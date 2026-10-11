@@ -11,6 +11,28 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const MAX_FILE = 150 * 1024 * 1024;
+const MAX_LINK_BYTES = 30 * 1024 * 1024;
+
+/** Read a response body, refusing anything larger than `limit` bytes. */
+async function readLimited(r: Response, limit: number): Promise<Buffer> {
+  const declared = Number(r.headers.get("content-length") ?? 0);
+  if (declared > limit) throw new Error("file is too large to import from a link");
+  if (!r.body) return Buffer.alloc(0);
+  const reader = r.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel();
+      throw new Error("file is too large to import from a link");
+    }
+    parts.push(value);
+  }
+  return Buffer.concat(parts);
+}
 
 function kindOr(v: unknown, fallback: MaterialKind): MaterialKind {
   return MATERIAL_KINDS.includes(v as MaterialKind) ? (v as MaterialKind) : fallback;
@@ -69,6 +91,13 @@ export const POST = handle(async (req: Request, { params }: Ctx<{ id: string }>)
   const b = (await req.json().catch(() => ({}))) as { url?: string; text?: string; title?: string; kind?: string };
   if (b.url) {
     const url = b.url.trim();
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return fail("That doesn't look like a valid link.");
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return fail("Only http and https links are supported.");
     if (youtubeId(url)) {
       const yt = await fetchYoutube(url);
       created.push(
@@ -91,17 +120,18 @@ export const POST = handle(async (req: Request, { params }: Ctx<{ id: string }>)
       let title = b.title?.trim() || url;
       let note: string | null = null;
       try {
-        const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+        const r = await fetch(url, { signal: AbortSignal.timeout(20000), redirect: "follow" });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const ct = r.headers.get("content-type") ?? "";
-        const buf = Buffer.from(await r.arrayBuffer());
+        const buf = await readLimited(r, MAX_LINK_BYTES);
         const name = new URL(url).pathname.split("/").pop() || "link";
         const ex = await extractFile(buf, ct.includes("html") ? `${name}.html` : name, ct.split(";")[0]);
         text = ex.text;
         note = ex.note;
         const t = buf.toString("utf8").match(/<title[^>]*>([^<]{1,200})<\/title>/i);
         if (!b.title && t) title = t[1].trim();
-      } catch {
-        note = "Could not fetch this link. Paste its content or your notes.";
+      } catch (err) {
+        note = `Could not fetch this link (${err instanceof Error ? err.message : "error"}). Paste its content or your notes.`;
       }
       created.push(
         insertMaterial({ course_id: courseId, kind: kindOr(b.kind, "reading"), title, source_type: "url", filename: null, mime: null, path: null, url, text, status: text ? "ready" : "partial", note }),

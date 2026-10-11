@@ -47,12 +47,16 @@ export default function KnowledgePage() {
       setHits(null);
       return;
     }
+    const ctrl = new AbortController();
     const t = setTimeout(() => {
-      api<Hit[]>(`/api/kb/search?q=${encodeURIComponent(q)}${course ? `&course=${course}` : ""}`)
+      api<Hit[]>(`/api/kb/search?q=${encodeURIComponent(q)}${course ? `&course=${course}` : ""}`, { signal: ctrl.signal })
         .then(setHits)
-        .catch((e) => setError(e.message));
+        .catch((e) => e.name !== "AbortError" && setError(e.message));
     }, 200);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      ctrl.abort();
+    };
   }, [q, course]);
 
   async function rebuild() {

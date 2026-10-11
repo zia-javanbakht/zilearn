@@ -69,13 +69,21 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
   }
 
   async function mark(topicId: string, mastery: Mastery | null, branch = true) {
-    await api(`/api/topics/${topicId}`, { method: "PATCH", json: { mastery, applyToBranch: branch } });
+    try {
+      await api(`/api/topics/${topicId}`, { method: "PATCH", json: { mastery, applyToBranch: branch } });
+    } catch (e) {
+      setError((e as Error).message);
+    }
     await load();
   }
 
   async function markAll(mastery: Mastery | null) {
     if (!view) return;
-    await Promise.all(view.tree.map((r) => api(`/api/topics/${r.id}`, { method: "PATCH", json: { mastery, applyToBranch: true } })));
+    try {
+      await Promise.all(view.tree.map((r) => api(`/api/topics/${r.id}`, { method: "PATCH", json: { mastery, applyToBranch: true } })));
+    } catch (e) {
+      setError((e as Error).message);
+    }
     await load();
   }
 

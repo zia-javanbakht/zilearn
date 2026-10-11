@@ -301,12 +301,17 @@ export async function gradeExam(
   questions: ExamQuestion[],
   answers: Record<string, string>,
   selfMarks: Record<string, number> = {},
+  previous: ExamGrade[] = [],
 ): Promise<ExamGrade[]> {
   const grades = new Map<string, ExamGrade>();
   const written: ExamQuestion[] = [];
+  // Keep grades already given (by Claude or the student) instead of re-marking them.
+  const kept = new Map(previous.filter((g) => !g.feedback.startsWith("Needs marking")).map((g) => [g.question_id, g]));
   for (const q of questions) {
     const a = (answers[q.id] ?? "").trim();
-    if (q.type === "mcq") {
+    if (kept.has(q.id) && !(q.id in selfMarks)) {
+      grades.set(q.id, kept.get(q.id)!);
+    } else if (q.type === "mcq") {
       const right = a !== "" && Number(a) === q.answer_index;
       grades.set(q.id, {
         question_id: q.id,

@@ -7,7 +7,8 @@ export const dynamic = "force-dynamic";
 /** Update brainmap marks from exam performance per topic. */
 export const POST = handle(async (_req: Request, { params }: Ctx<{ id: string }>) => {
   const exam = getExam((await params).id);
-  if (!exam?.grades) return fail("Grade the exam first.");
+  if (!exam) return fail("Not found", 404);
+  if (!exam.grades) return fail("Grade the exam first.");
   const per = new Map<string, { score: number; max: number }>();
   for (const g of exam.grades) {
     const q = exam.questions.find((x) => x.id === g.question_id);

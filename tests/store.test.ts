@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb, setDb } from "@/lib/db";
-import { buildTree, createCourse, insertMaterial, listTopics, replaceTopics, setMastery, savePlan, getPlan, setPlanItemDone, getTopic } from "@/lib/store";
+import { buildTree, createCourse, insertMaterial, listTopics, replaceTopics, setMastery, savePlan, getPlan, setPlanItemDone, getTopic, saveLesson, getLesson } from "@/lib/store";
+import { check, CourseInput } from "@/lib/validate";
 import { computeLinks, search } from "@/lib/kb";
 import { generateExam, generateNotes, generatePodcast, gradeExam } from "@/lib/generate";
 import { buildPlan } from "@/lib/plan";
@@ -58,6 +59,9 @@ describe("store", () => {
     expect(hits.some((h) => h.type === "material" && h.course_id === c.id)).toBe(true);
     expect(search("   ")).toEqual([]);
     expect(search('weird "quotes" AND (stuff')).toBeInstanceOf(Array);
+    const r = createCourse({ name: "Stats" });
+    insertMaterial({ course_id: r.id, kind: "lecture_notes", title: "Using R", source_type: "text", filename: null, mime: null, path: null, url: null, text: "We analyse data in R and C.", status: "ready", note: null });
+    expect(search("R").some((h) => h.course_id === r.id)).toBe(true);
   });
 
   it("links similar topics across courses only", () => {
@@ -76,6 +80,54 @@ describe("store", () => {
   });
 });
 
+describe("rebuilding the brainmap", () => {
+  it("keeps ids, lessons and plan items for topics that survive", () => {
+    const c = seed();
+    const gd = listTopics(c.id).find((t) => t.title === "Gradient descent")!;
+    saveLesson(gd.id, 2, "lesson", "claude");
+    const draft = buildPlan({ roots: buildTree(listTopics(c.id)), targetLevel: 1, startDate: "2026-01-01", examDate: "2026-01-10", hoursPerDay: 2, materialKinds: new Map() });
+    savePlan({ course_id: c.id, ...draft });
+    replaceTopics(c.id, [
+      { ref: "a", parent_ref: null, title: "Training", summary: "", keywords: [], material_ids: [], importance: 2 },
+      { ref: "b", parent_ref: "a", title: "Gradient Descent", summary: "new", keywords: [], material_ids: [], importance: 3 },
+    ]);
+    const after = listTopics(c.id);
+    expect(after.find((t) => t.title === "Gradient Descent")!.id).toBe(gd.id);
+    expect(after.find((t) => t.title === "Gradient Descent")!.parent_id).toBe(after.find((t) => t.title === "Training")!.id);
+    expect(getLesson(gd.id, 2)).not.toBeNull();
+    const items = getPlan(c.id)!.items.filter((i) => i.kind === "study");
+    expect(items.find((i) => i.topic_title === "Gradient descent")!.topic_id).toBe(gd.id);
+    expect(items.find((i) => i.topic_title === "Regularisation")!.topic_id).toBeNull();
+  });
+
+  it("does not leak marks between non-Latin titles", () => {
+    const c = createCourse({ name: "OS" });
+    replaceTopics(c.id, [{ ref: "a", parent_ref: null, title: "网络", summary: "", keywords: [], material_ids: [], importance: 2 }]);
+    setMastery(listTopics(c.id)[0].id, "know");
+    replaceTopics(c.id, [{ ref: "b", parent_ref: null, title: "操作系统", summary: "", keywords: [], material_ids: [], importance: 2 }]);
+    expect(listTopics(c.id)[0].mastery).toBeNull();
+  });
+
+  it("survives parent cycles from the model", () => {
+    const c = createCourse({ name: "X" });
+    replaceTopics(c.id, [
+      { ref: "a", parent_ref: "b", title: "A", summary: "", keywords: [], material_ids: [], importance: 2 },
+      { ref: "b", parent_ref: "a", title: "B", summary: "", keywords: [], material_ids: [], importance: 2 },
+    ]);
+    expect(buildTree(listTopics(c.id)).length).toBeGreaterThan(0);
+  });
+});
+
+describe("input validation", () => {
+  it("rejects bad course input with a readable message", () => {
+    expect(check(CourseInput, { name: "" }).ok).toBe(false);
+    expect(check(CourseInput, { name: "A", hours_per_day: "abc" }).ok).toBe(false);
+    expect(check(CourseInput, { name: "A", exam_date: "next week" }).ok).toBe(false);
+    const good = check(CourseInput, { name: " A ", exam_date: "", hours_per_day: "2" });
+    expect(good.ok && good.data).toMatchObject({ name: "A", exam_date: null, hours_per_day: 2 });
+  });
+});
+
 describe("offline generators", () => {
   it("creates and grades a mock exam", async () => {
     const c = seed();
@@ -85,6 +137,11 @@ describe("offline generators", () => {
     const answers = { [mcq.id]: String(mcq.answer_index) };
     const grades = await gradeExam(exam.questions, answers);
     expect(grades.find((g) => g.question_id === mcq.id)!.score).toBe(mcq.marks);
+    // Self-marking a written answer later keeps the other grades as they were.
+    const written = exam.questions.find((q) => q.type !== "mcq")!;
+    const again = await gradeExam(exam.questions, { ...answers, [written.id]: "x" }, { [written.id]: 1 }, grades);
+    expect(again.find((g) => g.question_id === mcq.id)).toEqual(grades.find((g) => g.question_id === mcq.id));
+    expect(again.find((g) => g.question_id === written.id)!.score).toBe(1);
   });
 
   it("writes notes and a podcast for a branch", async () => {

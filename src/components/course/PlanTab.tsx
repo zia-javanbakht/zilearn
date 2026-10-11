@@ -24,7 +24,7 @@ export function PlanTab({ data, reload }: { data: CourseData; reload: () => void
     setBusy(true);
     setError(null);
     try {
-      setPlan(await api<Plan>(`/api/courses/${course.id}/plan`, { method: "POST", json: { ...form, exam_date: form.exam_date || null } }));
+      setPlan(await api<Plan>(`/api/courses/${course.id}/plan`, { method: "POST", json: { ...form, exam_date: form.exam_date || null, start_date: localDate() } }));
       reload();
     } catch (e) {
       setError((e as Error).message);
@@ -35,9 +35,15 @@ export function PlanTab({ data, reload }: { data: CourseData; reload: () => void
 
   async function toggle(item: PlanItem) {
     const done = !item.done;
-    setPlan((p) => p && { ...p, items: p.items.map((i) => (i.id === item.id ? { ...i, done } : i)) });
-    await api(`/api/plan-items/${item.id}`, { method: "PATCH", json: { done } });
-    reload();
+    const set = (v: boolean) => setPlan((p) => p && { ...p, items: p.items.map((i) => (i.id === item.id ? { ...i, done: v } : i)) });
+    set(done);
+    try {
+      await api(`/api/plan-items/${item.id}`, { method: "PATCH", json: { done } });
+      reload();
+    } catch (e) {
+      set(!done);
+      setError((e as Error).message);
+    }
   }
 
   const days = useMemo(() => {
@@ -46,7 +52,7 @@ export function PlanTab({ data, reload }: { data: CourseData; reload: () => void
     return [...m.entries()];
   }, [plan]);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = localDate();
   const done = plan?.items.filter((i) => i.done).length ?? 0;
   const total = plan?.items.length ?? 0;
   const passes = useMemo(() => {
@@ -194,4 +200,9 @@ export function PlanTab({ data, reload }: { data: CourseData; reload: () => void
 
 function formatDay(d: string) {
   return new Date(d + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+/** The user's local calendar date (not UTC). */
+function localDate(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }

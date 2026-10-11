@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Markdown } from "../Markdown";
 import { DEPTH_LEVELS } from "@/lib/types";
@@ -10,18 +10,21 @@ export function LessonModal({ topicId, title, depth: initialDepth, onClose }: { 
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Ignore responses that arrive after the user switched level or regenerated again.
+  const reqRef = useRef(0);
 
   async function load(regenerate = false) {
+    const req = ++reqRef.current;
     setBusy(true);
     setError(null);
     if (regenerate) setContent(null);
     try {
       const r = await api<{ content: string }>(`/api/topics/${topicId}/lesson?depth=${depth}`, { method: regenerate ? "POST" : "GET" });
-      setContent(r.content);
+      if (req === reqRef.current) setContent(r.content);
     } catch (e) {
-      setError((e as Error).message);
+      if (req === reqRef.current) setError((e as Error).message);
     } finally {
-      setBusy(false);
+      if (req === reqRef.current) setBusy(false);
     }
   }
 

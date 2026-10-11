@@ -211,60 +211,79 @@ export interface NewTopic {
 }
 
 /**
- * Replace a course's topic tree. Marks (mastery / achieved depth) carry over to
- * topics whose title matches a previous topic, so rebuilding never loses progress.
+ * Replace a course's topic tree. Topics whose title matches an existing topic keep
+ * their id, so marks, achieved depth, lessons, plan items and knowledge-base links
+ * all survive a rebuild.
  */
 export function replaceTopics(courseId: string, topics: NewTopic[]) {
   const d = db();
   const old = listTopics(courseId);
-  const prev = new Map(old.map((t) => [normTitle(t.title), t]));
+  const prev = new Map<string, Topic>();
+  for (const t of old) {
+    const k = normTitle(t.title);
+    if (k && !prev.has(k)) prev.set(k, t);
+  }
   const refToId = new Map<string, string>();
-  for (const t of topics) refToId.set(t.ref, newId());
+  const reused = new Set<string>();
+  for (const t of topics) {
+    if (refToId.has(t.ref)) continue;
+    const match = prev.get(normTitle(t.title));
+    if (match && !reused.has(match.id)) {
+      reused.add(match.id);
+      refToId.set(t.ref, match.id);
+    } else refToId.set(t.ref, newId());
+  }
 
   d.transaction(() => {
+    // Detach parents first so deleting a dropped topic never cascades into a kept one.
+    d.prepare("UPDATE topics SET parent_id = NULL WHERE course_id = ?").run(courseId);
+    const del = d.prepare("DELETE FROM topics WHERE id = ?");
+    const orphanItems = d.prepare("UPDATE plan_items SET topic_id = NULL WHERE topic_id = ?");
+    for (const t of old) {
+      if (reused.has(t.id)) continue;
+      orphanItems.run(t.id);
+      del.run(t.id);
+    }
     d.prepare("DELETE FROM topics_fts WHERE course_id = ?").run(courseId);
-    d.prepare("DELETE FROM topics WHERE course_id = ?").run(courseId);
+
     const ins = d.prepare(
       `INSERT INTO topics (id, course_id, parent_id, title, summary, keywords, material_ids, importance, position, mastery, achieved_depth)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, 0)`,
     );
+    const upd = d.prepare(
+      "UPDATE topics SET title = ?, summary = ?, keywords = ?, material_ids = ?, importance = ?, position = ? WHERE id = ?",
+    );
+    const setParent = d.prepare("UPDATE topics SET parent_id = ? WHERE id = ?");
     const fts = d.prepare("INSERT INTO topics_fts (title, summary, keywords, topic_id, course_id) VALUES (?, ?, ?, ?, ?)");
-    // Parents must exist before children (FK), so insert in topological order.
-    const inserted = new Set<string>();
-    let pending = [...topics];
-    let position = 0;
-    while (pending.length) {
-      const next: NewTopic[] = [];
-      for (const t of pending) {
-        const parentOk = !t.parent_ref || !refToId.has(t.parent_ref) || inserted.has(t.parent_ref);
-        if (!parentOk) {
-          next.push(t);
-          continue;
+    const done = new Set<string>();
+    topics.forEach((t, position) => {
+      const id = refToId.get(t.ref)!;
+      if (done.has(id)) return;
+      done.add(id);
+      const vals = [t.title, t.summary, JSON.stringify(t.keywords), JSON.stringify(t.material_ids), clampInt(t.importance, 1, 3), position] as const;
+      if (reused.has(id)) upd.run(...vals, id);
+      else ins.run(id, courseId, ...vals);
+      fts.run(t.title, t.summary, t.keywords.join(" "), id, courseId);
+    });
+    // Link parents, refusing cycles (a parent chain that leads back to the topic).
+    const parentOf = new Map<string, string | null>();
+    for (const t of topics) {
+      const id = refToId.get(t.ref)!;
+      const pid = t.parent_ref ? refToId.get(t.parent_ref) ?? null : null;
+      if (!parentOf.has(id)) parentOf.set(id, pid && pid !== id ? pid : null);
+    }
+    for (const [id, pid] of parentOf) {
+      let cur = pid;
+      let cyclic = false;
+      for (let hops = 0; cur && hops < 1000; hops++) {
+        if (cur === id) {
+          cyclic = true;
+          break;
         }
-        const id = refToId.get(t.ref)!;
-        const parentId = t.parent_ref && refToId.has(t.parent_ref) ? refToId.get(t.parent_ref)! : null;
-        const carried = prev.get(normTitle(t.title));
-        ins.run(
-          id,
-          courseId,
-          parentId,
-          t.title,
-          t.summary,
-          JSON.stringify(t.keywords),
-          JSON.stringify(t.material_ids),
-          clampInt(t.importance, 1, 3),
-          position++,
-          carried?.mastery ?? null,
-          carried?.achieved_depth ?? 0,
-        );
-        fts.run(t.title, t.summary, t.keywords.join(" "), id, courseId);
-        inserted.add(t.ref);
+        cur = parentOf.get(cur) ?? null;
       }
-      if (next.length === pending.length) {
-        // Cycle or dangling parent: attach the rest at the root.
-        for (const t of next) t.parent_ref = null;
-      }
-      pending = next;
+      if (cyclic) parentOf.set(id, null);
+      else if (pid) setParent.run(pid, id);
     }
   })();
 }
@@ -423,7 +442,9 @@ export function replaceLinks(links: Omit<KnowledgeLink, "id">[]) {
   d.transaction(() => {
     d.prepare("DELETE FROM links").run();
     const ins = d.prepare("INSERT INTO links (id, from_topic, to_topic, score, relation) VALUES (?, ?, ?, ?, ?)");
-    for (const l of links) ins.run(newId(), l.from_topic, l.to_topic, l.score, l.relation);
+    const exists = d.prepare("SELECT 1 FROM topics WHERE id = ?");
+    // Topics may have been rebuilt while links were being computed.
+    for (const l of links) if (exists.get(l.from_topic) && exists.get(l.to_topic)) ins.run(newId(), l.from_topic, l.to_topic, l.score, l.relation);
   })();
 }
 
@@ -442,7 +463,7 @@ export function allTopics(): Topic[] {
 /* ---------------- helpers ---------------- */
 
 export function normTitle(s: string) {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  return s.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
 export function clampInt(n: number, lo: number, hi: number) {

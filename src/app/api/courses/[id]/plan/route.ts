@@ -1,5 +1,6 @@
 import { buildPlan, fmtDate } from "@/lib/plan";
 import { buildTree, getCourse, getPlan, listMaterials, listTopics, savePlan, updateCourse } from "@/lib/store";
+import { check, PlanInput } from "@/lib/validate";
 import { body, fail, handle, ok, type Ctx } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,9 @@ export const GET = handle(async (_req: Request, { params }: Ctx<{ id: string }>)
 /** Build (or rebuild) the progressive plan from the current marks. Completed depths are kept. */
 export const POST = handle(async (req: Request, { params }: Ctx<{ id: string }>) => {
   const { id } = await params;
-  const b = await body<{ exam_date?: string | null; target_level?: number; hours_per_day?: number; start_date?: string }>(req);
+  const v = check(PlanInput, await body(req));
+  if (!v.ok) return fail(v.error);
+  const b = v.data;
   let course = getCourse(id);
   if (!course) return fail("Course not found", 404);
   const patch: Record<string, unknown> = {};

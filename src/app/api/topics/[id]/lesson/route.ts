@@ -1,6 +1,6 @@
 import { generateLesson } from "@/lib/generate";
-import { getLesson, saveLesson } from "@/lib/store";
-import { handle, ok, type Ctx } from "@/lib/http";
+import { getLesson, getTopic, saveLesson } from "@/lib/store";
+import { fail, handle, ok, type Ctx } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -14,6 +14,7 @@ function depthOf(req: Request) {
 export const GET = handle(async (req: Request, { params }: Ctx<{ id: string }>) => {
   const { id } = await params;
   const depth = depthOf(req);
+  if (!getTopic(id)) return fail("This topic no longer exists. Rebuild the study plan.", 404);
   const cached = getLesson(id, depth);
   if (cached) return ok({ ...cached, depth });
   const { content, by } = await generateLesson(id, depth);
@@ -25,6 +26,7 @@ export const GET = handle(async (req: Request, { params }: Ctx<{ id: string }>) 
 export const POST = handle(async (req: Request, { params }: Ctx<{ id: string }>) => {
   const { id } = await params;
   const depth = depthOf(req);
+  if (!getTopic(id)) return fail("This topic no longer exists. Rebuild the study plan.", 404);
   const { content, by } = await generateLesson(id, depth);
   saveLesson(id, depth, content, by);
   return ok({ content, generated_by: by, depth });

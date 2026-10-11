@@ -83,47 +83,88 @@ export function buildPlan(input: PlanInput): DraftPlan {
   if (!units.length) warnings.push("Build the brainmap first: there are no topics to plan yet.");
   else if (!slots.length) warnings.push("Every topic is already at the target level. Raise the target level or mark topics you want to revisit.");
 
-  // 2. Fit into the calendar.
-  const start = parseDate(input.startDate);
-  let end = input.examDate ? parseDate(input.examDate) : addDays(start, DEFAULT_SPAN_DAYS);
-  // Keep the last day before the exam free for a final review.
-  let studyDays = Math.max(1, daysBetween(start, end));
-  if (input.examDate && studyDays < 1) {
-    warnings.push("The exam date is today or in the past; the plan uses one day.");
+  // 2. Fit into the calendar. The exam day itself is not a study day.
+  const parsedStart = parseDate(input.startDate);
+  const start = Number.isNaN(parsedStart.getTime()) ? parseDate(fmtDate(new Date())) : parsedStart;
+  const exam = input.examDate ? parseDate(input.examDate) : null;
+  const hasExam = exam !== null && !Number.isNaN(exam.getTime());
+  let end = hasExam ? exam : addDays(start, DEFAULT_SPAN_DAYS);
+  let studyDays = daysBetween(start, end);
+  if (studyDays < 1) {
+    warnings.push(
+      hasExam && studyDays < 0
+        ? "The exam date has passed. Update it in the plan settings; for now the plan covers one day."
+        : "The exam is today, so the plan fits into a single day. Focus on the checkpoints and core topics.",
+    );
     studyDays = 1;
     end = addDays(start, 1);
   }
   const dailyMinutes = Math.max(15, Math.round(input.hoursPerDay * 60));
-  const checkpointMinutes = (n: number) => Math.min(45, 10 + n * 2);
-
-  const totalStudy = slots.reduce((s, x) => s + ("checkpoint" in x ? checkpointMinutes(x.topics.length) : x.minutes), 0);
   const capacity = studyDays * dailyMinutes;
-  let scale = 1;
-  if (totalStudy > capacity && totalStudy > 0) {
-    scale = capacity / totalStudy;
-    const needDays = Math.ceil(totalStudy / dailyMinutes);
+  const checkpointMinutes = (n: number) => Math.min(45, 10 + n * 2);
+  const baseMinutes = (x: (typeof slots)[number]) => ("checkpoint" in x ? checkpointMinutes(x.topics.length) : x.minutes);
+  const totalStudy = slots.reduce((sum, x) => sum + baseMinutes(x), 0);
+
+  // When even minimum-length sessions can't fit, drop the least valuable ones:
+  // intermediate passes go first, then minor topics. The first and final pass of
+  // each topic and the last checkpoint are kept as long as possible.
+  let kept = slots;
+  if (slots.length * MIN_ITEM_MINUTES > capacity) {
+    const priority = (x: (typeof slots)[number]) => {
+      if ("checkpoint" in x) return x.iteration === target ? 100 : 5;
+      const first = startDepth(x.unit.node.effective_mastery, target, x.unit.node.achieved_depth);
+      const tier = x.iteration === target ? 30 : x.iteration === first ? 20 : 10;
+      return tier + Math.min(3, Math.max(1, x.unit.node.importance));
+    };
+    const maxSlots = Math.max(1, Math.floor(capacity / MIN_ITEM_MINUTES));
+    const keep = new Set(
+      slots
+        .map((x, i) => ({ i, p: priority(x) }))
+        .sort((x, y) => y.p - x.p || x.i - y.i)
+        .slice(0, maxSlots)
+        .map((x) => x.i),
+    );
+    kept = slots.filter((_, i) => keep.has(i));
     warnings.push(
-      `The full plan needs about ${hours(totalStudy)} but only ${hours(capacity)} fit before ${input.examDate ? "the exam" : "the end date"}. ` +
-        `Sessions were shortened by ${Math.round((1 - scale) * 100)}%. Studying ${Math.ceil(totalStudy / studyDays / 6) / 10}h/day or starting ${needDays - studyDays} day(s) earlier would avoid that.`,
+      `Not enough time for every session: ${slots.length - kept.length} lower-priority session(s) (mostly intermediate passes) were left out. More hours per day or an earlier start would bring them back.`,
     );
   }
 
+  // Shorten sessions proportionally until everything fits.
+  const keptTotal = kept.reduce((sum, x) => sum + baseMinutes(x), 0);
+  const fitted = (scale: number) => kept.map((x) => Math.max(MIN_ITEM_MINUTES, Math.round(baseMinutes(x) * scale)));
+  let scale = keptTotal > capacity ? capacity / keptTotal : 1;
+  let minutesList = fitted(scale);
+  while (scale > 0.01 && minutesList.reduce((a, m) => a + m, 0) > capacity) {
+    scale *= 0.95;
+    minutesList = fitted(scale);
+  }
+  if (scale < 1 && kept.length === slots.length) {
+    const needDays = Math.ceil(totalStudy / dailyMinutes);
+    warnings.push(
+      `The full plan needs about ${hours(totalStudy)} but only ${hours(capacity)} fit before ${hasExam ? "the exam" : "the end date"}. ` +
+        `Sessions were shortened by about ${Math.round((1 - scale) * 100)}%. Studying ${Math.ceil(totalStudy / studyDays / 6) / 10}h/day or starting ${needDays - studyDays} day(s) earlier would avoid that.`,
+    );
+  }
+
+  // Spread sessions evenly over the available days (never more than the daily budget).
   const items: DraftItem[] = [];
   let day = 0;
   let used = 0;
-  let position = 0;
-  // Spread evenly when there's slack instead of front-loading everything.
-  const perDay = Math.min(dailyMinutes, Math.ceil((totalStudy * scale) / studyDays) + 15);
-  for (const s of slots) {
-    const isCheck = "checkpoint" in s;
-    const minutes = Math.max(MIN_ITEM_MINUTES, Math.round((isCheck ? checkpointMinutes(s.topics.length) : s.minutes) * scale));
-    if (used > 0 && used + minutes > perDay && day < studyDays - 1) {
+  let remaining = minutesList.reduce((a, m) => a + m, 0);
+  let target_today = Math.min(dailyMinutes, Math.ceil(remaining / studyDays) + 10);
+  kept.forEach((s, idx) => {
+    const minutes = minutesList[idx];
+    if (used > 0 && used + minutes > target_today && day < studyDays - 1) {
       day++;
       used = 0;
+      target_today = Math.min(dailyMinutes, Math.ceil(remaining / (studyDays - day)) + 10);
     }
     used += minutes;
+    remaining -= minutes;
     const date = fmtDate(addDays(start, day));
-    if (isCheck) {
+    const position = items.length;
+    if ("checkpoint" in s) {
       items.push({
         day: day + 1,
         date,
@@ -135,7 +176,7 @@ export function buildPlan(input: PlanInput): DraftPlan {
         minutes,
         activities: checkpointActivities(s.iteration, s.topics),
         done: false,
-        position: position++,
+        position,
       });
     } else {
       const kinds = new Set(s.unit.node.material_ids.map((id) => input.materialKinds.get(id)).filter(Boolean) as MaterialKind[]);
@@ -150,10 +191,10 @@ export function buildPlan(input: PlanInput): DraftPlan {
         minutes,
         activities: activitiesFor(s.depth, kinds, s.unit.node.effective_mastery),
         done: false,
-        position: position++,
+        position,
       });
     }
-  }
+  });
 
   return {
     start_date: fmtDate(start),

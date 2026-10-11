@@ -21,7 +21,9 @@ export interface SearchHit {
 
 /** Turn free text into a safe FTS5 query: every word as a prefix term, OR-ed, with exact phrase boosted. */
 export function ftsQuery(q: string): string | null {
-  const words = (q.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length > 1).slice(0, 12);
+  const all = q.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  // Single letters (e.g. the languages "C" or "R") only count when they are the whole query.
+  const words = (all.length === 1 ? all : all.filter((w) => w.length > 1)).slice(0, 12);
   if (!words.length) return null;
   const terms = words.map((w) => `"${w}"*`);
   return words.length > 1 ? `"${words.join(" ")}" OR ${terms.join(" OR ")}` : terms[0];

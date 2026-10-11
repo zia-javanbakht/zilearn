@@ -8,11 +8,17 @@ export function SettingsTab({ data, reload }: { data: CourseData; reload: () => 
   const c = data.course;
   const [form, setForm] = useState({ name: c.name, code: c.code ?? "", description: c.description ?? "" });
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function save() {
-    await api(`/api/courses/${c.id}`, { method: "PATCH", json: form });
-    setSaved(true);
-    reload();
+    setError(null);
+    try {
+      await api(`/api/courses/${c.id}`, { method: "PATCH", json: form });
+      setSaved(true);
+      reload();
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }
 
   return (
@@ -36,6 +42,7 @@ export function SettingsTab({ data, reload }: { data: CourseData; reload: () => 
             Save
           </button>
           {saved && <span className="small muted">Saved.</span>}
+          {error && <span className="small" style={{ color: "var(--dont)" }}>{error}</span>}
         </div>
       </div>
       <div className="card stack">

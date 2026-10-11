@@ -56,8 +56,35 @@ describe("buildPlan", () => {
   it("warns and compresses when time is short", () => {
     const roots = Array.from({ length: 30 }, (_, i) => node(`T${i}`, "dont_know"));
     const plan = buildPlan({ ...base, examDate: "2026-01-03", hoursPerDay: 1, roots, targetLevel: 4 });
-    expect(plan.warnings.join(" ")).toMatch(/shortened/);
+    expect(plan.warnings.join(" ")).toMatch(/left out/);
     for (const it of plan.items) expect(it.date <= "2026-01-02").toBe(true);
+    // The final pass survives; intermediate passes are dropped first.
+    expect(plan.items.some((i) => i.iteration === 4)).toBe(true);
+  });
+
+  it("shortens sessions when time is tight but enough for every session", () => {
+    const roots = Array.from({ length: 6 }, (_, i) => node(`T${i}`, "dont_know"));
+    const plan = buildPlan({ ...base, examDate: "2026-01-04", hoursPerDay: 2, roots, targetLevel: 3 });
+    expect(plan.warnings.join(" ")).toMatch(/shortened/);
+    expect(plan.items.filter((i) => i.kind === "study")).toHaveLength(18);
+  });
+
+  it("never overloads a day, even with hundreds of topics", () => {
+    const roots = Array.from({ length: 300 }, (_, i) => node(`T${i}`, "dont_know"));
+    const plan = buildPlan({ ...base, examDate: "2026-01-03", hoursPerDay: 2, roots, targetLevel: 4 });
+    const perDay = new Map<number, number>();
+    for (const it of plan.items) perDay.set(it.day, (perDay.get(it.day) ?? 0) + it.minutes);
+    for (const m of perDay.values()) expect(m).toBeLessThanOrEqual(120 + 45);
+  });
+
+  it("handles an exam today or in the past", () => {
+    const roots = [node("A", "dont_know")];
+    const past = buildPlan({ ...base, examDate: "2025-12-20", roots, targetLevel: 2 });
+    expect(past.warnings.join(" ")).toMatch(/passed/);
+    expect(past.end_date > past.start_date).toBe(true);
+    const today = buildPlan({ ...base, examDate: "2026-01-01", roots, targetLevel: 2 });
+    expect(today.warnings.join(" ")).toMatch(/today/);
+    for (const it of today.items) expect(it.date).toBe("2026-01-01");
   });
 
   it("skips depth already achieved", () => {

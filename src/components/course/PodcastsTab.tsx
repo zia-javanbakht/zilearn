@@ -90,7 +90,8 @@ function Player({ podcast, onDelete }: { podcast: Podcast; onDelete: () => void 
   const [rate, setRate] = useState(1.05);
   const [current, setCurrent] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
-  const stopRef = useRef(false);
+  // Each playback run gets a generation number; callbacks from an older run are ignored.
+  const genRef = useRef(0);
   const supported = typeof window !== "undefined" && "speechSynthesis" in window;
 
   useEffect(() => {
@@ -109,17 +110,19 @@ function Player({ podcast, onDelete }: { podcast: Podcast; onDelete: () => void 
     speechSynthesis.addEventListener("voiceschanged", pick);
     return () => {
       speechSynthesis.removeEventListener("voiceschanged", pick);
+      genRef.current++;
       speechSynthesis.cancel();
     };
   }, [supported]);
 
   function playFrom(i: number) {
     if (!supported) return;
+    const gen = ++genRef.current;
     speechSynthesis.cancel();
-    stopRef.current = false;
     setPlaying(true);
     const speak = (k: number) => {
-      if (stopRef.current || k >= podcast.segments.length) {
+      if (gen !== genRef.current) return;
+      if (k >= podcast.segments.length) {
         setPlaying(false);
         setCurrent(null);
         return;
@@ -150,7 +153,7 @@ function Player({ podcast, onDelete }: { podcast: Podcast; onDelete: () => void 
   }
 
   function stop() {
-    stopRef.current = true;
+    genRef.current++;
     speechSynthesis.cancel();
     setPlaying(false);
     setCurrent(null);

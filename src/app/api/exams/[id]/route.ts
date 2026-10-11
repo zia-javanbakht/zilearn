@@ -16,8 +16,9 @@ export const POST = handle(async (req: Request, { params }: Ctx<{ id: string }>)
   const exam = getExam(id);
   if (!exam) return fail("Not found", 404);
   const b = await body<{ answers?: Record<string, string>; selfMarks?: Record<string, number> }>(req);
-  const answers = b.answers ?? exam.answers ?? {};
-  const grades = await gradeExam(exam.questions, answers, b.selfMarks ?? {});
+  // Answers are fixed once an attempt has been graded; later submits only add self-marks.
+  const answers = exam.grades ? exam.answers ?? {} : b.answers ?? {};
+  const grades = await gradeExam(exam.questions, answers, b.selfMarks ?? {}, exam.grades ?? []);
   saveExamResult(id, answers, grades);
   return ok(getExam(id));
 });

@@ -40,14 +40,16 @@ export async function generateStructured<T extends z.ZodType>(opts: {
   maxTokens?: number;
 }): Promise<z.infer<T>> {
   const content = typeof opts.prompt === "string" ? [{ type: "text" as const, text: opts.prompt }] : opts.prompt;
-  const message = await anthropic().beta.messages.parse({
+  // Streamed so large outputs (podcast scripts, big brainmaps) don't hit the SDK's non-streaming limit.
+  const stream = anthropic().beta.messages.stream({
     model: MODEL,
-    max_tokens: opts.maxTokens ?? 16000,
+    max_tokens: opts.maxTokens ?? 32000,
     system: SYSTEM,
     ...FALLBACK,
     output_config: { effort: opts.effort ?? "medium", format: betaZodOutputFormat(opts.schema) },
     messages: [{ role: "user", content }],
   });
+  const message = await stream.finalMessage();
   if (message.stop_reason === "refusal") throw new AIRefusalError("Claude declined this request.");
   if (message.parsed_output == null) {
     throw new Error(
@@ -76,11 +78,12 @@ export async function generateText(opts: {
   });
   const message = await stream.finalMessage();
   if (message.stop_reason === "refusal") throw new AIRefusalError("Claude declined this request.");
-  return message.content
+  const text = message.content
     .filter((b): b is Anthropic.Beta.Messages.BetaTextBlock => b.type === "text")
     .map((b) => b.text)
     .join("")
     .trim();
+  return message.stop_reason === "max_tokens" ? `${text}\n\n_(This text was cut off because it reached the length limit. Try a narrower scope.)_` : text;
 }
 
 /** Human-readable message for an API failure, without leaking internals. */
