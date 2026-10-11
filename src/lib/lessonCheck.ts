@@ -35,8 +35,9 @@ export function mathProblems(s: string): string[] {
       out.push(`${(e as Error).message.replace(/^KaTeX parse error: /, "")} in ${m[0].slice(0, 80)}`);
     }
   }
+  // Any $ left after the maths is matched would print as-is: unbalanced, or a space just inside a delimiter.
   const rest = s.replace(MATH, "").replace(/\\\$/g, "");
-  if ((rest.match(/\$/g) ?? []).length % 2) out.push("unbalanced $ delimiters");
+  if (rest.includes("$")) out.push("stray $ (unbalanced, or a space just inside the delimiters)");
   return out;
 }
 
@@ -69,6 +70,7 @@ export function* texts(doc: LessonDoc): Generator<[string, string]> {
       yield [`sections.${i}.blocks.${j}.title`, b.title];
       yield [`sections.${i}.blocks.${j}.body`, b.body];
       if (b.solution) yield [`sections.${i}.blocks.${j}.solution`, b.solution];
+      if (b.try_steps) yield [`sections.${i}.blocks.${j}.try_steps`, b.try_steps];
     }
   }
   for (const [i, g] of doc.glossary.entries()) {
@@ -109,8 +111,10 @@ export function lintLesson(doc: LessonDoc): TextProblem[] {
 }
 
 /** Shows maths that still won't render as code, so neither KaTeX nor XeLaTeX trips over it. */
-export function defuse(text: string): string {
-  return text.replace(MATH, (whole, display: string | undefined, inl: string | undefined) => {
+export function defuse(raw: string): string {
+  // Spaces just inside inline delimiters ("$ x = 1 $") stop the $ pairing; trim them first.
+  let text = raw.replace(/(?<![\\$])\$(?!\$)[ \t]*([^$\n]+?)[ \t]*\$(?!\$)/g, (_, m: string) => `$${m.trim()}$`);
+  text = text.replace(MATH, (whole, display: string | undefined, inl: string | undefined) => {
     try {
       katex.renderToString(display ?? inl!, { throwOnError: true, displayMode: display !== undefined, strict: "ignore" });
       return whole;
@@ -118,6 +122,14 @@ export function defuse(text: string): string {
       return "`" + (display ?? inl!).replace(/`/g, "'").replace(/\s+/g, " ").trim() + "`";
     }
   });
+  // A $ still unpaired would show as-is or swallow the text after it: make it a literal dollar sign.
+  let out = "";
+  let last = 0;
+  for (const m of text.matchAll(MATH)) {
+    out += text.slice(last, m.index).replace(/(?<!\\)\$/g, "\\$") + m[0];
+    last = m.index! + m[0].length;
+  }
+  return out + text.slice(last).replace(/(?<!\\)\$/g, "\\$");
 }
 
 /** The numbers in a text that identify a problem (not small counts like 1, 2, 3). */
@@ -243,6 +255,8 @@ export async function refereeLesson(doc: LessonDoc, context: string): Promise<st
   if (!aiEnabled()) return [];
   const fields = refereeFields(doc);
   const paths = new Set(fields.map(([p]) => p));
+  const tested = new Set([...doc.check_yourself].map((q) => q.objective).filter((n): n is number => typeof n === "number"));
+  const untested = doc.objectives.map((_, i) => i + 1).filter((n) => !tested.has(n));
   try {
     const { corrections } = await generateStructured({
       schema: RefereeSchema,
@@ -254,7 +268,7 @@ export async function refereeLesson(doc: LessonDoc, context: string): Promise<st
 - Statements that contradict another part of the lesson or the student's sources.
 - Questions whose data don't agree with their answers or with each other; recompute every number you can.
 - Sources that don't state the block's claim: set the right title plus timestamp, section or question number, or an empty string if the claim isn't in the sources.
-- Figure captions that state a quantity an example or question asks the student to find.
+- Figure captions that state a quantity an example or question asks the student to find.${untested.length && doc.check_yourself.length ? `\n- Objectives ${untested.join(", ")} have no check_yourself question. Rewrite the least useful check_yourself questions (question and answer) so each of these objectives is tested.` : ""}
 Leave style alone, keep the student's notation, and keep maths KaTeX-compatible ($...$ and $$...$$). Return an empty list if nothing is wrong.
 
 ${fields.map(([path, text]) => `<field path="${path}">\n${text}\n</field>`).join("\n")}`,

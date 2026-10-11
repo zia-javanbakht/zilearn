@@ -32,7 +32,10 @@ describe("lesson checks", () => {
     expect(normalizeMath("a \\(x\\) and \\[y\\]")).toBe("a $x$ and $$y$$");
     expect(mathProblems("fine $\\frac{a}{b}$ and $$\\begin{aligned}a&=b\\end{aligned}$$")).toEqual([]);
     expect(mathProblems("bad $\\frac{a}{b$")[0]).toMatch(/end of input/);
-    expect(mathProblems("costs $5 and more")).toEqual(["unbalanced $ delimiters"]);
+    expect(mathProblems("costs $5 and more")).toEqual(["stray $ (unbalanced, or a space just inside the delimiters)"]);
+    expect(mathProblems("Units: $\\text{kg} \\times \\text{rad/s} = $ N s/m")).toHaveLength(1);
+    expect(defuse("Units: $\\text{kg} \\times \\text{rad/s} = $ N s/m")).toBe("Units: $\\text{kg} \\times \\text{rad/s} =$ N s/m");
+    expect(defuse("costs $5 and more")).toBe("costs \\$5 and more");
   });
 
   it("strips HTML outside maths only, fixes delimiters and drops figures that can't be drawn", () => {

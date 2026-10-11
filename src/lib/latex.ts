@@ -58,6 +58,8 @@ export function inline(md: string): string {
   let s = md
     .replace(MATH, (m) => keep(safeMath(m.startsWith("$$") ? `\\[${m.slice(2, -2)}\\]` : m)))
     .replace(/`([^`]+)`/g, (_, c) => keep(`\\texttt{${tex(c)}}`))
+    // Markdown's escaped dollar is a literal dollar sign.
+    .replace(/\\\$/g, () => keep("\\$"))
     .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, t, u) => keep(`${tex(t)}\\footnote{\\url{${u.replace(/[{}\\]/g, "").replace(/[%#]/g, "\\$&")}}}`));
   s = tex(s.replace(/<\/?[a-z][^>]*>/gi, ""))
     .replace(/\*\*(.+?)\*\*/g, "\\textbf{$1}")
@@ -206,7 +208,7 @@ function figureTex(f: Figure): string {
 
 function blockToTex(b: LessonBlock): string {
   const fig = b.figure ? figureTex(b.figure) : "";
-  const sol = b.solution ? `\n\n\\textbf{Solution.}\n\n${blockTex(b.solution)}` : "";
+  const sol = `${b.try_steps ? `\n\n\\textbf{Your turn.} ${blockTex(b.try_steps)}` : ""}${b.solution ? `\n\n\\textbf{Solution.}\n\n${blockTex(b.solution)}` : ""}`;
   const env = THEOREM_ENV[b.kind];
   if (env) {
     const src = b.source ? `\n\n{\\hfill\\footnotesize\\itshape Source: ${inline(b.source)}\\par}` : "";
@@ -300,7 +302,7 @@ export function lessonToTex(raw: LessonDoc): string {
   return zDocument(doc, s.join("\n"));
 }
 
-const KIND: Record<string, string> = { recall: "Recall", explain: "Explain", apply: "Apply", transfer: "Transfer" };
+const KIND: Record<string, string> = { recall: "Recall", explain: "Explain", apply: "Apply", predict: "Predict", transfer: "Transfer" };
 
 type Head = Pick<LessonDoc, "title" | "depth" | "level" | "goal"> & { map: Pick<LessonDoc["map"], "course" | "path"> };
 

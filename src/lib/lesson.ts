@@ -25,6 +25,7 @@ export interface LessonBlock {
   title: string;
   body: string; // Markdown with $LaTeX$
   solution?: string | null; // worked solution, for examples
+  try_steps?: string | null; // a faded example's last steps, left for the student
   source?: string | null; // where in the student's materials, e.g. "Lecture 3 recording [12:30]"
   figure?: Figure | null;
 }
@@ -34,13 +35,15 @@ export interface LessonSection {
   blocks: LessonBlock[];
 }
 
-export const QUESTION_KINDS = ["recall", "explain", "apply", "transfer"] as const;
+export const QUESTION_KINDS = ["recall", "explain", "apply", "predict", "transfer"] as const;
 
 export interface QA {
   question: string;
   answer: string;
   kind?: (typeof QUESTION_KINDS)[number];
   hint?: string | null;
+  /** The objective it tests (1-based), so every objective gets tested. */
+  objective?: number | null;
 }
 
 export interface Mistake {
@@ -110,8 +113,9 @@ export function normalizeDoc(raw: LessonDoc): LessonDoc {
 const QASchema = z.object({
   question: z.string(),
   answer: z.string().describe("Model answer: the reasoning in brief and the result, with units"),
-  kind: z.enum(QUESTION_KINDS).describe("recall a fact, explain why, apply to a problem, or transfer to a new situation"),
+  kind: z.enum(QUESTION_KINDS).describe("recall a fact, explain why, apply to a problem, predict or sketch a behaviour before calculating, or transfer to a new situation"),
   hint: z.string().nullable().describe("A nudge that doesn't give the answer away, or null"),
+  objective: z.number().int().nullable().describe("Which objective (1-based) this question tests; null for warm-up questions"),
 });
 
 const BlockSchema = z.object({
@@ -119,6 +123,7 @@ const BlockSchema = z.object({
   title: z.string().describe("Short title naming the idea (not the kind): e.g. 'Why the envelope is exponential'"),
   body: z.string().describe("Markdown; maths in KaTeX-compatible LaTeX ($...$ inline, $$...$$ display)"),
   solution: z.string().nullable().describe("For examples: the full worked solution as numbered steps, ending with the boxed or bold result and a sanity check. Otherwise null"),
+  try_steps: z.string().nullable().describe("For a faded example only: the last 1-2 steps, phrased as prompts for the student to do themselves (the full working stays in solution). Otherwise null"),
   source: z.string().nullable().describe("Where this comes from in the sources: the source title plus a timestamp, section or question number, e.g. 'Lecture 3 recording [12:30]'. Null if it isn't from them"),
   figure: FigureSchema,
 });
@@ -140,9 +145,9 @@ export const LessonSchema = z.object({
 
 /** What each level teaches, in terms of the block kinds. */
 const LEVEL_BLOCKS: Record<number, string> = {
-  1: `Big picture only, about 600-900 words. Start from the phenomenon or problem the topic solves, then the idea in plain words (intuition blocks with an analogy or a picture in words), 1-2 definition blocks stating the key terms simply, and one short example that needs no derivation. No derivations, no exam-style problems.`,
-  2: `How and why it works, about 1000-1500 words. Precise definitions; intuition for each step of the mechanism; a formula block for each key result, saying what every symbol means and when it applies; the reasoning or derivation in short steps; 1-2 examples; pitfall blocks for the misconceptions; and a comparison block with a neighbouring or related topic.`,
-  3: `Problem solving, about 1200-2000 words. A procedure block with the solution method as numbered steps; the formula blocks needed (with units); 2 fully worked exam-style examples of increasing difficulty, styled on the tutorial and exam questions in the sources but with different numbers; pitfall blocks for the errors students make in exams. check_yourself holds 3-4 practice problems (kind "apply") with worked answers.`,
+  1: `Big picture only, about 600-900 words. Start from the phenomenon or problem the topic solves, then the idea in plain words (intuition blocks with an analogy or a picture in words), 1-2 definition blocks stating the key terms simply, and one short example that needs no derivation. No derivations, no exam-style problems, no formula blocks; a glossary of 3-5 terms; at most one figure.`,
+  2: `How and why it works, about 1000-1500 words. Precise definitions; intuition for each step of the mechanism; a formula block for each key result, saying what every symbol means and when it applies; the reasoning or derivation in short steps; 1 fully worked example then 1 faded example (try_steps set); pitfall blocks for the misconceptions; and a comparison block with a neighbouring or related topic.`,
+  3: `Problem solving, about 1200-2000 words. A procedure block with the solution method as numbered steps; the formula blocks needed (with units); exam-style examples of increasing difficulty styled on the tutorial and exam questions in the sources: one fully worked, then one faded (try_steps set) so the student finishes it; pitfall blocks for the errors students make in exams. check_yourself holds 3-4 practice problems (kind "apply") with worked answers.`,
   4: `Mastery, about 1000-1800 words. Assumptions, limitations and edge cases (when the model breaks down), comparison blocks with related topics in this and other courses, one hard multi-step or 'explain why' exam question worked fully, and a teach-back note asking the student to explain it from memory. check_yourself mixes "explain" and "transfer" questions.`,
 };
 
@@ -153,7 +158,9 @@ const RULES = `How to write it:
 - A source must point to text that states that block's claim. Material from beyond the sources (standard textbook knowledge) has source null; the app marks it "Beyond your notes" so the student knows what their course said.
 - Figure captions say what the figure shows; they never state a quantity an example or question asks the student to find.
 - Each block teaches one idea. Titles name the idea. Don't repeat the same point across blocks, glossary and takeaways.
-- Worked solutions: numbered steps, each saying what is done and why; carry units; finish with the result in bold and a quick sanity check (order of magnitude, limiting case or units).
+- Worked solutions: numbered steps, each saying what is done and why; carry units; finish with the result in bold and a quick sanity check (order of magnitude, limiting case or units). In one step, ask "Why?" and answer it in a line, so the student explains the step to themselves.
+- Assessment matches the objectives: every objective is tested by at least one check_yourself question (set objective to its number). Use "predict" questions (sketch or predict the behaviour before any calculation) where the topic has a behaviour to picture.
+- Stay within the level's word budget. A figure must show something no table or text in the lesson already shows.
 - Maths: KaTeX-compatible LaTeX only. $...$ inline and $$...$$ display on their own lines; for multi-line working use $$\\begin{aligned} ... \\end{aligned}$$. No \\( \\), no \\[ \\], no equation/align environments, no \\label or \\eqref, no custom macros.
 - Markdown only: bold, italics, lists and pipe tables. No HTML, no headings inside blocks, no Mermaid or ASCII diagrams: draw with figure instead.
 - Figures: give a block a figure when a picture teaches better than words: a plot of the response or relationship (substitute realistic numbers so it can be drawn), or a diagram of a process, classification or cause and effect. About 1-3 per lesson; never decorative.
@@ -267,13 +274,25 @@ export async function generateLessonDoc(topicId: string, depth: number): Promise
 
 /** The AI's answer, tidied, as a lesson document. */
 export function fromAi(head: Pick<LessonDoc, "title" | "depth" | "level" | "goal" | "map">, out: z.infer<typeof LessonSchema>): LessonDoc {
+  let figures = 0;
   return {
     version: 2,
     ...head,
     by: "claude",
     ...out,
     recall: out.recall.slice(0, 4),
-    sections: out.sections.filter((x) => x.blocks.length).map((x) => ({ ...x, blocks: x.blocks.map((b) => ({ ...b, solution: b.solution || null, source: b.source || null, figure: b.figure && !figureProblems(b.figure).length ? b.figure : null })) })),
+    // Caps that keep the entry level light and every level within reach, whatever the model wrote.
+    glossary: out.glossary.slice(0, head.depth === 1 ? 5 : 8),
+    check_yourself: out.check_yourself.slice(0, 5),
+    sections: out.sections
+      .filter((x) => x.blocks.length)
+      .map((x) => ({
+        ...x,
+        blocks: x.blocks.map((b) => {
+          const figure = b.figure && !figureProblems(b.figure).length && figures++ < (head.depth === 1 ? 1 : 3) ? b.figure : null;
+          return { ...b, solution: b.solution || null, try_steps: b.try_steps || null, source: b.source || null, figure };
+        }),
+      })),
   };
 }
 
@@ -347,7 +366,7 @@ export function lessonMermaid(doc: LessonDoc): string {
   return lines.filter(Boolean).join("\n");
 }
 
-const KIND_TAG: Record<string, string> = { recall: "Recall", explain: "Explain", apply: "Apply", transfer: "Transfer" };
+const KIND_TAG: Record<string, string> = { recall: "Recall", explain: "Explain", apply: "Apply", predict: "Predict", transfer: "Transfer" };
 
 function questions(qs: QA[], answerLabel: string): string {
   const list = qs.map((q, i) => `${i + 1}. ${q.kind ? `*${KIND_TAG[q.kind]}.* ` : ""}${q.question}${q.hint ? `\n\n${details("Hint", q.hint).replace(/^(?=.)/gm, "   ")}` : ""}`).join("\n\n");
@@ -365,7 +384,7 @@ export function lessonToMarkdown(raw: LessonDoc): string {
   for (const sec of doc.sections) {
     out.push(`### ${sec.heading}`);
     for (const b of sec.blocks) {
-      const sol = b.solution ? `\n\n${details("Worked solution", b.solution)}` : "";
+      const sol = `${b.try_steps ? `\n\n**✍️ Your turn:** ${b.try_steps}` : ""}${b.solution ? `\n\n${details(b.try_steps ? "Full solution" : "Worked solution", b.solution)}` : ""}`;
       const src = b.source ? `\n\n<p class="lb-source">${b.source === BEYOND_NOTES ? "📚" : "📎"} ${b.source}</p>` : "";
       const fig = b.figure ? `\n\n${figureMarkdown(b.figure)}` : "";
       // A coloured box per kind (styled in globals.css), like the Z class's boxes in print.
