@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { openDb, setDb } from "@/lib/db";
 import { createCourse, getMaterial, insertMaterial, listTopics, buildTree } from "@/lib/store";
-import { digestNow, offlineDigest, topPhrases } from "@/lib/digest";
+import { digestNow, offlineDigest, settleNewText, topPhrases } from "@/lib/digest";
+import { replaceTopics } from "@/lib/store";
 import { digestMindmap } from "@/lib/mermaid";
 import { heuristicTopics } from "@/lib/brainmap";
 import { formatTranscript } from "@/lib/transcript";
@@ -67,5 +68,18 @@ describe("digest of a recording", () => {
     expect(listTopics(c.id).every((t) => !t.manual && t.material_ids.includes(video.id))).toBe(true);
     const again = await addToBrainmap(new Request("http://x", { method: "POST" }), { params: Promise.resolve({ id: video.id }) });
     expect(again.status).toBe(400);
+  });
+
+  it("puts a new lecture recording into an existing brainmap by itself", async () => {
+    const c = createCourse({ name: "ML" });
+    replaceTopics(c.id, [{ ref: "1", parent_ref: null, title: "Probability", summary: "", keywords: [], material_ids: [], importance: 2 }]);
+    const base = { course_id: c.id, source_type: "url" as const, filename: null, mime: null, path: null, url: "https://youtu.be/x", status: "ready" as const, note: null };
+    const [yt] = digestNow([insertMaterial({ ...base, kind: "youtube", title: "Optimisation lecture", text: transcript })]);
+    await settleNewText([yt.id]);
+    const tree = buildTree(listTopics(c.id));
+    expect(tree.map((t) => t.title)).toEqual(["Probability", "Optimisation lecture"]);
+    expect(tree[1].children.map((t) => t.title)).toEqual(yt.digest!.topics.map((t) => t.title));
+    await settleNewText([yt.id]); // only once
+    expect(buildTree(listTopics(c.id))).toHaveLength(2);
   });
 });

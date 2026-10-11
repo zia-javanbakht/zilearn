@@ -2,7 +2,7 @@ import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
 import { splitSections, stem, topKeywords, truncate } from "./text";
 import { stripTimestamps } from "./transcript";
-import { getMaterial, setDigest } from "./store";
+import { addTopic, getMaterial, listTopics, normTitle, setDigest } from "./store";
 import type { Digest, DigestTopic, Material } from "./types";
 
 /**
@@ -83,6 +83,42 @@ export async function upgradeDigests(ids: string[]): Promise<void> {
     const digest = await makeDigest(m, true);
     // Skip if the text was edited meanwhile; that edit made its own digest.
     if (digest?.by === "ai" && getMaterial(id)?.text === m.text) setDigest(id, digest);
+  }
+}
+
+/**
+ * Add a material's topics to its course brainmap as a new branch (title = the material, children = its
+ * digest topics), without rebuilding the map. Not marked hand-made, so a rebuild reorganises it.
+ * Returns why it couldn't, or null.
+ */
+export function addBranch(m: Material): { topic_id: string } | { error: string } {
+  const digest = m.digest ?? (m.text?.trim() ? offlineDigest(m.text) : null);
+  if (!digest?.topics.length) return { error: "This item has no topics yet. Add or transcribe its text first." };
+  const roots = listTopics(m.course_id).filter((t) => !t.parent_id);
+  if (roots.some((t) => normTitle(t.title) === normTitle(m.title) || (t.material_ids.length === 1 && t.material_ids[0] === m.id)))
+    return { error: `"${m.title}" is already a branch of the brainmap.` };
+  const at = (s: string | null) => (s ? `[${s}] ` : "");
+  const branch = addTopic(m.course_id, { title: m.title, summary: digest.summary, keywords: digest.keywords.slice(0, 8), material_ids: [m.id], manual: false });
+  for (const t of digest.topics) {
+    const child = addTopic(m.course_id, { title: t.title, summary: at(t.start) + t.summary, parent_id: branch.id, material_ids: [m.id], manual: false });
+    for (const s of t.subtopics ?? []) addTopic(m.course_id, { title: s.title, summary: at(s.start) + s.summary, parent_id: child.id, material_ids: [m.id], manual: false });
+  }
+  return { topic_id: branch.id };
+}
+
+/**
+ * After new text arrives (an import, a transcript, captions): give recordings their AI digest, then put
+ * recordings and videos that aren't in the course brainmap yet into it as their own branch, so a
+ * lecture's topics show up without a rebuild. Courses without a brainmap get them when it is built.
+ */
+export async function settleNewText(ids: string[]): Promise<void> {
+  await upgradeDigests(ids);
+  for (const id of ids) {
+    const m = getMaterial(id);
+    if (!m?.digest?.topics.length || !RECORDING_KINDS.has(m.kind)) continue;
+    const topics = listTopics(m.course_id);
+    if (!topics.length || topics.some((t) => t.material_ids.includes(m.id))) continue;
+    addBranch(m);
   }
 }
 

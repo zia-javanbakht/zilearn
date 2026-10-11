@@ -333,7 +333,9 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
       {added > 0 && (
         <div className="alert info spread">
           <span>
-            {added} item{added > 1 ? "s" : ""} added. {data.tree.length ? "Rebuild the brainmap to include them." : "Build the brainmap when you've added everything."}
+            {added} item{added > 1 ? "s" : ""} added. {data.tree.length
+              ? "Videos and recordings join the brainmap as their own branches; rebuild it to merge everything into one map."
+              : "Build the brainmap when you've added everything."}
           </span>
           <button className="primary" onClick={onBrainmap}>
             Go to brainmap

@@ -8,7 +8,7 @@ import { providerName } from "@/lib/ai";
 import { MATERIAL_KINDS, type Material } from "@/lib/types";
 import { fetchYoutube, youtubeId, youtubeNote } from "@/lib/youtube";
 import { stripTimestamps } from "@/lib/transcript";
-import { digestNow, upgradeDigests } from "@/lib/digest";
+import { digestNow, settleNewText } from "@/lib/digest";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +75,7 @@ export const PATCH = handle(async (req: Request, { params }: Ctx<{ id: string }>
 function withDigest(m: Material | null): Material | null {
   if (!m || m.digest) return m;
   const [done] = digestNow([m]);
-  later(() => upgradeDigests([m.id]));
+  later(() => settleNewText([m.id]));
   return done;
 }
 

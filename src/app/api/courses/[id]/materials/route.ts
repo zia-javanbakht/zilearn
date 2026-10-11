@@ -1,4 +1,4 @@
-import { digestNow, upgradeDigests } from "@/lib/digest";
+import { digestNow, settleNewText } from "@/lib/digest";
 import { importFile, importLink, sizeLabel, sizeLimit, type ImportResult } from "@/lib/importer";
 import { getCourse, insertMaterial, listMaterials } from "@/lib/store";
 import { fail, handle, later, ok, type Ctx } from "@/lib/http";
@@ -15,7 +15,7 @@ export const maxDuration = 300;
 function created(result: ImportResult) {
   result.materials = digestNow(result.materials);
   const ids = result.materials.map((m) => m.id);
-  later(() => upgradeDigests(ids));
+  later(() => settleNewText(ids));
   return ok(result, 201);
 }
 
