@@ -24,6 +24,8 @@ export function PlanTab({ data, reload, go }: { data: CourseData; reload: () => 
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hideDone, setHideDone] = useState(false);
+  // The plan can run to weeks of days; the coming week is what matters, the rest is one click away.
+  const [showAll, setShowAll] = useState(false);
   const [lesson, setLesson] = useState<{ id: string; title: string; depth: number } | null>(null);
 
   const load = () => api<Plan | null>(`/api/courses/${course.id}/plan`).then(setPlan).catch((e) => setError(e.message));
@@ -255,7 +257,7 @@ export function PlanTab({ data, reload, go }: { data: CourseData; reload: () => 
           </div>
 
           <div>
-            {days.map(([date, items]) => {
+            {(showAll ? days : days.filter(([date]) => date <= addDays(today, 6))).map(([date, items]) => {
               const visible = hideDone ? items.filter((i) => !i.done) : items;
               if (!visible.length) return null;
               const mins = items.reduce((s, i) => s + i.minutes, 0);
@@ -328,6 +330,16 @@ export function PlanTab({ data, reload, go }: { data: CourseData; reload: () => 
                 </div>
               );
             })}
+            {!showAll && days.some(([date]) => date > addDays(today, 6)) && (
+              <button className="sm" style={{ marginTop: 8 }} onClick={() => setShowAll(true)}>
+                Show the remaining {days.filter(([date]) => date > addDays(today, 6)).length} days, up to the exam
+              </button>
+            )}
+            {showAll && days.length > 7 && (
+              <button className="sm ghost" style={{ marginTop: 8 }} onClick={() => setShowAll(false)}>
+                Show only the coming week
+              </button>
+            )}
           </div>
         </>
       )}
@@ -350,6 +362,13 @@ export function PlanTab({ data, reload, go }: { data: CourseData; reload: () => 
 
 function formatDay(d: string) {
   return new Date(d + "T00:00:00").toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+/** The local calendar date n days after an ISO date. */
+function addDays(iso: string, n: number) {
+  const d = new Date(iso + "T00:00:00");
+  d.setDate(d.getDate() + n);
+  return localDate(d);
 }
 
 /** The user's local calendar date (not UTC). */

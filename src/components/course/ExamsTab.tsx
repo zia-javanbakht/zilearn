@@ -231,6 +231,8 @@ function ExamRunner({ exam: initial, courseId, onBack, onPlan }: { exam: Exam; c
   const score = exam.grades?.reduce((s, g) => s + g.score, 0) ?? 0;
   const max = exam.questions.reduce((s, q) => s + q.marks, 0);
   const needsSelf = exam.grades?.some((g) => g.feedback.startsWith("Needs marking"));
+  // Marks on answers waiting for the student's own marking: without saying so, "1/34" reads as a fail.
+  const toMark = (exam.grades ?? []).filter((g) => g.feedback.startsWith("Needs marking")).reduce((s, g) => s + (exam.questions.find((q) => q.id === g.question_id)?.marks ?? 0), 0);
 
   return (
     <div className="stack" style={{ gap: 12 }}>
@@ -246,6 +248,15 @@ function ExamRunner({ exam: initial, courseId, onBack, onPlan }: { exam: Exam; c
             <span className={`badge ${score / max >= 0.8 ? "know" : score / max >= 0.5 ? "familiar" : "dont_know"}`}>
               Score {score}/{max} ({Math.round((score / max) * 100)}%)
             </span>
+            {toMark > 0 && (
+              <button
+                className="sm"
+                title="Compare your answers with the model answers and enter your marks"
+                onClick={() => document.querySelector(".question .self-mark")?.scrollIntoView({ behavior: "smooth", block: "center" })}
+              >
+                {toMark} mark{toMark === 1 ? "" : "s"} to mark yourself
+              </button>
+            )}
             <button className="sm" onClick={applyMarks}>
               Update my brainmap marks
             </button>
@@ -386,7 +397,7 @@ const QuestionRow = memo(function QuestionRow({
             </details>
           )}
           {g.feedback.startsWith("Needs marking") && (
-            <label className="small row">
+            <label className="small row self-mark">
               Your mark:
               <input type="number" min={0} max={q.marks} value={selfMark ?? ""} onChange={(e) => onSelfMark(q.id, Number(e.target.value))} style={{ width: 70 }} />/ {q.marks}
             </label>

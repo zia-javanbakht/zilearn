@@ -24,9 +24,13 @@ export function stem(w: string): string {
   return w;
 }
 
+// Words about the paper or the recording rather than the subject; fine in search, useless as key terms.
+const BOILERPLATE = new Set("question questions marks mark total answer answers points minutes hour hours instructions candidates attempt tutorial workshop exam exams received recording".split(" "));
+
 export function topKeywords(text: string, n = 8): string[] {
   const counts = new Map<string, { n: number; word: string }>();
   for (const w of tokenize(text)) {
+    if (BOILERPLATE.has(w)) continue;
     const s = stem(w);
     const c = counts.get(s);
     if (c) c.n++;

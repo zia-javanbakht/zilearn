@@ -222,7 +222,8 @@ function titleFor(text: string, spread: Map<string, number>, total: number): str
     .filter((p) => p.count >= 2)
     .map((p) => ({ ...p, score: p.count * Math.log(1 + total / (spread.get(p.phrase) ?? 1)) }))
     .sort((a, b) => b.score - a.score)[0];
-  const title = best ? best.phrase : topKeywords(text, 2).join(" and ");
+  // Without a repeated phrase, the single most frequent term; "Marks and gradient" style pairs read as noise.
+  const title = best ? best.phrase : (topKeywords(text, 1)[0] ?? "");
   return title ? title[0].toUpperCase() + title.slice(1) : "";
 }
 

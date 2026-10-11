@@ -205,12 +205,21 @@ ${
 
   // Offline: build questions from topic summaries.
   const weighted = pool.flatMap((n) => Array(WEIGHT[n.effective_mastery ?? "dont_know"]).fill(n) as TopicNode[]);
-  const pick = () => weighted[Math.floor(Math.random() * weighted.length)];
+  // Weighted towards weak topics, but without asking about the same topic twice until every topic has had a turn.
+  const asked = new Set<string>();
+  const pick = () => {
+    const fresh = weighted.filter((n) => !asked.has(n.id));
+    const n = (fresh.length ? fresh : weighted)[Math.floor(Math.random() * (fresh.length || weighted.length))];
+    asked.add(n.id);
+    return n;
+  };
   const questions: ExamQuestion[] = [];
   for (let i = 0; i < nMcq; i++) {
     const n = pick();
     const others = shuffle(pool.filter((p) => p.id !== n.id)).slice(0, 3);
-    if (!n.summary || others.length < 1) {
+    const clue = blank(n.summary ?? "", n.title);
+    // A clue that is mostly blanks (or a recording's noise) gives nothing to reason from; ask for an explanation instead.
+    if (!clue || others.length < 1 || clue.split(/\s+/).filter((w) => !w.includes("____")).length < 6) {
       questions.push(shortQ(n, 2));
       continue;
     }
@@ -220,7 +229,7 @@ ${
       type: "mcq",
       topic_id: n.id,
       topic_title: n.title,
-      prompt: `Which topic does this describe?\n\n> ${blank(n.summary, n.title)}`,
+      prompt: `Which topic does this describe?\n\n> ${clue}`,
       options: options.map((o) => o.title),
       answer_index: options.indexOf(n),
       model_answer: n.title,
@@ -261,7 +270,7 @@ function shortQ(n: TopicNode, marks: number): ExamQuestion {
 
 function blank(summary: string, title: string) {
   const words = title.split(/\s+/).filter((w) => w.length > 3);
-  let s = summary;
+  let s = summary.replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]\s*/g, "").trim();
   for (const w of words) s = s.replace(new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi"), "____");
   return s;
 }
