@@ -5,7 +5,20 @@ import { api } from "../api";
 import { Markdown } from "../Markdown";
 import { DEPTH_LEVELS } from "@/lib/types";
 
-export function LessonModal({ topicId, title, depth: initialDepth, onClose }: { topicId: string; title: string; depth: number; onClose: () => void }) {
+export function LessonModal({
+  topicId,
+  title,
+  depth: initialDepth,
+  onClose,
+  onCompleted,
+}: {
+  topicId: string;
+  title: string;
+  depth: number;
+  onClose: () => void;
+  onCompleted?: () => void;
+}) {
+  const [completed, setCompleted] = useState<number | null>(null);
   const [depth, setDepth] = useState(initialDepth);
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +75,28 @@ export function LessonModal({ topicId, title, depth: initialDepth, onClose }: { 
         </div>
         <p className="small muted">{DEPTH_LEVELS[depth - 1].goal}</p>
         {error && <div className="alert error">{error}</div>}
+        {content && (
+          <div className="row" style={{ justifyContent: "flex-end", marginBottom: 8 }}>
+            {completed === depth ? (
+              <span className="badge know">Level {depth} recorded</span>
+            ) : (
+              <button
+                className="sm primary"
+                onClick={async () => {
+                  try {
+                    await api(`/api/topics/${topicId}/progress`, { method: "POST", json: { depth } });
+                    setCompleted(depth);
+                    onCompleted?.();
+                  } catch (e) {
+                    setError((e as Error).message);
+                  }
+                }}
+              >
+                ✓ I&apos;ve finished level {depth}
+              </button>
+            )}
+          </div>
+        )}
         {content === null && !error ? (
           <p className="muted">
             <span className="spinner" /> Preparing the lesson…

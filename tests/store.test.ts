@@ -153,3 +153,29 @@ describe("offline generators", () => {
     expect(pod.segments.length).toBeGreaterThan(3);
   });
 });
+
+describe("knowledge base refresh", () => {
+  it("keeps Claude-written links and relations across a brainmap rebuild", async () => {
+    const { refreshLinks } = await import("@/lib/kb");
+    const { replaceLinks, listLinks } = await import("@/lib/store");
+    const c = seed();
+    const d = createCourse({ name: "Deep Learning" });
+    replaceTopics(d.id, [
+      { ref: "1", parent_ref: null, title: "Training neural nets", summary: "Gradient descent with backpropagation and a learning rate.", keywords: ["gradient", "learning rate", "loss"], material_ids: [], importance: 3 },
+    ]);
+    refreshLinks();
+    const keyword = listLinks();
+    expect(keyword.length).toBeGreaterThan(0);
+    const [a] = keyword;
+    const reg = listTopics(c.id).find((t) => t.title === "Regularisation")!;
+    const nets = listTopics(d.id)[0];
+    replaceLinks([
+      { ...a, relation: "Backprop computes the gradient that descent follows" },
+      { from_topic: reg.id, to_topic: nets.id, score: 0.5, relation: "Weight decay is regularisation for nets" },
+    ]);
+    refreshLinks();
+    const after = listLinks();
+    expect(after.find((l) => l.from_topic === a.from_topic && l.to_topic === a.to_topic)?.relation).toMatch(/Backprop/);
+    expect(after.some((l) => l.relation?.startsWith("Weight decay"))).toBe(true);
+  });
+});

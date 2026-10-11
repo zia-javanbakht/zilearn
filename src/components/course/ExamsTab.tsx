@@ -7,10 +7,13 @@ import { ScopePicker, type ScopeValue } from "./ScopePicker";
 import type { Exam } from "@/lib/types";
 import type { CourseData } from "./CourseWorkspace";
 
-export function ExamsTab({ data, reload }: { data: CourseData; reload: () => void }) {
+export function ExamsTab({ data, reload, openExamId, onPlan }: { data: CourseData; reload: () => void; openExamId?: string | null; onPlan: () => void }) {
   const id = data.course.id;
   const [exams, setExams] = useState<Exam[] | null>(null);
   const [active, setActive] = useState<Exam | null>(null);
+  useEffect(() => {
+    if (openExamId) api<Exam>(`/api/exams/${openExamId}`).then(setActive).catch(() => {});
+  }, [openExamId]);
   const [scope, setScope] = useState<ScopeValue>({ kind: "course" });
   const [cfg, setCfg] = useState({ questionCount: 10, durationMinutes: 45, mcq: 5, short: 3, long: 2 });
   const [busy, setBusy] = useState(false);
@@ -39,7 +42,7 @@ export function ExamsTab({ data, reload }: { data: CourseData; reload: () => voi
     }
   }
 
-  if (active) return <ExamRunner exam={active} onBack={() => (setActive(null), load(), reload())} />;
+  if (active) return <ExamRunner exam={active} courseId={id} onBack={() => (setActive(null), load(), reload())} onPlan={() => (reload(), onPlan())} />;
 
   return (
     <div className="stack" style={{ gap: 16 }}>
@@ -125,7 +128,7 @@ export function ExamsTab({ data, reload }: { data: CourseData; reload: () => voi
   );
 }
 
-function ExamRunner({ exam: initial, onBack }: { exam: Exam; onBack: () => void }) {
+function ExamRunner({ exam: initial, courseId, onBack, onPlan }: { exam: Exam; courseId: string; onBack: () => void; onPlan: () => void }) {
   const [exam, setExam] = useState(initial);
   const [answers, setAnswers] = useState<Record<string, string>>(initial.answers ?? {});
   const [selfMarks, setSelfMarks] = useState<Record<string, number>>({});
@@ -155,8 +158,26 @@ function ExamRunner({ exam: initial, onBack }: { exam: Exam; onBack: () => void 
   }
 
   async function applyMarks() {
-    const r = await api<{ updated: unknown[] }>(`/api/exams/${exam.id}/apply`, { method: "POST" });
-    setApplied(`Updated marks on ${r.updated.length} topic${r.updated.length === 1 ? "" : "s"}. Rebuild your study plan to reflect them.`);
+    try {
+      const r = await api<{ updated: unknown[] }>(`/api/exams/${exam.id}/apply`, { method: "POST" });
+      setApplied(`Updated marks on ${r.updated.length} topic${r.updated.length === 1 ? "" : "s"}.`);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  async function reschedule() {
+    setBusy(true);
+    try {
+      const d = new Date();
+      const start_date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      await api(`/api/courses/${courseId}/plan`, { method: "POST", json: { start_date } });
+      onPlan();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   const score = exam.grades?.reduce((s, g) => s + g.score, 0) ?? 0;
@@ -192,7 +213,14 @@ function ExamRunner({ exam: initial, onBack }: { exam: Exam; onBack: () => void 
           </div>
         )}
       </div>
-      {applied && <div className="alert info">{applied}</div>}
+      {applied && (
+        <div className="alert info spread">
+          <span>{applied} Update your study plan so weak topics are repeated at the right depth.</span>
+          <button className="primary sm" disabled={busy} onClick={reschedule}>
+            Update study plan
+          </button>
+        </div>
+      )}
       {error && <div className="alert error">{error}</div>}
 
       {exam.questions.map((q, i) => {

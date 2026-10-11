@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
 import { db } from "./db";
-import { allTopics, listCourses, replaceLinks } from "./store";
+import { allTopics, listCourses, listLinks, replaceLinks } from "./store";
 import { cosine, sharedTerms, tfidfVectors } from "./text";
 import type { KnowledgeLink, Topic } from "./types";
 
@@ -99,15 +99,24 @@ function topicDoc(t: Topic) {
   return `${t.title} ${t.title} ${t.title} ${t.keywords.join(" ")} ${t.keywords.join(" ")} ${t.summary}`;
 }
 
-/** Find similar topics across different courses with TF-IDF cosine similarity. */
+const SAME_COURSE_THRESHOLD = 0.3;
+
+/**
+ * Find similar topics with TF-IDF cosine similarity: across courses, and (with a
+ * stricter threshold) between distant parts of the same course. Topics that are
+ * already adjacent in the tree (parent/child or siblings) are not linked.
+ */
 export function computeLinks(topics: Topic[], threshold = LINK_THRESHOLD): Omit<KnowledgeLink, "id">[] {
   const vecs = tfidfVectors(topics.map(topicDoc));
   const cand: { a: number; b: number; s: number }[] = [];
   for (let i = 0; i < topics.length; i++) {
     for (let j = i + 1; j < topics.length; j++) {
-      if (topics[i].course_id === topics[j].course_id) continue;
+      const x = topics[i];
+      const y = topics[j];
+      const same = x.course_id === y.course_id;
+      if (same && (x.parent_id === y.id || y.parent_id === x.id || x.parent_id === y.parent_id)) continue;
       const s = cosine(vecs[i], vecs[j]);
-      if (s >= threshold) cand.push({ a: i, b: j, s });
+      if (s >= (same ? SAME_COURSE_THRESHOLD : threshold)) cand.push({ a: i, b: j, s });
     }
   }
   cand.sort((x, y) => y.s - x.s);
@@ -126,6 +135,22 @@ export function computeLinks(topics: Topic[], threshold = LINK_THRESHOLD): Omit<
     });
   }
   return out;
+}
+
+/**
+ * Recompute keyword links after a brainmap changes, keeping explanations Claude
+ * wrote earlier for pairs that are still linked. No API calls.
+ */
+export function refreshLinks() {
+  const previous = new Map(listLinks().map((l) => [[l.from_topic, l.to_topic].sort().join("|"), l]));
+  const fresh = computeLinks(allTopics()).map((l) => {
+    const old = previous.get([l.from_topic, l.to_topic].sort().join("|"));
+    return old?.relation && !old.relation.startsWith("Shared concepts") ? { ...l, relation: old.relation } : l;
+  });
+  // Keep Claude-found links that keyword matching can't see.
+  const have = new Set(fresh.map((l) => [l.from_topic, l.to_topic].sort().join("|")));
+  for (const [k, l] of previous) if (!have.has(k) && l.relation && !l.relation.startsWith("Shared concepts") && l.score === 0.5) fresh.push(l);
+  replaceLinks(fresh);
 }
 
 const RelationSchema = z.object({
@@ -164,7 +189,7 @@ export async function rebuildKnowledgeBase(): Promise<{ links: number; by: "clau
     const out = await generateStructured({
       schema: RelationSchema,
       effort: "low",
-      prompt: `A student is taking several courses. Here is every topic across their courses:\n\n${catalog}\n\nCandidate cross-course links found by keyword similarity:\n${cands || "(none)"}\n\nFor each candidate, decide whether the topics are genuinely related and describe the connection in one sentence. Then add up to 10 strong cross-course connections that keyword matching missed (only between different courses).`,
+      prompt: `A student is taking several courses. Here is every topic across their courses (the bracket names the course):\n\n${catalog}\n\nCandidate cross-course links found by keyword similarity:\n${cands || "(none)"}\n\nFor each candidate, decide whether the topics are genuinely related and describe the connection in one sentence. Then add up to 10 strong cross-course connections that keyword matching missed (only between different courses).`,
     });
     const verdict = new Map(out.links.map((l) => [l.index, l]));
     links = candidates

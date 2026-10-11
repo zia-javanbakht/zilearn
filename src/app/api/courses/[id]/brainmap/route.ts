@@ -1,3 +1,4 @@
+import { refreshLinks } from "@/lib/kb";
 import { structureCourse, toFlowchart, toMindmap } from "@/lib/brainmap";
 import { buildTree, getCourse, listMaterials, listTopics, replaceTopics, updateCourse } from "@/lib/store";
 import { fail, handle, ok, type Ctx } from "@/lib/http";
@@ -26,6 +27,7 @@ export const POST = handle(async (_req: Request, { params }: Ctx<{ id: string }>
   if (!materials.length) return fail("Add some materials first.");
   const { topics, summary, by } = await structureCourse(course, materials);
   replaceTopics(id, topics);
+  refreshLinks();
   updateCourse(id, { summary });
   return ok({ ...view(id), by });
 });

@@ -189,3 +189,9 @@ mark, .hl { background: #ffe58f; color: #141a2e; border-radius: 3px; padding: 0 
 .empty { text-align: center; padding: 40px 16px; color: var(--muted); }
 .spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; display: inline-block; animation: spin 0.7s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+.plan-item.recall { background: var(--surface-2); border-style: dashed; }
+.plan-item.overview, .plan-item.synthesis { border-left: 3px solid var(--accent); }
+.plan-item.diagnostic { border-left: 3px solid var(--know); }
+.plan-item.final { background: var(--familiar-soft); border-color: transparent; }
+.stepper button.primary { color: #fff; }

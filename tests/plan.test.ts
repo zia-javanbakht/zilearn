@@ -18,7 +18,9 @@ describe("startDepth", () => {
     expect(startDepth(null, 3, 0)).toBe(1);
     expect(startDepth("familiar", 3, 0)).toBe(2);
     expect(startDepth("know", 3, 0)).toBe(3);
-    expect(startDepth("dont_know", 3, 2)).toBe(3);
+    expect(startDepth("familiar", 3, 2)).toBe(3);
+    // Marked "don't know" after studying: repeat the current depth.
+    expect(startDepth("dont_know", 3, 2)).toBe(2);
   });
 });
 
@@ -88,9 +90,45 @@ describe("buildPlan", () => {
   });
 
   it("skips depth already achieved", () => {
-    const roots = [node("Done", "dont_know", [], 3)];
+    const roots = [node("Done", "familiar", [], 3)];
     const plan = buildPlan({ ...base, roots, targetLevel: 3 });
     expect(plan.items).toHaveLength(0);
     expect(plan.warnings[0]).toMatch(/target level/);
+  });
+});
+
+describe("plan structure", () => {
+  const branch = () => node("Branch", null, [node("L1", "dont_know"), node("L2", "dont_know")]);
+
+  it("opens branches with an overview and closes them with a synthesis", () => {
+    const roots = [branch(), node("Other", "dont_know", [node("O1", "dont_know")])];
+    const plan = buildPlan({ ...base, roots, targetLevel: 2 });
+    const kinds = plan.items.map((i) => `${i.kind}:${i.topic_title}`);
+    expect(kinds.indexOf("overview:Branch")).toBeLessThan(kinds.indexOf("study:L1"));
+    expect(kinds.lastIndexOf("synthesis:Branch")).toBeGreaterThan(kinds.lastIndexOf("study:L2"));
+  });
+
+  it("interleaves branches from pass 2 on", () => {
+    const roots = [node("A", null, [node("A1", "dont_know"), node("A2", "dont_know")]), node("B", null, [node("B1", "dont_know"), node("B2", "dont_know")])];
+    const plan = buildPlan({ ...base, roots, targetLevel: 2 });
+    const pass2 = plan.items.filter((i) => i.kind === "study" && i.iteration === 2).map((i) => i.topic_title);
+    expect(pass2).toEqual(["A1", "B1", "A2", "B2"]);
+  });
+
+  it("checks known topics early with a diagnostic", () => {
+    const roots = [node("K", "know"), node("U", "dont_know")];
+    const plan = buildPlan({ ...base, roots, targetLevel: 3 });
+    const diag = plan.items.find((i) => i.kind === "diagnostic")!;
+    expect(diag.topic_title).toBe("K");
+    expect(diag.day).toBe(1);
+  });
+
+  it("adds spaced recall warm-ups and keeps the last day for a final review", () => {
+    const roots = Array.from({ length: 8 }, (_, i) => node(`T${i}`, "dont_know"));
+    const plan = buildPlan({ ...base, roots, targetLevel: 3 });
+    expect(plan.items.some((i) => i.kind === "recall")).toBe(true);
+    const finals = plan.items.filter((i) => i.kind === "final");
+    expect(finals.map((f) => f.date)).toEqual(["2026-01-20", "2026-01-20"]);
+    expect(plan.items.filter((i) => i.kind !== "final" && i.kind !== "recall").every((i) => i.date < "2026-01-20")).toBe(true);
   });
 });

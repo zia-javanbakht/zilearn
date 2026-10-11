@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { aiEnabled, generateStructured, generateText } from "./ai";
 import { excerptsFor } from "./kb";
-import { buildTree, flattenTree, getCourse, getTopic, listMaterials, listTopics } from "./store";
+import { buildTree, flattenTree, getCourse, getLesson, getTopic, listMaterials, listTopics } from "./store";
 import { truncate } from "./text";
 import {
   DEPTH_LEVELS,
@@ -16,11 +16,19 @@ import { newId } from "./db";
 
 /* ---------------- Scope ---------------- */
 
-export type Scope = { kind: "course" } | { kind: "topic"; topicId: string } | { kind: "weak" };
+export type Scope =
+  | { kind: "course" }
+  | { kind: "topic"; topicId: string }
+  | { kind: "weak" }
+  | { kind: "topics"; ids: string[]; label?: string };
 
 export function parseScope(v: unknown): Scope {
-  const s = v as Partial<{ kind: string; topicId: string }>;
+  const s = v as Partial<{ kind: string; topicId: string; ids: unknown; label: unknown }>;
   if (s?.kind === "topic" && typeof s.topicId === "string") return { kind: "topic", topicId: s.topicId };
+  if (s?.kind === "topics" && Array.isArray(s.ids)) {
+    const ids = s.ids.filter((x): x is string => typeof x === "string").slice(0, 500);
+    if (ids.length) return { kind: "topics", ids, label: typeof s.label === "string" ? s.label.slice(0, 120) : undefined };
+  }
   if (s?.kind === "weak") return { kind: "weak" };
   return { kind: "course" };
 }
@@ -49,6 +57,10 @@ export function resolveScope(courseId: string, scope: Scope, sourceBudget = 120_
     nodes = flattenTree([root]);
     outlineRoots = [root];
     label = root.title;
+  } else if (scope.kind === "topics") {
+    const wanted = new Set(scope.ids);
+    nodes = nodes.filter((n) => wanted.has(n.id));
+    label = scope.label ?? `${nodes.length} selected topic${nodes.length === 1 ? "" : "s"}`;
   } else if (scope.kind === "weak") {
     const weak = nodes.filter((n) => !n.children.length && n.effective_mastery !== "know");
     if (weak.length) nodes = weak;
@@ -105,6 +117,14 @@ export async function generateLesson(topicId: string, depth: number): Promise<{ 
   const course = getCourse(topic.course_id)!;
   const level = DEPTH_LEVELS[Math.min(4, Math.max(1, depth)) - 1];
   const excerpts = excerptsFor(topic.course_id, `${topic.title} ${topic.keywords.join(" ")}`, 20000, topic.material_ids);
+  const all = flattenTree(buildTree(listTopics(topic.course_id)));
+  const node = all.find((n) => n.id === topic.id);
+  const byId = new Map(all.map((n) => [n.id, n]));
+  const ancestors: string[] = [];
+  for (let p = topic.parent_id; p && byId.has(p) && ancestors.length < 10; p = byId.get(p)!.parent_id) ancestors.unshift(byId.get(p)!.title);
+  const siblings = all.filter((n) => n.parent_id === topic.parent_id && n.id !== topic.id).map((n) => n.title);
+  const previous = depth > 1 ? getLesson(topic.id, depth - 1) : null;
+  const mark = node?.effective_mastery ? MASTERY_LABELS[node.effective_mastery] : "not marked";
 
   if (!aiEnabled()) {
     const body = [
@@ -125,9 +145,12 @@ export async function generateLesson(topicId: string, depth: number): Promise<{ 
   const content = await generateText({
     prompt: `Course: ${course.name}
 Topic: ${topic.title}
+Where it sits in the course: ${[...ancestors, topic.title].join(" > ")}
+Neighbouring topics: ${siblings.slice(0, 15).join(", ") || "(none)"}
 Topic summary: ${topic.summary}
 Key terms: ${topic.keywords.join(", ")}
-
+Student's self-assessment: ${mark}
+${previous ? `\nThe student already studied this lesson in the previous pass (assume it is covered; build on it, do not repeat it):\n<previous_lesson>\n${truncate(previous.content, 6000)}\n</previous_lesson>\n` : ""}
 Excerpts from the student's own materials:
 ${excerpts.join("\n\n---\n\n") || "(none found)"}
 
@@ -135,7 +158,8 @@ The student is studying this topic progressively. This is pass ${depth} of up to
 Earlier passes covered the shallower levels; later passes go deeper, so do not cover everything now.
 
 Write the lesson for this pass in Markdown:
-- Start with a 2-3 sentence "Where this fits" orientation.
+- Start with a 2-3 sentence "Where this fits" orientation that names how it relates to the neighbouring topics.
+- What this level's lesson contains: ${level.lesson}
 - Teach the content at exactly this depth. Use examples, and LaTeX ($...$) for maths where relevant.
 - You may include one small Mermaid diagram in a \`\`\`mermaid block if it genuinely helps.
 - Point to which of the student's materials to look at (by title) when useful.
@@ -166,6 +190,7 @@ export interface ExamOptions {
   questionCount: number;
   mix: { mcq: number; short: number; long: number }; // relative weights
   durationMinutes: number;
+  depth?: number; // focus questions on one progressive level (checkpoints)
 }
 
 export async function generateExam(courseId: string, opts: ExamOptions) {
@@ -198,7 +223,11 @@ ${ctx.sources}
 Requirements:
 - Exactly ${nMcq} multiple-choice (4 options, one correct), ${nShort} short-answer and ${nLong} long-answer questions.
 - Weight towards topics the student marked "Don't know anything" or "Familiar", but cover the scope.
-- Target the course's required level (${DEPTH_LEVELS[ctx.course.target_level - 1].name}); include some application questions.
+${
+  opts.depth
+    ? `- This is a checkpoint after the student's level ${opts.depth} pass ("${DEPTH_LEVELS[opts.depth - 1].name}": ${DEPTH_LEVELS[opts.depth - 1].goal}). Pitch every question at that level, not deeper.`
+    : `- Target the course's required level (${DEPTH_LEVELS[ctx.course.target_level - 1].name}); include some application questions.`
+}
 - Marks: mcq 1, short 2-5, long 8-15. Give a precise marking guide in model_answer.
 - Questions must be answerable from the course content. Plausible distractors for MCQs.`,
     });

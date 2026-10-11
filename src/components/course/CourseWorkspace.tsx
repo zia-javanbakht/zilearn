@@ -34,6 +34,7 @@ export function CourseWorkspace({ id }: { id: string }) {
   const [data, setData] = useState<CourseData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("materials");
+  const [openExamId, setOpenExamId] = useState<string | null>(null);
 
   const reload = useCallback(() => api<CourseData>(`/api/courses/${id}`).then(setData).catch((e) => setError(e.message)), [id]);
 
@@ -48,9 +49,10 @@ export function CourseWorkspace({ id }: { id: string }) {
     return () => window.removeEventListener("hashchange", fromHash);
   }, [reload]);
 
-  const go = (t: Tab) => {
+  const go = (t: Tab, opts?: { examId?: string }) => {
+    setOpenExamId(opts?.examId ?? null);
     setTab(t);
-    history.replaceState(null, "", `#${t}`);
+    history.replaceState(null, "", `${window.location.search}#${t}`);
   };
 
   if (error) return <div className="alert error">{error}</div>;
@@ -86,6 +88,8 @@ export function CourseWorkspace({ id }: { id: string }) {
       </div>
       {course.summary && <p className="muted" style={{ marginTop: 10, maxWidth: 900 }}>{course.summary}</p>}
 
+      <Steps data={data} go={go} />
+
       <div className="tabs">
         {TABS.map(([k, label]) => (
           <button key={k} className={tab === k ? "active" : ""} onClick={() => go(k)}>
@@ -96,11 +100,42 @@ export function CourseWorkspace({ id }: { id: string }) {
 
       {tab === "materials" && <MaterialsTab data={data} reload={reload} onBrainmap={() => go("brainmap")} />}
       {tab === "brainmap" && <BrainmapTab data={data} reload={reload} onPlan={() => go("plan")} />}
-      {tab === "plan" && <PlanTab data={data} reload={reload} />}
-      {tab === "exams" && <ExamsTab data={data} reload={reload} />}
+      {tab === "plan" && <PlanTab data={data} reload={reload} go={go} />}
+      {tab === "exams" && <ExamsTab key={openExamId ?? "list"} data={data} reload={reload} openExamId={openExamId} onPlan={() => go("plan")} />}
       {tab === "notes" && <NotesTab data={data} />}
       {tab === "podcasts" && <PodcastsTab data={data} />}
       {tab === "settings" && <SettingsTab data={data} reload={reload} />}
+    </div>
+  );
+}
+
+/** Getting-started guide: shows the next step until a plan exists. */
+function Steps({ data, go }: { data: CourseData; go: (t: Tab) => void }) {
+  const leaves: TopicNode[] = [];
+  const walk = (ns: TopicNode[]) => ns.forEach((n) => (n.children.length ? walk(n.children) : leaves.push(n)));
+  walk(data.tree);
+  const marked = leaves.filter((n) => n.effective_mastery).length;
+  const steps: { label: string; done: boolean; tab: Tab; hint: string }[] = [
+    { label: "Add materials", done: data.materials.length > 0, tab: "materials", hint: "Drop in your lecture notes, slides, recordings and sample exams." },
+    { label: "Build the brainmap", done: data.tree.length > 0, tab: "brainmap", hint: "ziLearn organises everything into topics." },
+    {
+      label: "Mark what you know",
+      done: leaves.length > 0 && marked > 0,
+      tab: "brainmap",
+      hint: "Mark branches as Know, Familiar or Don't know. Unmarked topics are treated as Don't know.",
+    },
+    { label: "Create your study plan", done: data.planProgress !== null, tab: "plan", hint: "Set your exam date and get a day-by-day progressive plan." },
+  ];
+  const next = steps.findIndex((s) => !s.done);
+  if (next === -1) return null;
+  return (
+    <div className="card row" style={{ marginTop: 14, gap: 16 }}>
+      {steps.map((s, i) => (
+        <button key={s.label} className={`ghost sm ${i === next ? "primary" : ""}`} onClick={() => go(s.tab)} title={s.hint} style={{ opacity: s.done ? 0.6 : 1 }}>
+          {s.done ? "✓" : `${i + 1}.`} {s.label}
+        </button>
+      ))}
+      <span className="small muted grow">{steps[next].hint}</span>
     </div>
   );
 }

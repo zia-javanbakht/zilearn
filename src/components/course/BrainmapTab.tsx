@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { Mermaid } from "../Mermaid";
 import { LessonModal } from "./LessonModal";
+import { toFlowchart } from "@/lib/mermaid";
 import { MASTERY_LABELS, MATERIAL_KIND_LABELS, type Mastery, type TopicNode } from "@/lib/types";
 import type { CourseData } from "./CourseWorkspace";
 
@@ -29,7 +30,10 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
   const id = data.course.id;
   const [view, setView] = useState<BrainmapView | null>(null);
   const [mode, setMode] = useState<"map" | "mindmap" | "outline">("map");
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("topic"),
+  );
+  const [focus, setFocus] = useState<string | null>(selected);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lesson, setLesson] = useState<{ id: string; title: string; depth: number } | null>(null);
@@ -46,6 +50,39 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
     if (view) walk(view.tree);
     return out;
   }, [view]);
+
+  const flow = useMemo(() => (view ? toFlowchart(data.course.name, view.tree, { focusId: focus }) : null), [view, focus, data.course.name]);
+
+  const leavesInOrder = useMemo(() => [...flat.values()].filter((n) => !n.children.length), [flat]);
+  function nextUnmarked() {
+    const start = Math.max(0, leavesInOrder.findIndex((n) => n.id === selected) + 1);
+    const next = [...leavesInOrder.slice(start), ...leavesInOrder.slice(0, start)].find((n) => !n.effective_mastery);
+    if (next) {
+      setSelected(next.id);
+      setFocus(next.parent_id ?? next.id);
+    }
+  }
+
+  // Keyboard: 1 know, 2 familiar, 3 don't know, 0 clear, n next unmarked.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
+      const map: Record<string, Mastery | null> = { "1": "know", "2": "familiar", "3": "dont_know", "0": null };
+      if (e.key in map && selected) {
+        e.preventDefault();
+        const node = flat.get(selected);
+        mark(selected, map[e.key], true).then(() => {
+          if (node && !node.children.length) nextUnmarked();
+        });
+      } else if (e.key === "n") {
+        e.preventDefault();
+        nextUnmarked();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   const counts = useMemo(() => {
     const c = { know: 0, familiar: 0, dont_know: 0, none: 0 };
@@ -68,7 +105,7 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
     }
   }
 
-  async function mark(topicId: string, mastery: Mastery | null, branch = true) {
+  async function mark(topicId: string, mastery: Mastery | null, branch = true): Promise<void> {
     try {
       await api(`/api/topics/${topicId}`, { method: "PATCH", json: { mastery, applyToBranch: branch } });
     } catch (e) {
@@ -136,6 +173,9 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
             ))}
             <option value="clear">Clear all marks</option>
           </select>
+          <button onClick={nextUnmarked} disabled={counts.none === 0} title="Jump to the next unmarked topic (n)">
+            Next unmarked
+          </button>
           <button onClick={build} disabled={busy}>
             {busy && <span className="spinner" />} {busy ? "Rebuilding…" : "Rebuild"}
           </button>
@@ -149,11 +189,36 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
         <div>
           {mode === "map" && (
             <>
-              <p className="small muted">Click a topic to mark it. Marking a branch applies to everything under it.</p>
-              <Mermaid code={view.flowchart.code} onNodeClick={(nid) => view.flowchart.nodeIds[nid] && setSelected(view.flowchart.nodeIds[nid])} />
+              <div className="spread small muted">
+                <span>
+                  Click a topic to select and expand it. Keys: <kbd>1</kbd> Know, <kbd>2</kbd> Familiar, <kbd>3</kbd> Don&apos;t know, <kbd>n</kbd> next unmarked.
+                </span>
+                {flow?.collapsed && focus && (
+                  <button className="sm" onClick={() => setFocus(null)}>
+                    Collapse all
+                  </button>
+                )}
+              </div>
+              {flow && (
+                <Mermaid
+                  code={flow.code}
+                  zoom
+                  onNodeClick={(nid) => {
+                    const tid = flow.nodeIds[nid];
+                    if (!tid) return;
+                    setSelected(tid);
+                    if (flat.get(tid)?.children.length) setFocus(tid);
+                  }}
+                />
+              )}
             </>
           )}
-          {mode === "mindmap" && <Mermaid code={view.mindmap} />}
+          {mode === "mindmap" && (
+            <>
+              <p className="small muted">Overview of the whole course. ✅ Know · 🟡 Familiar · 🔴 Don&apos;t know. Use the coloured map or outline to mark topics.</p>
+              <Mermaid code={view.mindmap} zoom />
+            </>
+          )}
           {mode === "outline" && (
             <div className="card">
               <Outline nodes={view.tree} selected={selected} onSelect={setSelected} onMark={mark} />
@@ -325,7 +390,7 @@ function TopicPanel({
           <div className="muted">Connected in other courses</div>
           {related.map((r) => (
             <div key={r.topic_id} style={{ marginTop: 4 }}>
-              <a href={`/courses/${r.course_id}#brainmap`}>{r.course_name}</a>: <strong>{r.title}</strong>
+              <a href={`/courses/${r.course_id}?topic=${r.topic_id}#brainmap`}>{r.course_name}</a>: <strong>{r.title}</strong>
               {r.relation && <div className="muted">{r.relation}</div>}
             </div>
           ))}

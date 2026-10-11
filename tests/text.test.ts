@@ -61,8 +61,19 @@ describe("brainmap", () => {
     expect(tree[0].children[0].effective_mastery).toBe("know");
     const flow = toFlowchart("ML", tree);
     expect(flow.code).toContain(':::know');
-    expect(flow.code).toContain("#quot;");
+    expect(flow.code).toContain("#34;");
     expect(Object.values(flow.nodeIds)).toEqual(["a", "b"]);
+    const big = buildTree(
+      Array.from({ length: 60 }, (_, i) => ({
+        id: `t${i}`, course_id: "c", parent_id: i < 3 ? null : i < 12 ? `t${i % 3}` : `t${3 + (i % 9)}`, title: `T${i}`, summary: "", keywords: [], material_ids: [], importance: 2, position: i, mastery: null, achieved_depth: 0,
+      })),
+    );
+    const collapsed = toFlowchart("Big", big);
+    expect(collapsed.collapsed).toBe(true);
+    expect(collapsed.code).toMatch(/\(\+\d+\)/);
+    expect(Object.values(collapsed.nodeIds)).not.toContain("t20");
+    const focused = toFlowchart("Big", big, { focusId: "t5" });
+    expect(Object.values(focused.nodeIds)).toContain("t20"); // a child of t5
     const mind = toMindmap("ML (intro)", tree);
     expect(mind).toMatch(/^mindmap/);
     expect(mind).not.toMatch(/\(x\)/);

@@ -9,6 +9,7 @@ import { Snippet } from "@/components/Markdown";
 interface Hit {
   type: "topic" | "material";
   id: string;
+  topic_id?: string;
   course_id: string;
   course_name: string;
   title: string;
@@ -99,7 +100,7 @@ export default function KnowledgePage() {
                 <span className={`badge ${h.type === "topic" ? "accent" : ""}`}>{h.type === "topic" ? "Topic" : "Material"}</span>
                 <div className="grow">
                   <div>
-                    <Link href={`/courses/${h.course_id}#${h.type === "topic" ? "brainmap" : "materials"}`}>
+                    <Link href={h.type === "topic" ? `/courses/${h.course_id}?topic=${h.topic_id}#brainmap` : `/courses/${h.course_id}#materials`}>
                       <strong>{h.title}</strong>
                     </Link>{" "}
                     <span className="small muted">· {h.course_name}</span>
@@ -116,15 +117,16 @@ export default function KnowledgePage() {
 
       <div className="card stack">
         <div className="spread">
-          <h2 style={{ margin: 0 }}>Connections between courses</h2>
+          <h2 style={{ margin: 0 }}>Connections</h2>
           <button className="primary" onClick={rebuild} disabled={busy}>
             {busy && <span className="spinner" />} {busy ? "Linking topics…" : graph?.links.length ? "Rebuild links" : "Build links"}
           </button>
         </div>
         <p className="small muted" style={{ margin: 0 }}>
-          ziLearn compares every topic across your courses and links the ones that overlap. Rebuild after adding courses or rebuilding a brainmap.
+          ziLearn links topics that overlap, across courses and between distant parts of the same course. Links update automatically when a brainmap is built;
+          {" "}&ldquo;Rebuild links&rdquo; also asks Claude to check them and explain each connection.
         </p>
-        {graph && graph.courses.length < 2 && <div className="alert info">Add at least two courses with brainmaps to see connections.</div>}
+        {graph && graph.courses.length < 2 && <div className="alert info">Links appear between related topics. Add more courses to connect them with each other.</div>}
         {graph?.mermaid && <Mermaid code={graph.mermaid} />}
         {graph && graph.links.length > 0 && (
           <div className="list">
@@ -132,8 +134,8 @@ export default function KnowledgePage() {
               <div key={l.id} className="list-item">
                 <div className="grow">
                   <div>
-                    <Link href={`/courses/${l.from.course_id}#brainmap`}>{l.from.title}</Link> <span className="small muted">({l.from.course_name})</span> ↔{" "}
-                    <Link href={`/courses/${l.to.course_id}#brainmap`}>{l.to.title}</Link> <span className="small muted">({l.to.course_name})</span>
+                    <Link href={`/courses/${l.from.course_id}?topic=${l.from.id}#brainmap`}>{l.from.title}</Link> <span className="small muted">({l.from.course_name})</span> ↔{" "}
+                    <Link href={`/courses/${l.to.course_id}?topic=${l.to.id}#brainmap`}>{l.to.title}</Link> <span className="small muted">({l.to.course_name})</span>
                   </div>
                   {l.relation && <div className="small muted">{l.relation}</div>}
                 </div>

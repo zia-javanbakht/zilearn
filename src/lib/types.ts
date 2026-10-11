@@ -34,10 +34,30 @@ export const MASTERY_LABELS: Record<Mastery, string> = {
 
 /** Progressive depth levels. Each study iteration goes one level deeper. */
 export const DEPTH_LEVELS = [
-  { level: 1, name: "Survey", goal: "Get the big picture: what it is, why it matters, key terms." },
-  { level: 2, name: "Understand", goal: "Explain the ideas in your own words and see how they connect." },
-  { level: 3, name: "Apply", goal: "Work problems and examples; use the ideas in exam-style questions." },
-  { level: 4, name: "Master", goal: "Handle edge cases, compare and critique, teach it back from memory." },
+  {
+    level: 1,
+    name: "Survey",
+    goal: "Get the big picture: what it is, why it matters, the 3-5 key terms, and one intuitive example.",
+    lesson: "A short orientation (no derivations): a plain-language explanation, the key terms with one-line definitions, one intuitive example or analogy, and why it matters for the course.",
+  },
+  {
+    level: 2,
+    name: "Understand",
+    goal: "Explain how and why it works in your own words, and how it connects to neighbouring topics.",
+    lesson: "Open with 2 quick recall questions on the level 1 ideas. Then explain the mechanism or reasoning step by step, the main definitions/results precisely, common misconceptions, and how it links to its sibling topics.",
+  },
+  {
+    level: 3,
+    name: "Apply",
+    goal: "Solve exam-style problems with it: two worked examples, then problems on your own.",
+    lesson: "Open with 2 recall questions on the level 2 ideas. Then give 2 fully worked exam-style examples with reasoning shown, a checklist of steps/pitfalls, and 2-3 unsolved practice problems (answers in a <details> block).",
+  },
+  {
+    level: 4,
+    name: "Master",
+    goal: "Handle edge cases, compare with related ideas, critique, and teach it back from memory.",
+    lesson: "Open with 2 recall questions on applying it. Then cover edge cases and limitations, compare and contrast with related topics, one hard multi-step or 'explain why' exam question with a model answer, and a teach-back prompt.",
+  },
 ] as const;
 
 export interface Course {
@@ -87,13 +107,15 @@ export interface TopicNode extends Topic {
   effective_mastery: Mastery | null;
 }
 
+export type PlanItemKind = "study" | "checkpoint" | "diagnostic" | "overview" | "synthesis" | "recall" | "final";
+
 export interface PlanItem {
   id: string;
   plan_id: string;
   day: number;
   date: string;
   iteration: number;
-  kind: "study" | "checkpoint";
+  kind: PlanItemKind;
   topic_id: string | null;
   topic_title: string;
   depth: number;

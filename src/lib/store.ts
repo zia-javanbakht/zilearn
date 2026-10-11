@@ -314,6 +314,15 @@ export function setAchievedDepth(topicId: string, depth: number) {
   db().prepare("UPDATE topics SET achieved_depth = MAX(achieved_depth, ?) WHERE id = ?").run(depth, topicId);
 }
 
+/** Record that a topic was studied to a depth from a lesson, ticking matching plan sessions. */
+export function completeTopicDepth(topicId: string, depth: number): number {
+  const d = db();
+  return d.transaction(() => {
+    setAchievedDepth(topicId, depth);
+    return d.prepare("UPDATE plan_items SET done = 1 WHERE topic_id = ? AND kind = 'study' AND depth <= ? AND done = 0").run(topicId, depth).changes;
+  })();
+}
+
 /* ---------------- Lessons ---------------- */
 
 export function getLesson(topicId: string, depth: number): { content: string; generated_by: string } | null {
@@ -333,9 +342,15 @@ export function saveLesson(topicId: string, depth: number, content: string, gene
 
 /* ---------------- Plans ---------------- */
 
+/**
+ * Save a new plan for the course. Completed sessions of the previous plan are kept
+ * as history at the top, so rescheduling never loses what was already done.
+ */
 export function savePlan(plan: Omit<Plan, "id" | "created_at" | "items"> & { items: Omit<PlanItem, "id" | "plan_id">[] }): Plan {
   const d = db();
   const id = newId();
+  const history = (getPlan(plan.course_id)?.items ?? []).filter((i) => i.done && i.date < plan.start_date);
+  const items = [...history.map((h) => ({ ...h })), ...plan.items].map((it, position) => ({ ...it, position }));
   d.transaction(() => {
     d.prepare("DELETE FROM plans WHERE course_id = ?").run(plan.course_id);
     d.prepare(
@@ -345,7 +360,7 @@ export function savePlan(plan: Omit<Plan, "id" | "created_at" | "items"> & { ite
       `INSERT INTO plan_items (id, plan_id, day, date, iteration, kind, topic_id, topic_title, depth, minutes, activities, done, position)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
-    for (const it of plan.items) {
+    for (const it of items) {
       ins.run(newId(), id, it.day, it.date, it.iteration, it.kind, it.topic_id, it.topic_title, it.depth, it.minutes, JSON.stringify(it.activities), it.done ? 1 : 0, it.position);
     }
   })();
@@ -367,7 +382,7 @@ export function setPlanItemDone(itemId: string, done: boolean): PlanItem | null 
   const r = d.prepare("SELECT * FROM plan_items WHERE id = ?").get(itemId) as Row | undefined;
   if (!r) return null;
   const item = { ...(r as unknown as PlanItem), activities: json<string[]>(r.activities, []), done: r.done === 1 };
-  if (done && item.topic_id) setAchievedDepth(item.topic_id, item.depth);
+  if (done && item.topic_id && item.kind === "study") setAchievedDepth(item.topic_id, item.depth);
   return item;
 }
 
