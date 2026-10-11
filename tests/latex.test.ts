@@ -8,6 +8,7 @@ export const SAMPLE: LessonDoc = {
   depth: 2,
   level: "Understand",
   goal: "Explain why it works and how the parts fit together.",
+  objectives: ["Explain why a small step size converges.", "Compute one step by hand."],
   where_it_fits: "It builds on **derivatives** and leads to *stochastic* methods.",
   map: {
     course: "Machine Learning 101",
@@ -18,7 +19,10 @@ export const SAMPLE: LessonDoc = {
     related: [{ course: "Numerical Methods", title: "Newton's method", relation: "second-order cousin" }],
   },
   recall: [{ question: "What is a gradient?", answer: "The vector of partial derivatives, $\\nabla f$." }],
-  blocks: [
+  sections: [
+    {
+      heading: "The update rule and $\\eta$",
+      blocks: [
     { kind: "definition", title: "Update rule", body: "Each step moves against the gradient:\n\n$$\\theta_{k+1} = \\theta_k - \\eta \\nabla f(\\theta_k)$$\n\nwhere $\\eta > 0$ is the step size." },
     { kind: "intuition", title: "Walking downhill", body: "Like walking down a foggy hill: feel the slope, take a step." },
     { kind: "formula", title: "Convergence for $L$-smooth $f$", body: "If $\\eta \\le 1/L$ then $f(\\theta_{k+1}) \\le f(\\theta_k)$." },
@@ -27,17 +31,19 @@ export const SAMPLE: LessonDoc = {
     { kind: "pitfall", title: "Too large a step", body: "With $\\eta > 2/L$ the iterates diverge (100% of the time on $x^2$)." },
     { kind: "comparison", title: "GD vs Newton", body: "| Method | Cost per step | Rate |\n|---|---|---|\n| GD | $O(n)$ | linear |\n| Newton | $O(n^3)$ | quadratic |" },
     { kind: "keypoint", title: "Scale matters", body: "Rescale features so one `eta` suits every direction." },
-    { kind: "note", title: "Further reading", body: "See [Boyd & Vandenberghe](https://web.stanford.edu/~boyd/cvxbook/#book) ch. 9." },
+    { kind: "note", title: "Further reading", body: "See [Boyd & Vandenberghe](https://web.stanford.edu/~boyd/cvxbook/#book) ch. 9.", source: "Lecture 3 slides [p. 4]" },
+      ],
+    },
   ],
-  key_points: ["Step against the gradient.", "Step size $\\eta$ trades speed for stability."],
-  common_mistakes: ["Forgetting the minus sign.", "Using one learning rate for badly scaled features_like_this."],
+  glossary: [{ term: "Step size $\\eta$", meaning: "How far each step moves; too big diverges." }],
+  common_mistakes: [{ mistake: "Forgetting the minus sign.", correction: "Step *against* the gradient." }, { mistake: "Using one learning rate for badly scaled features_like_this.", correction: "" }],
   connections: [{ topic: "Newton's method", relation: "uses curvature as well as slope" }],
   check_yourself: [
-    { question: "Why must $\\eta$ be small enough?", answer: "Otherwise the step overshoots and $f$ can increase." },
+    { question: "Why must $\\eta$ be small enough?", answer: "Otherwise the step overshoots and $f$ can increase.", kind: "explain", hint: "Think of $x^2$." },
     { question: "What happens on $f(x)=x^2$ with $\\eta = 1$?", answer: "$x_{k+1} = -x_k$: it oscillates forever." },
   ],
   takeaways: ["Gradient descent is local and first-order.", "Tune $\\eta$ against the smoothness $L$."],
-  read: ["Lecture 3 slides", "Week 2 notes #1"],
+  read: [{ title: "Lecture 3 slides", focus: "p. 4" }, { title: "Week 2 notes #1", focus: "" }],
   by: "claude",
 };
 
@@ -58,6 +64,17 @@ describe("LaTeX export", () => {
     expect(out).not.toContain("graph LR");
   });
 
+  it("keeps display maths and paragraphs inside list items, and numbering across loose lists", () => {
+    const out = blockTex("1. Find $\\omega_n$:\n\n   $$\\omega_n = 20$$\n\n2. Then **$T_n$ = 0.31 s**.\n\n3. Done.");
+    expect(out).toBe("\\begin{enumerate}\n\\item Find $\\omega_n$:\n\n\\[\\omega_n = 20\\]\n\\item Then \\textbf{$T_n$ = 0.31 s}.\n\\item Done.\n\\end{enumerate}");
+    expect(blockTex("Intro\n\n3. third\n4. fourth")).toContain("\\begin{enumerate}[start=3]");
+  });
+
+  it("turns KaTeX-only shorthands into LaTeX", () => {
+    expect(safeMath("$x \\in \\R, \\bm{u}, 30\\degree, a=b \\tag{2}$")).toBe("$x \\in \\mathbb{R}, \\symbf{u}, 30^{\\circ}, a=b \\qquad(2)$");
+    expect(safeMath("$\\Rightarrow \\Nu$")).toBe("$\\Rightarrow \\Nu$");
+  });
+
   it("keeps one-line display maths and strips file commands from maths", () => {
     expect(blockTex("$$a = b$$\ntext")).toBe("\\[a = b\\] text");
     expect(safeMath("$\\input{/etc/passwd} \\immediate\\write18{x} \\inputs$")).toBe("${/etc/passwd} {x} \\inputs$");
@@ -70,7 +87,9 @@ describe("LaTeX export", () => {
     expect(t).toContain("\\begin{definition}[Update rule]");
     expect(t).toContain("\\begin{intuition}[Walking downhill]");
     expect(t).toContain("\\begin{nobox}[Pitfall: Too large a step]");
-    expect(t).toContain("\\begin{chbox}[Key points]");
+    expect(t).toContain("\\begin{blbox}[Glossary]\n\\begin{tabularx}");
+    expect(t).toContain("\\section{\\texorpdfstring{The update rule and $\\eta$}{The update rule and}}");
+    expect(t).toContain("\\begin{qubox}[Note: Further reading][Lecture 3 slides {[}p. 4{]}]");
     expect(t).toContain("\\begin{subox}[Critical Takeaways]");
     expect(t).toContain("child[concept color=DarkOrange1!70] { node {Newton's method (Numerical Methods)} }");
     expect(t).toContain("\\title{Gradient descent \\& step sizes}");
@@ -85,7 +104,9 @@ describe("LaTeX export", () => {
     const md = lessonToMarkdown(SAMPLE);
     expect(md).toContain('<div class="lb lb-definition">');
     expect(md).toContain("```mermaid\nflowchart LR");
-    expect(md).toContain("<details><summary>Solution</summary>");
+    expect(md).toContain("<details><summary>Worked solution</summary>");
+    expect(md).toContain("| **Step size $\\eta$** | How far each step moves; too big diverges. |");
+    expect(md).toContain("### The update rule and $\\eta$");
     expect(md).toContain("- **Newton's method**: uses curvature as well as slope");
   });
 });

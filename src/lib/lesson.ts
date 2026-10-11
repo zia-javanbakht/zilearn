@@ -1,9 +1,12 @@
 import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
-import { excerptsFor } from "./kb";
+import { sourcesFor } from "./kb";
+import { checkLesson } from "./lessonCheck";
+import { offlineLesson } from "./lessonOffline";
+import { diagramMermaid, figureProblems, FigureSchema, type Figure } from "./figure";
 import { buildTree, flattenTree, getCourse, getLesson, getTopic, getTopicsByIds, linksForTopic, listCourses, listMaterials, listTopics } from "./store";
 import { truncate } from "./text";
-import { DEPTH_LEVELS, MASTERY_LABELS, type Mastery } from "./types";
+import { DEPTH_LEVELS, MASTERY_LABELS, MATERIAL_KIND_LABELS, type MaterialKind, type Mastery } from "./types";
 
 /**
  * Lessons as structured documents: categorised blocks (definitions, key points, intuitions, examples,
@@ -21,11 +24,27 @@ export interface LessonBlock {
   title: string;
   body: string; // Markdown with $LaTeX$
   solution?: string | null; // worked solution, for examples
+  source?: string | null; // where in the student's materials, e.g. "Lecture 3 recording [12:30]"
+  figure?: Figure | null;
 }
+
+export interface LessonSection {
+  heading: string;
+  blocks: LessonBlock[];
+}
+
+export const QUESTION_KINDS = ["recall", "explain", "apply", "transfer"] as const;
 
 export interface QA {
   question: string;
   answer: string;
+  kind?: (typeof QUESTION_KINDS)[number];
+  hint?: string | null;
+}
+
+export interface Mistake {
+  mistake: string;
+  correction: string;
 }
 
 export interface LessonMap {
@@ -38,54 +57,92 @@ export interface LessonMap {
 }
 
 export interface LessonDoc {
+  version?: 2;
   title: string;
   depth: number;
   level: string;
   goal: string;
+  objectives: string[];
   where_it_fits: string;
   map: LessonMap;
   recall: QA[];
-  blocks: LessonBlock[];
-  key_points: string[];
-  common_mistakes: string[];
+  sections: LessonSection[];
+  glossary: { term: string; meaning: string }[];
+  common_mistakes: Mistake[];
   connections: { topic: string; relation: string }[];
   check_yourself: QA[];
   takeaways: string[];
-  read: string[]; // material titles to look at
+  read: { title: string; focus: string }[];
   by: "claude" | "heuristic";
-  truncated?: boolean;
+  /** Lessons saved before sections and the glossary: a flat block list and key points. */
+  blocks?: LessonBlock[];
+  key_points?: string[];
 }
 
-const QASchema = z.object({ question: z.string(), answer: z.string().describe("Concise model answer") });
+/** Brings a lesson saved by an earlier version to the current shape. */
+export function normalizeDoc(raw: LessonDoc): LessonDoc {
+  const d = raw as LessonDoc & { common_mistakes: (Mistake | string)[]; read: ({ title: string; focus: string } | string)[] };
+  return {
+    ...d,
+    objectives: d.objectives ?? [],
+    sections: d.sections ?? (d.blocks?.length ? [{ heading: "Lesson", blocks: d.blocks }] : []),
+    glossary: d.glossary ?? [],
+    common_mistakes: (d.common_mistakes ?? []).map((m) => (typeof m === "string" ? { mistake: m, correction: "" } : m)),
+    read: (d.read ?? []).map((r) => (typeof r === "string" ? { title: r, focus: "" } : r)),
+    check_yourself: d.check_yourself ?? [],
+    recall: d.recall ?? [],
+  };
+}
 
-const LessonSchema = z.object({
-  where_it_fits: z.string().describe("2-3 sentences placing the topic in the course map: what it builds on, what it leads to"),
-  recall: z.array(QASchema).describe("Warm-up questions on the previous level (empty for level 1)"),
-  blocks: z
-    .array(
-      z.object({
-        kind: z.enum(BLOCK_KINDS),
-        title: z.string().describe("Short title of the block"),
-        body: z.string().describe("Markdown; maths in LaTeX ($...$ inline, $$...$$ display)"),
-        solution: z.string().nullable().describe("Fully worked solution for an example, otherwise null"),
-      }),
-    )
-    .describe("The lesson itself, in teaching order"),
-  key_points: z.array(z.string()).describe("3-7 key points to remember"),
-  common_mistakes: z.array(z.string()).describe("Typical misconceptions or errors (may be empty at level 1)"),
-  connections: z.array(z.object({ topic: z.string(), relation: z.string() })).describe("How this topic relates to the named neighbouring or related topics"),
-  check_yourself: z.array(QASchema).describe("3-5 questions at this level, with answers"),
-  takeaways: z.array(z.string()).describe("3-5 critical takeaways"),
-  read: z.array(z.string()).describe("Titles of the student's materials worth reading for this topic"),
+const QASchema = z.object({
+  question: z.string(),
+  answer: z.string().describe("Model answer: the reasoning in brief and the result, with units"),
+  kind: z.enum(QUESTION_KINDS).describe("recall a fact, explain why, apply to a problem, or transfer to a new situation"),
+  hint: z.string().nullable().describe("A nudge that doesn't give the answer away, or null"),
 });
 
-/** What each level emphasises, in terms of the block kinds. */
+const BlockSchema = z.object({
+  kind: z.enum(BLOCK_KINDS),
+  title: z.string().describe("Short title naming the idea (not the kind): e.g. 'Why the envelope is exponential'"),
+  body: z.string().describe("Markdown; maths in KaTeX-compatible LaTeX ($...$ inline, $$...$$ display)"),
+  solution: z.string().nullable().describe("For examples: the full worked solution as numbered steps, ending with the boxed or bold result and a sanity check. Otherwise null"),
+  source: z.string().nullable().describe("Where this comes from in the sources: the source title plus a timestamp, section or question number, e.g. 'Lecture 3 recording [12:30]'. Null if it isn't from them"),
+  figure: FigureSchema,
+});
+
+export const LessonSchema = z.object({
+  objectives: z.array(z.string()).describe("2-4 things the student can do after this pass, each starting with a verb (Explain, Compute, Choose...)"),
+  where_it_fits: z.string().describe("2-3 sentences placing the topic in the course map: what it builds on, what it leads to"),
+  recall: z.array(QASchema).describe("Warm-up questions on the previous level (empty for level 1)"),
+  sections: z
+    .array(z.object({ heading: z.string().describe("A heading that says what the section teaches"), blocks: z.array(BlockSchema) }))
+    .describe("The lesson itself in teaching order, in 2-5 sections"),
+  glossary: z.array(z.object({ term: z.string(), meaning: z.string().describe("One line; the symbol and units if it has them") })).describe("The key terms and symbols used, 3-8"),
+  common_mistakes: z.array(z.object({ mistake: z.string(), correction: z.string().describe("What is right instead, and how to avoid the slip") })).describe("Typical misconceptions or errors (may be empty at level 1)"),
+  connections: z.array(z.object({ topic: z.string().describe("Exact topic name from the brainmap"), relation: z.string() })).describe("How this topic relates to the named neighbouring, sub- and cross-course topics"),
+  check_yourself: z.array(QASchema).describe("3-5 questions at this level, with answers"),
+  takeaways: z.array(z.string()).describe("3-5 critical takeaways: the ideas to keep if everything else is forgotten, not a repeat of the glossary"),
+  read: z.array(z.object({ title: z.string().describe("Exact source title"), focus: z.string().describe("What to look at there and why: a section, timestamp or question") })).describe("The student's materials worth going back to"),
+});
+
+/** What each level teaches, in terms of the block kinds. */
 const LEVEL_BLOCKS: Record<number, string> = {
-  1: "1-2 definitions, 1-2 intuitions (analogies, pictures in words), 1 simple example, key points. No derivations.",
-  2: "definitions stated precisely, intuitions for why it works, a procedure or formula block for the mechanism, 1-2 examples, pitfalls, and a comparison with a neighbouring topic.",
-  3: "the formulas and procedures needed, 2 fully worked exam-style examples (with solutions), pitfalls, and practice problems in check_yourself.",
-  4: "edge cases and limitations (pitfall/note blocks), comparisons with related topics, one hard worked example, and key points that tie it to the rest of the course.",
+  1: `Big picture only, about 600-900 words. Start from the phenomenon or problem the topic solves, then the idea in plain words (intuition blocks with an analogy or a picture in words), 1-2 definition blocks stating the key terms simply, and one short example that needs no derivation. No derivations, no exam-style problems.`,
+  2: `How and why it works, about 1000-1500 words. Precise definitions; intuition for each step of the mechanism; a formula block for each key result, saying what every symbol means and when it applies; the reasoning or derivation in short steps; 1-2 examples; pitfall blocks for the misconceptions; and a comparison block with a neighbouring or related topic.`,
+  3: `Problem solving, about 1200-2000 words. A procedure block with the solution method as numbered steps; the formula blocks needed (with units); 2 fully worked exam-style examples of increasing difficulty, styled on the tutorial and exam questions in the sources but with different numbers; pitfall blocks for the errors students make in exams. check_yourself holds 3-4 practice problems (kind "apply") with worked answers.`,
+  4: `Mastery, about 1000-1800 words. Assumptions, limitations and edge cases (when the model breaks down), comparison blocks with related topics in this and other courses, one hard multi-step or 'explain why' exam question worked fully, and a teach-back note asking the student to explain it from memory. check_yourself mixes "explain" and "transfer" questions.`,
 };
+
+const RULES = `How to write it:
+- Teach, don't summarise. Concrete before abstract: motivate with the situation or phenomenon, then give the idea, then the formal statement.
+- Use the student's sources as the backbone: their notation, their symbols, their examples and their lecturer's advice. Where a block comes from a source, set source to its title plus a timestamp, section or question number. You may add standard textbook knowledge to fill gaps, but never contradict the sources.
+- Each block teaches one idea. Titles name the idea. Don't repeat the same point across blocks, glossary and takeaways.
+- Worked solutions: numbered steps, each saying what is done and why; carry units; finish with the result in bold and a quick sanity check (order of magnitude, limiting case or units).
+- Maths: KaTeX-compatible LaTeX only. $...$ inline and $$...$$ display on their own lines; for multi-line working use $$\\begin{aligned} ... \\end{aligned}$$. No \\( \\), no \\[ \\], no equation/align environments, no \\label or \\eqref, no custom macros.
+- Markdown only: bold, italics, lists and pipe tables. No HTML, no headings inside blocks, no Mermaid or ASCII diagrams: draw with figure instead.
+- Figures: give a block a figure when a picture teaches better than words: a plot of the response or relationship (substitute realistic numbers so it can be drawn), or a diagram of a process, classification or cause and effect. About 1-3 per lesson; never decorative.
+- Use the brainmap: where_it_fits says what this builds on and leads to; connections explain the link to each neighbouring, sub- and cross-course topic named above, using their exact names.
+- British spelling. Plain, direct sentences; avoid em dashes.`;
 
 /** Where a topic sits in its course brainmap and how it links to other courses. */
 export function lessonMap(topicId: string): LessonMap & { mastery: Mastery | null; summary: string; keywords: string[]; material_ids: string[] } {
@@ -119,18 +176,17 @@ export function lessonMap(topicId: string): LessonMap & { mastery: Mastery | nul
   };
 }
 
-export async function generateLessonDoc(topicId: string, depth: number): Promise<LessonDoc> {
+/** Everything the AI is sent for a lesson: the sources (cached context) and the instructions. */
+export function lessonRequest(topicId: string, depth: number) {
   const topic = getTopic(topicId)!;
   const d = Math.min(4, Math.max(1, depth));
   const level = DEPTH_LEVELS[d - 1];
   const map = lessonMap(topicId);
-  const excerpts = excerptsFor(topic.course_id, `${topic.title} ${topic.keywords.join(" ")}`, 20000, topic.material_ids);
+  const sources = sourcesFor(topic.course_id, `${topic.title} ${topic.keywords.join(" ")}`, 24000, topic.material_ids);
   const materials = listMaterials(topic.course_id).filter((m) => topic.material_ids.includes(m.id));
   const head = { title: topic.title, depth: d, level: level.name, goal: level.goal, map: stripMap(map) };
-
-  if (!aiEnabled()) return offlineLesson(head, map, excerpts, materials.map((m) => m.title));
-
-  const previous = d > 1 ? getLesson(topic.id, d - 1) : null;
+  const prev = d > 1 ? getLesson(topic.id, d - 1) : null;
+  const previous = prev ? (prev.doc ? lessonOutline(normalizeDoc(prev.doc)) : truncate(prev.content, 6000)) : null;
   const mapText = [
     `Course: ${map.course}`,
     `Path in the brainmap: ${[...map.path, topic.title].join(" > ")}`,
@@ -141,74 +197,60 @@ export async function generateLessonDoc(topicId: string, depth: number): Promise
   ]
     .filter(Boolean)
     .join("\n");
+  const context = sources.length
+    ? sources.map((x) => `<source title="${x.title.replace(/"/g, "'")}" type="${MATERIAL_KIND_LABELS[x.kind as MaterialKind] ?? x.kind}">\n${x.text}\n</source>`).join("\n\n")
+    : "<source>(no matching material found)</source>";
+  const prompt = `Above are the student's own materials for this topic.
 
-  const out = await generateStructured({
-    schema: LessonSchema,
-    effort: "medium",
-    maxTokens: 20000,
-    context: `<sources>\n${excerpts.join("\n\n---\n\n") || "(no excerpts found)"}\n</sources>`,
-    prompt: `${mapText}
+<brainmap>
+${mapText}
 Topic: ${topic.title}
 Topic summary: ${topic.summary}
-Key terms: ${topic.keywords.join(", ")}
+Key terms: ${topic.keywords.join(", ") || "(none listed)"}
 Student's self-assessment: ${map.mastery ? MASTERY_LABELS[map.mastery] : "not marked"}
-Materials on this topic: ${materials.map((m) => m.title).join("; ") || "(none)"}
-${previous ? `\nThe student studied the previous level already; build on it, don't repeat it:\n<previous_lesson>\n${truncate(previous.content, 6000)}\n</previous_lesson>\n` : ""}
-Above are excerpts from the student's own materials on this topic.
-
-Write a lesson on this topic for pass ${d} of 4, the "${level.name}" level: ${level.goal}
+</brainmap>
+${previous ? `\nThe student has done the level ${d - 1} lesson; build on it and don't repeat it:\n<previous_lesson>\n${previous}\n</previous_lesson>\n` : ""}
+Write the lesson on "${topic.title}" for pass ${d} of 4, the "${level.name}" level: ${level.goal}
 Earlier passes covered shallower levels and later ones go deeper, so teach exactly this depth.
-${level.lesson}
 
-Organise it into categorised blocks. At this level use: ${LEVEL_BLOCKS[d]}
-- Use the brainmap: say in where_it_fits what this topic builds on and leads to, and in connections explain how it relates to the neighbouring, sub- and cross-course topics named above (use their exact names).
-- Ground the content in the student's materials; name the ones worth reading in read.
-- Maths in LaTeX ($...$ inline, $$...$$ display). No Mermaid diagrams (the map is drawn separately).
-${d === 1 ? "- recall: empty." : "- recall: 2 quick questions on the previous level."}`,
-  });
+At this level: ${LEVEL_BLOCKS[d]}
+${d === 1 ? "recall: empty." : `recall: 2 quick questions on the level ${d - 1} ideas.`}
+
+${RULES}`;
+  return { topic, head, map, sources, materials, context, prompt };
+}
+
+export async function generateLessonDoc(topicId: string, depth: number): Promise<LessonDoc> {
+  const { head, map, sources, context, prompt } = lessonRequest(topicId, depth);
+  if (!aiEnabled()) return offlineLesson(head, { summary: map.summary, keywords: map.keywords, mastery: map.mastery }, sources);
+  const out = await generateStructured({ schema: LessonSchema, effort: "medium", maxTokens: 20000, context, prompt });
+  return checkLesson(fromAi(head, out));
+}
+
+/** The AI's answer, tidied, as a lesson document. */
+export function fromAi(head: Pick<LessonDoc, "title" | "depth" | "level" | "goal" | "map">, out: z.infer<typeof LessonSchema>): LessonDoc {
   return {
+    version: 2,
     ...head,
     by: "claude",
-    where_it_fits: out.where_it_fits,
+    ...out,
     recall: out.recall.slice(0, 4),
-    blocks: out.blocks.map((b) => ({ ...b, solution: b.solution || null })),
-    key_points: out.key_points,
-    common_mistakes: out.common_mistakes,
-    connections: out.connections,
-    check_yourself: out.check_yourself,
-    takeaways: out.takeaways,
-    read: out.read,
+    sections: out.sections.filter((x) => x.blocks.length).map((x) => ({ ...x, blocks: x.blocks.map((b) => ({ ...b, solution: b.solution || null, source: b.source || null, figure: b.figure && !figureProblems(b.figure).length ? b.figure : null })) })),
   };
+}
+
+/** A short outline of a lesson, to tell the next level what was covered. */
+export function lessonOutline(doc: LessonDoc): string {
+  return [
+    ...doc.sections.map((x) => `${x.heading}: ${x.blocks.map((b) => `${b.kind} "${b.title}"`).join("; ")}`),
+    doc.takeaways.length ? `Takeaways: ${doc.takeaways.join(" ")}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function stripMap(m: ReturnType<typeof lessonMap>): LessonMap {
   return { course: m.course, path: m.path, children: m.children, before: m.before, after: m.after, related: m.related };
-}
-
-/** Without an AI: the topic's own summary and terms, the map, and passages from the student's materials. */
-function offlineLesson(head: Pick<LessonDoc, "title" | "depth" | "level" | "goal" | "map">, map: ReturnType<typeof lessonMap>, excerpts: string[], read: string[]): LessonDoc {
-  const t = head.title;
-  const neighbours = [...map.before.map((x) => ({ topic: x, relation: "comes before it in the course; review it first" })), ...map.after.map((x) => ({ topic: x, relation: "builds on it" }))];
-  return {
-    ...head,
-    by: "heuristic",
-    where_it_fits: `**${t}** is part of ${map.path.length ? `*${map.path.join(" › ")}*` : `*${map.course}*`}.${map.before.length ? ` It follows ${map.before.join(", ")}.` : ""}${map.after.length ? ` It leads to ${map.after.join(", ")}.` : ""}`,
-    recall: head.depth > 1 ? [{ question: `Explain ${t} in two sentences.`, answer: map.summary || "Check your notes." }] : [],
-    blocks: [
-      { kind: "definition", title: t, body: map.summary || `${t}, as covered in your materials.` },
-      ...excerpts.slice(0, head.depth + 1).map((e, i) => ({ kind: "note" as const, title: `From your materials (${i + 1})`, body: truncate(e, 1500) })),
-    ],
-    key_points: map.keywords.length ? map.keywords.map((k) => `Know what **${k}** means and how it is used in ${t}.`) : [`Explain ${t} without notes.`],
-    common_mistakes: [],
-    connections: [...neighbours, ...map.children.map((c) => ({ topic: c.title, relation: "a subtopic" })), ...map.related.map((r) => ({ topic: `${r.title} (${r.course})`, relation: r.relation ?? "a similar idea in another course" }))],
-    check_yourself: [
-      { question: `Can you explain ${t} in two sentences without notes?`, answer: map.summary || "Compare with your sources." },
-      ...(head.depth >= 2 ? [{ question: `How does ${t} connect to the topics around it?`, answer: "See Connections." }] : []),
-      ...(head.depth >= 3 ? [{ question: `Solve one problem that uses ${t}.`, answer: "Check against your sources." }] : []),
-    ],
-    takeaways: [map.summary || t].filter(Boolean),
-    read,
-  };
 }
 
 /* ---------------- Markdown (the app) ---------------- */
@@ -249,25 +291,51 @@ export function lessonMermaid(doc: LessonDoc): string {
   return lines.filter(Boolean).join("\n");
 }
 
-export function lessonToMarkdown(doc: LessonDoc): string {
+const KIND_TAG: Record<string, string> = { recall: "Recall", explain: "Explain", apply: "Apply", transfer: "Transfer" };
+
+function questions(qs: QA[], answerLabel: string): string {
+  const list = qs.map((q, i) => `${i + 1}. ${q.kind ? `*${KIND_TAG[q.kind]}.* ` : ""}${q.question}${q.hint ? `\n\n   ${details("Hint", q.hint)}` : ""}`).join("\n");
+  return `${list}\n\n${details(answerLabel, qs.map((q, i) => `**${i + 1}.** ${q.answer}`).join("\n\n"))}`;
+}
+
+export function lessonToMarkdown(raw: LessonDoc): string {
+  const doc = normalizeDoc(raw);
   const out: string[] = [];
+  if (doc.objectives.length) out.push(`<div class="lb lb-goal">\n\n**🎯 By the end of this pass you can**\n\n${doc.objectives.map((o) => `- ${o}`).join("\n")}\n\n</div>`);
   out.push(`### Where this fits\n\n${doc.where_it_fits}`);
   if (doc.map.path.length || doc.map.children.length || doc.map.before.length || doc.map.after.length || doc.map.related.length)
     out.push("```mermaid\n" + lessonMermaid(doc) + "\n```");
-  if (doc.recall.length) out.push(`### Warm-up\n\n${doc.recall.map((r, i) => `${i + 1}. ${r.question}`).join("\n")}\n\n${details("Answers", doc.recall.map((r, i) => `${i + 1}. ${r.answer}`).join("\n"))}`);
-  for (const b of doc.blocks) {
-    const sol = b.solution ? `\n\n${details("Solution", b.solution)}` : "";
-    // A coloured box per kind (styled in globals.css), like the Z class's boxes in print.
-    out.push(`<div class="lb lb-${b.kind}">\n\n**${BLOCK_ICON[b.kind]} ${BLOCK_LABEL[b.kind]}: ${b.title}**\n\n${b.body}${sol}\n\n</div>`);
+  if (doc.recall.length) out.push(`### Warm-up\n\n${questions(doc.recall, "Answers")}`);
+  for (const sec of doc.sections) {
+    out.push(`### ${sec.heading}`);
+    for (const b of sec.blocks) {
+      const sol = b.solution ? `\n\n${details("Worked solution", b.solution)}` : "";
+      const src = b.source ? `\n\n<p class="lb-source">📎 ${b.source}</p>` : "";
+      const fig = b.figure ? `\n\n${figureMarkdown(b.figure)}` : "";
+      // A coloured box per kind (styled in globals.css), like the Z class's boxes in print.
+      out.push(`<div class="lb lb-${b.kind}">\n\n**${BLOCK_ICON[b.kind]} ${BLOCK_LABEL[b.kind]}: ${b.title}**\n\n${b.body}${fig}${sol}${src}\n\n</div>`);
+    }
   }
-  if (doc.key_points.length) out.push(`### Key points\n\n${doc.key_points.map((k) => `- ${k}`).join("\n")}`);
-  if (doc.common_mistakes.length) out.push(`### Common mistakes\n\n${doc.common_mistakes.map((k) => `- ${k}`).join("\n")}`);
+  if (doc.glossary.length) out.push(`### Key terms\n\n| Term | Meaning |\n|---|---|\n${doc.glossary.map((g) => `| **${cell(g.term)}** | ${cell(g.meaning)} |`).join("\n")}`);
+  if (doc.key_points?.length) out.push(`### Key points\n\n${doc.key_points.map((k) => `- ${k}`).join("\n")}`);
+  if (doc.common_mistakes.length)
+    out.push(`### Common mistakes\n\n${doc.common_mistakes.map((m) => `- ❌ ${m.mistake}${m.correction ? `\n  ✅ ${m.correction}` : ""}`).join("\n")}`);
   if (doc.connections.length) out.push(`### Connections\n\n${doc.connections.map((c) => `- **${c.topic}**: ${c.relation}`).join("\n")}`);
-  if (doc.check_yourself.length)
-    out.push(`### Check yourself\n\n${doc.check_yourself.map((r, i) => `${i + 1}. ${r.question}`).join("\n")}\n\n${details("Answers", doc.check_yourself.map((r, i) => `${i + 1}. ${r.answer}`).join("\n\n"))}`);
-  if (doc.takeaways.length) out.push(`### Critical takeaways\n\n${doc.takeaways.map((k) => `- ${k}`).join("\n")}`);
-  if (doc.read.length) out.push(`**Read next:** ${doc.read.join("; ")}`);
+  if (doc.check_yourself.length) out.push(`### Check yourself\n\n${questions(doc.check_yourself, "Answers")}`);
+  if (doc.takeaways.length) out.push(`<div class="lb lb-takeaways">\n\n**📌 Critical takeaways**\n\n${doc.takeaways.map((k) => `- ${k}`).join("\n")}\n\n</div>`);
+  if (doc.read.length) out.push(`### Go back to\n\n${doc.read.map((r) => `- **${r.title}**${r.focus ? `: ${r.focus}` : ""}`).join("\n")}`);
   return out.join("\n\n");
+}
+
+/** A figure as a fenced block: ```plot (drawn by the app as SVG) or ```mermaid, then its caption. */
+export function figureMarkdown(f: Figure): string {
+  const code = f.type === "plot" && f.plot ? "```plot\n" + JSON.stringify(f.plot) + "\n```" : f.diagram ? "```mermaid\n" + diagramMermaid(f.diagram) + "\n```" : "";
+  return code ? `${code}\n\n*${f.caption}*` : "";
+}
+
+/** Text for a Markdown table cell: no pipes or line breaks. */
+function cell(s: string) {
+  return s.replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ");
 }
 
 function details(summary: string, body: string) {

@@ -3,6 +3,7 @@ import { openDb, setDb } from "@/lib/db";
 import { createCourse, getLesson, listTopics, replaceLinks, replaceTopics, saveLesson, type NewTopic } from "@/lib/store";
 import { generateLessonDoc, lessonMap, lessonToMarkdown } from "@/lib/lesson";
 import { lessonToTex, markdownLessonToTex } from "@/lib/latex";
+import { dynamicsCourse } from "./fixtures/dynamics";
 
 delete process.env.ANTHROPIC_API_KEY;
 delete process.env.ANTHROPIC_AUTH_TOKEN;
@@ -41,19 +42,28 @@ describe("structured lessons", () => {
     expect(m.related).toEqual([{ course: "Numerical Methods", title: "Newton's method", relation: "second-order cousin" }]);
   });
 
-  it("builds an offline lesson with categorised blocks and connections, for the app and for print", async () => {
-    const { gd } = setup();
-    const doc = await generateLessonDoc(gd.id, 2);
-    expect(doc.by).toBe("heuristic");
-    expect(doc.blocks[0]).toMatchObject({ kind: "definition", title: "Gradient descent" });
-    expect(doc.connections.map((c) => c.topic)).toEqual(["Derivatives", "Stochastic gradient descent", "Momentum", "Newton's method (Numerical Methods)"]);
-    expect(doc.where_it_fits).toContain("It follows Derivatives");
-    const md = lessonToMarkdown(doc);
-    expect(md).toContain("```mermaid");
+  it("builds an offline lesson from the brainmap and the student's materials", async () => {
+    const { topic } = dynamicsCourse();
+    const l1 = await generateLessonDoc(topic.id, 1);
+    expect(l1.by).toBe("heuristic");
+    const blocks = (doc: typeof l1) => doc.sections.flatMap((x) => x.blocks);
+    expect(blocks(l1).find((b) => b.title === "Critical damping")).toMatchObject({ kind: "definition", source: "Lecture 3 recording [05:05]" });
+    expect(blocks(l1).some((b) => b.kind === "intuition" && /door closer/.test(b.body))).toBe(true);
+    expect(l1.glossary.find((g) => g.term === "damping ratio")?.meaning).toBe("$\\zeta = c/c_{cr}$");
+    expect(l1.connections.map((c) => c.topic)).toContain("Second-order systems (Control Systems)");
+
+    const l3 = await generateLessonDoc(topic.id, 3);
+    expect(blocks(l3).find((b) => b.kind === "formula")?.body).toContain("$$\\ddot{u} + 2\\zeta\\omega_n\\dot{u} + \\omega_n^2 u = 0.$$");
+    expect(blocks(l3).find((b) => b.kind === "pitfall")).toMatchObject({ source: "Lecture 3 recording [07:40]" });
+    expect(blocks(l3).find((b) => b.kind === "example")?.body).toMatch(/^A one-storey frame/);
+    expect(l3.read.find((r) => r.title === "Lecture 3 recording")?.focus).toMatch(/^around \[/);
+
+    const md = lessonToMarkdown(l3);
     expect(md).toContain('<div class="lb lb-definition">');
-    const tex = lessonToTex(doc);
-    expect(tex).toContain("\\begin{definition}[Gradient descent]");
-    expect(tex).toContain("Machine Learning \\textperiodcentered{} Optimisation");
+    expect(md).toContain("📎 Lecture 3 recording [07:40]");
+    const tex = lessonToTex(l3);
+    expect(tex).toContain("\\begin{definition}[Critical damping]");
+    expect(tex).toContain("Structural Dynamics \\textperiodcentered{} SDOF systems");
   });
 
   it("stores the structured lesson with its Markdown, and still prints older Markdown-only lessons", async () => {

@@ -8,6 +8,8 @@ import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { Mermaid } from "./Mermaid";
+import { Plot } from "./Plot";
+import type { PlotSpec } from "@/lib/figure";
 
 // Allow <details>/<summary> from generated lessons and keep code-block language classes.
 const schema = {
@@ -17,6 +19,7 @@ const schema = {
     code: [...(defaultSchema.attributes?.code ?? []), ["className", /^language-/, /^math-/]],
     // Lesson block boxes (definition, intuition, example, ...).
     div: [...(defaultSchema.attributes?.div ?? []), ["className", "lb", /^lb-[a-z]+$/]],
+    p: [...(defaultSchema.attributes?.p ?? []), ["className", "lb-source"]],
   },
 };
 
@@ -27,6 +30,13 @@ const components: Components = {
   code({ className, children: c, node: _node, ...props }) {
     const lang = /language-(\w+)/.exec(className ?? "")?.[1];
     if (lang === "mermaid") return <Mermaid code={String(c).trim()} fit />;
+    if (lang === "plot") {
+      try {
+        return <Plot spec={JSON.parse(String(c)) as PlotSpec} />;
+      } catch {
+        /* not a plot spec: show it as code */
+      }
+    }
     return (
       <code className={className} {...props}>
         {c}

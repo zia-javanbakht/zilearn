@@ -90,6 +90,63 @@ export function excerptsFor(courseId: string, query: string, maxChars = 12000, m
   return out;
 }
 
+export interface Source {
+  title: string;
+  kind: string;
+  text: string;
+}
+
+/**
+ * Source text for teaching a topic, in reading order: the topic's own materials whole when they fit,
+ * otherwise their best-matching passages in the order they appear (neighbouring passages joined), then
+ * matching passages from the rest of the course. Reading order keeps derivations and timestamps intact.
+ */
+export function sourcesFor(courseId: string, query: string, maxChars = 20000, materialIds: string[] = []): Source[] {
+  const own = materialIds.length
+    ? (db()
+        .prepare(`SELECT id, title, kind, text FROM materials WHERE course_id = ? AND id IN (${materialIds.map(() => "?").join(",")})`)
+        .all(courseId, ...materialIds) as { id: string; title: string; kind: string; text: string | null }[])
+    : [];
+  own.sort((a, b) => materialIds.indexOf(a.id) - materialIds.indexOf(b.id));
+  const total = own.reduce((n, m) => n + (m.text?.length ?? 0), 0);
+  if (own.length && total <= maxChars * 0.8) {
+    const out: Source[] = own.filter((m) => m.text?.trim()).map((m) => ({ title: m.title, kind: m.kind, text: m.text!.trim() }));
+    return [...out, ...passages(courseId, query, maxChars - total, new Set(own.map((m) => m.id)), true)];
+  }
+  return passages(courseId, query, maxChars, new Set(materialIds), false);
+}
+
+/** Best-matching chunks, grouped by material in document order; `skip` materials are left out when `exclude`. */
+function passages(courseId: string, query: string, budget: number, prefer: Set<string>, exclude: boolean): Source[] {
+  const fq = ftsQuery(query);
+  if (!fq || budget < 300) return [];
+  const rows = db()
+    .prepare(
+      `SELECT f.content, f.material_id, f.chunk_index, m.title, m.kind FROM chunks_fts f JOIN materials m ON m.id = f.material_id
+       WHERE chunks_fts MATCH ? AND f.course_id = ? ORDER BY bm25(chunks_fts) LIMIT 40`,
+    )
+    .all(fq, courseId) as { content: string; material_id: string; chunk_index: number; title: string; kind: string }[];
+  const ranked = rows.filter((r) => !(exclude && prefer.has(r.material_id)));
+  ranked.sort((a, b) => Number(prefer.has(b.material_id)) - Number(prefer.has(a.material_id)));
+  const picked: typeof ranked = [];
+  let used = 0;
+  for (const r of ranked) {
+    if (used + r.content.length > budget) continue;
+    picked.push(r);
+    used += r.content.length;
+  }
+  const byMaterial = new Map<string, typeof picked>();
+  for (const r of picked) byMaterial.set(r.material_id, [...(byMaterial.get(r.material_id) ?? []), r]);
+  return [...byMaterial.values()].map((rs) => {
+    rs.sort((a, b) => a.chunk_index - b.chunk_index);
+    // The first chunk starts with the title (it's indexed with the text); gaps are marked.
+    const text = rs
+      .map((r, i) => (i && r.chunk_index !== rs[i - 1].chunk_index + 1 ? "[…]\n" : "") + (r.chunk_index === 0 ? r.content.replace(/^.*\n/, "") : r.content))
+      .join("\n");
+    return { title: rs[0].title, kind: rs[0].kind, text: rs[0].chunk_index ? `[…]\n${text}` : text };
+  });
+}
+
 /* ---------------- Cross-course links ---------------- */
 
 const LINK_THRESHOLD = 0.18;

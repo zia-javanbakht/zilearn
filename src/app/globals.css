@@ -226,3 +226,17 @@ button.link:hover { text-decoration: underline; }
 .lb-pitfall { --lb: #e8590c; }
 .lb-comparison { --lb: #0c8599; }
 .lb-note { --lb: #868e96; }
+.lb-goal { --lb: #1971c2; }
+.lb-takeaways { --lb: #495057; }
+.lb-source { font-size: 0.82em; color: var(--muted, #868e96); margin: 6px 0 10px; }
+
+/* Lesson plots */
+.plot { margin: 10px 0; }
+.plot svg { width: 100%; max-width: 640px; height: auto; display: block; font-size: 11px; }
+.plot-grid line { stroke: color-mix(in srgb, currentColor 10%, transparent); }
+.plot-zero { stroke: color-mix(in srgb, currentColor 35%, transparent); }
+.plot-axis line { stroke: currentColor; }
+.plot-axis text { fill: currentColor; opacity: 0.75; }
+.plot-axis .plot-label { opacity: 1; font-size: 12px; }
+.plot-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.85em; }
+.plot-legend i { display: inline-block; width: 14px; height: 3px; vertical-align: middle; border-radius: 2px; }

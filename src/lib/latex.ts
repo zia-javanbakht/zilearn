@@ -1,4 +1,5 @@
-import type { LessonBlock, LessonDoc } from "./lesson";
+import { diagramTikz, plotTikz, type Figure } from "./figure";
+import { normalizeDoc, type LessonBlock, type LessonDoc, type QA } from "./lesson";
 
 /**
  * LaTeX for printing lessons with Zia's Z class (XeLaTeX): Z's theorem-style environments for
@@ -37,29 +38,35 @@ const UNSAFE = /\\(write\d*|immediate|input|include|openin|openout|read|catcode|
 
 /** Maths with file and definition commands removed. */
 export function safeMath(m: string): string {
-  return m.replace(UNSAFE, "");
+  return katexOnly(m.replace(UNSAFE, ""));
+}
+
+/** KaTeX shorthands that LaTeX (amsmath and unicode-math, as Z loads them) doesn't define. */
+function katexOnly(m: string): string {
+  return m
+    .replace(/\\([RNZ])(?![A-Za-z])/g, "\\mathbb{$1}")
+    .replace(/\\bm(?![A-Za-z])/g, "\\symbf")
+    .replace(/\\degree(?![A-Za-z])/g, "^{\\circ}")
+    .replace(/\\tag\*?\{([^{}]*)\}/g, "\\qquad($1)");
 }
 
 /** One line or paragraph of Markdown (bold, italics, code, links) with maths kept as LaTeX. */
 export function inline(md: string): string {
-  return md
-    .split(MATH)
-    .map((part, i) => {
-      if (i % 2 === 1) return safeMath(part.startsWith("$$") ? `\\[${part.slice(2, -2)}\\]` : part);
-      const codes: string[] = [];
-      let s = part.replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
-      const links: string[] = [];
-      s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, t, u) => `\u0001${links.push(`${tex(t)}\\footnote{\\url{${u.replace(/[{}\\]/g, "").replace(/[%#]/g, "\\$&")}}}`) - 1}\u0001`);
-      s = tex(s.replace(/<\/?[a-z][^>]*>/gi, ""))
-        .replace(/\*\*(.+?)\*\*/g, "\\textbf{$1}")
-        .replace(/(^|[^*\w])\*(?!\s)(.+?)(?<!\s)\*(?!\*)/g, "$1\\emph{$2}")
-        .replace(/(^|\W)\\_(?!\s)(.+?)(?<!\s)\\_(?=\W|$)/g, "$1\\emph{$2}")
-        .replace(/"([^"]+)"/g, "``$1''");
-      return s
-        .replace(/\u0000(\d+)\u0000/g, (_, n) => `\\texttt{${tex(codes[+n])}}`)
-        .replace(/\u0001(\d+)\u0001/g, (_, n) => links[+n]);
-    })
-    .join("");
+  // Maths, code and links are set aside first, so emphasis can wrap them (**$T_n$ = 0.31 s**).
+  const kept: string[] = [];
+  const keep = (x: string) => `\u0000${kept.push(x) - 1}\u0000`;
+  let s = md
+    .replace(MATH, (m) => keep(safeMath(m.startsWith("$$") ? `\\[${m.slice(2, -2)}\\]` : m)))
+    .replace(/`([^`]+)`/g, (_, c) => keep(`\\texttt{${tex(c)}}`))
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, (_, t, u) => keep(`${tex(t)}\\footnote{\\url{${u.replace(/[{}\\]/g, "").replace(/[%#]/g, "\\$&")}}}`));
+  s = tex(s.replace(/<\/?[a-z][^>]*>/gi, ""))
+    .replace(/\*\*(.+?)\*\*/g, "\\textbf{$1}")
+    .replace(/(^|[^*\w])\*(?!\s)(.+?)(?<!\s)\*(?!\*)/g, "$1\\emph{$2}")
+    .replace(/(^|\W)\\_(?!\s)(.+?)(?<!\s)\\_(?=\W|$)/g, "$1\\emph{$2}")
+    .replace(/"([^"]+)"/g, "``$1''");
+  // Restored last to first, since a link's text may hold a kept code span.
+  for (let k = kept.length - 1; k >= 0; k--) s = s.split(`\u0000${k}\u0000`).join(kept[k]);
+  return s;
 }
 
 /** A block of Markdown: paragraphs, lists (one level of nesting), display maths, tables, quotes, code. */
@@ -136,27 +143,44 @@ export function blockTex(md: string): string {
     .trim();
 }
 
+/**
+ * A list starting at lines[start]. An item is its marker line plus every following line that is blank or
+ * indented past the marker, so display maths, paragraphs and nested lists inside items stay in them.
+ */
 function list(lines: string[], start: number, done: (next: number) => void): string {
   const re = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
   const first = lines[start].match(re)!;
   const indent = first[1].length;
-  const env = /\d/.test(first[2]) ? "enumerate" : "itemize";
+  const ordered = /\d/.test(first[2]);
   const items: string[] = [];
   let i = start;
   while (i < lines.length) {
     const m = lines[i].match(re);
-    if (m && m[1].length === indent) {
-      items.push(inline(m[3]));
-      i++;
-    } else if (m && m[1].length > indent) {
-      items[items.length - 1] += "\n" + list(lines, i, (n) => (i = n));
-    } else if (lines[i].trim() && /^\s{2,}/.test(lines[i]) && items.length) {
-      items[items.length - 1] += " " + inline(lines[i].trim());
-      i++;
-    } else break;
+    if (!m || m[1].length !== indent || /\d/.test(m[2]) !== ordered) break;
+    const body = [m[3]];
+    const pad = indent + m[2].length + 1;
+    for (i++; i < lines.length; i++) {
+      const l = lines[i];
+      if (!l.trim()) {
+        // A blank line continues the item only if the next text is indented under it.
+        const nxt = lines.slice(i + 1).find((x) => x.trim());
+        if (nxt === undefined || nxt.length - nxt.trimStart().length <= indent) break;
+        body.push("");
+      } else if (l.length - l.trimStart().length > indent) body.push(l.slice(Math.min(pad, l.length - l.trimStart().length)));
+      else if (!re.test(l) && body[body.length - 1] !== "") body.push(l.trim()); // lazy continuation
+      else break;
+    }
+    items.push(blockTex(body.join("\n")));
+    // A loose list: blank lines between items of the same list.
+    let j = i;
+    while (j < lines.length && !lines[j].trim()) j++;
+    const n = lines[j]?.match(re);
+    if (j > i && n && n[1].length === indent && /\d/.test(n[2]) === ordered) i = j;
   }
   done(i);
-  return `\\begin{${env}}\n${items.map((x) => `\\item ${x}`).join("\n")}\n\\end{${env}}`;
+  const env = ordered ? "enumerate" : "itemize";
+  const from = ordered ? parseInt(first[2], 10) : 1;
+  return `\\begin{${env}}${from > 1 ? `[start=${from}]` : ""}\n${items.map((x) => `\\item ${x}`).join("\n")}\n\\end{${env}}`;
 }
 
 /* ---------------- Lesson → Z document ---------------- */
@@ -175,12 +199,33 @@ const BOX: Record<string, [env: string, label: string]> = {
   note: ["qubox", "Note"],
 };
 
+function figureTex(f: Figure): string {
+  const art = f.type === "plot" && f.plot ? plotTikz(f.plot, inline) : f.diagram ? diagramTikz(f.diagram, inline) : "";
+  return art ? `\n\n${art}\n{\\centering\\footnotesize\\itshape ${inline(f.caption)}\\par}` : "";
+}
+
 function blockToTex(b: LessonBlock): string {
-  const body = blockTex(b.body) + (b.solution ? `\n\n\\textbf{Solution.} ${blockTex(b.solution)}` : "");
+  const fig = b.figure ? figureTex(b.figure) : "";
+  const sol = b.solution ? `\n\n\\textbf{Solution.}\n\n${blockTex(b.solution)}` : "";
   const env = THEOREM_ENV[b.kind];
-  if (env) return `\\begin{${env}}[${inline(b.title)}]\n${body}\n\\end{${env}}`;
+  if (env) {
+    const src = b.source ? `\n\n{\\hfill\\footnotesize\\itshape Source: ${inline(b.source)}\\par}` : "";
+    return `\\begin{${env}}[${inline(b.title)}]\n${blockTex(b.body)}${fig}${sol}${src}\n\\end{${env}}`;
+  }
   const [box, label] = BOX[b.kind] ?? ["blbox", "Note"];
-  return `\\begin{${box}}[${label}: ${inline(b.title)}]\n${body}\n\\end{${box}}`;
+  // Z's boxes take a subtitle, shown beside the title: the source, when there is one.
+  return `\\begin{${box}}[${label}: ${inline(b.title)}]${b.source ? `[${inline(b.source)}]` : ""}\n${blockTex(b.body)}${fig}${sol}\n\\end{${box}}`;
+}
+
+/** Plain text for PDF bookmarks: maths and Markdown markers dropped. */
+function plain(md: string): string {
+  return tex(md.replace(/\$[^$]*\$/g, "").replace(/[*_`]/g, "").replace(/\s+/g, " ").trim());
+}
+
+/** A heading that is safe in \\section (a moving argument) and in the PDF bookmarks. */
+function heading(md: string): string {
+  const t = inline(md);
+  return /[\\$]/.test(t) ? `\\texorpdfstring{${t}}{${plain(md)}}` : t;
 }
 
 /** Items for Z's list boxes, which take \item directly. */
@@ -223,27 +268,39 @@ export function mapTikz(doc: LessonDoc): string {
   ].join("\n");
 }
 
-export function lessonToTex(doc: LessonDoc): string {
+export function lessonToTex(raw: LessonDoc): string {
+  const doc = normalizeDoc(raw);
   const s: string[] = [];
-  const sec = (title: string, body: string) => body.trim() && s.push(`\\section{${title}}\n${body.trim()}\n`);
+  const sec = (title: string, body: string) => body.trim() && s.push(`\\section{${heading(title)}}\n${body.trim()}\n`);
+  const ask = (q: QA) => `${q.kind ? `\\textit{${KIND[q.kind]}.} ` : ""}${blockTex(q.question)}${q.hint ? ` \\hfill{\\footnotesize\\itshape Hint: ${inline(q.hint)}}` : ""}`;
   const answers = [
-    ...(doc.recall.length ? [`\\paragraph{Warm-up}\n\\begin{enumerate}\n${items(doc.recall.map((r) => r.answer))}\n\\end{enumerate}`] : []),
-    ...(doc.check_yourself.length ? [`\\paragraph{Check yourself}\n\\begin{enumerate}\n${items(doc.check_yourself.map((r) => r.answer))}\n\\end{enumerate}`] : []),
+    ...(doc.recall.length ? [`\\subsection*{Warm-up}\n\\begin{enumerate}\n${doc.recall.map((r) => `\\item ${blockTex(r.answer)}`).join("\n")}\n\\end{enumerate}`] : []),
+    ...(doc.check_yourself.length ? [`\\subsection*{Check yourself}\n\\begin{enumerate}\n${doc.check_yourself.map((r) => `\\item ${blockTex(r.answer)}`).join("\n")}\n\\end{enumerate}`] : []),
   ];
 
+  if (doc.objectives.length) s.push(`\\begin{chbox}[By the end of this pass you can]\n${items(doc.objectives)}\n\\end{chbox}\n`);
   sec("Where this fits", `${blockTex(doc.where_it_fits)}\n\n${mapTikz(doc)}`);
-  if (doc.recall.length) sec("Warm-up", `\\begin{enbox}[Recall]\n${items(doc.recall.map((r) => r.question))}\n\\end{enbox}`);
-  sec("Lesson", doc.blocks.map(blockToTex).join("\n\n"));
-  if (doc.key_points.length) sec("Key points", `\\begin{chbox}[Key points]\n${items(doc.key_points)}\n\\end{chbox}`);
-  if (doc.common_mistakes.length) sec("Common mistakes", `\\begin{crbox}[Avoid]\n${items(doc.common_mistakes)}\n\\end{crbox}`);
+  if (doc.recall.length) sec("Warm-up", `\\begin{enbox}[Recall]\n${doc.recall.map((q) => `\\item ${ask(q)}`).join("\n")}\n\\end{enbox}`);
+  for (const x of doc.sections) sec(x.heading, x.blocks.map(blockToTex).join("\n\n"));
+  // A two-column table rather than Z's dsbox, whose description list breaks on \\item[...] labels.
+  if (doc.glossary.length)
+    sec(
+      "Key terms",
+      `\\begin{blbox}[Glossary]\n\\begin{tabularx}{\\linewidth}{@{}>{\\bfseries\\raggedright\\arraybackslash}p{0.28\\linewidth}X@{}}\n${doc.glossary.map((g) => `${inline(g.term)} & ${inline(g.meaning)} \\\\[2pt]`).join("\n")}\n\\end{tabularx}\n\\end{blbox}`,
+    );
+  if (doc.key_points?.length) sec("Key points", `\\begin{chbox}[Key points]\n${items(doc.key_points)}\n\\end{chbox}`);
+  if (doc.common_mistakes.length)
+    sec("Common mistakes", `\\begin{crbox}[Avoid]\n${doc.common_mistakes.map((m) => `\\item ${inline(m.mistake)}${m.correction ? `\\newline\\textit{Instead:} ${inline(m.correction)}` : ""}`).join("\n")}\n\\end{crbox}`);
   if (doc.connections.length) sec("Connections", `\\begin{itbox}[Connections]\n${items(doc.connections.map((c) => `**${c.topic}**: ${c.relation}`))}\n\\end{itbox}`);
-  if (doc.check_yourself.length) sec("Check yourself", `\\begin{enbox}[Questions]\n${items(doc.check_yourself.map((r) => r.question))}\n\\end{enbox}`);
+  if (doc.check_yourself.length) sec("Check yourself", `\\begin{enbox}[Questions]\n${doc.check_yourself.map((q) => `\\item ${ask(q)}`).join("\n")}\n\\end{enbox}`);
   if (doc.takeaways.length) sec("Takeaways", `\\begin{subox}[Critical Takeaways]\n\\begin{itemize}\n${items(doc.takeaways)}\n\\end{itemize}\n\\end{subox}`);
-  if (doc.read.length) s.push(`\\paragraph{Read next} ${doc.read.map(inline).join("; ")}.\n`);
+  if (doc.read.length) s.push(`\\paragraph{Go back to} ${doc.read.map((r) => `\\textbf{${inline(r.title)}}${r.focus ? ` (${inline(r.focus)})` : ""}`).join("; ")}.\n`);
   if (answers.length) s.push(`\\clearpage\n\\section{Answers}\n${answers.join("\n\n")}\n`);
 
   return zDocument(doc, s.join("\n"));
 }
+
+const KIND: Record<string, string> = { recall: "Recall", explain: "Explain", apply: "Apply", transfer: "Transfer" };
 
 type Head = Pick<LessonDoc, "title" | "depth" | "level" | "goal"> & { map: Pick<LessonDoc["map"], "course" | "path"> };
 
@@ -257,7 +314,10 @@ function zDocument(doc: Head, body: string): string {
 % minted, so -shell-escape isn't needed.)
 % ══════════════════════════════════════════════════════════════════════════════════════════════════
 \\documentclass[10pt,stix,minimal]{Z}
-\\usetikzlibrary{mindmap}
+\\usetikzlibrary{mindmap,arrows.meta}
+\\usepackage{pgfplots}
+\\usepackage{cancel}
+\\pgfplotsset{compat=1.18}
 
 \\title{${tex(doc.title)}}
 \\author{ziLearn}
