@@ -9,7 +9,7 @@ export interface Extracted {
 }
 
 const AUDIO_EXT = /\.(mp3|m4a|wav|ogg|oga|webm|aac|flac|opus)$/i;
-const VIDEO_EXT = /\.(mp4|mov|mkv|avi)$/i;
+const VIDEO_EXT = /\.(mp4|m4v|mov|mkv|avi)$/i;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp)$/i;
 const TEXT_EXT = /\.(txt|md|markdown|csv|tsv|json|tex|rtf|py|java|c|cpp|js|ts|r|m|sql)$/i;
 
@@ -18,6 +18,7 @@ export function guessKind(filename: string, mime = ""): MaterialKind {
   if (/(sample|past|mock|practice)?[\s_-]*(exam|midterm|final|paper|quiz|test)\b/.test(n) && !/notes?\b/.test(n)) return "sample_exam";
   if (/tutorial|\btut\d*\b/.test(n)) return "tutorial";
   if (/workshop|\blab\d*\b|practical/.test(n)) return "workshop";
+  if (VIDEO_EXT.test(n) || mime.startsWith("video/")) return "video";
   if (AUDIO_EXT.test(n) || mime.startsWith("audio/")) return "audio_memo";
   if (/\.(pptx?|key|odp)$/.test(n) || /slides?|deck/.test(n)) return "slides";
   if (/notes?|lecture|handout|summary/.test(n)) return "lecture_notes";

@@ -5,8 +5,10 @@ A study suite for university students and academics. Each course collects all of
 ## Features
 
 - **Courses** with an exam date, a required level and daily study hours.
-- **Drag-and-drop ingestion**: PDF (scanned PDFs are transcribed by Claude), PowerPoint (slides and speaker notes), Word, Markdown/text, images of handwritten notes, audio memos and lecture recordings (transcribed on your device, see below), YouTube links (title and captions when available), web links, and pasted notes. Each item is tagged as lecture notes, slides, sample exam, workshop, tutorial, reading, etc.
-- **Brainmap** rendered with Mermaid: a colour-coded map you can click, a mindmap overview, and an outline. Claude organises the material by concept across all sources; offline, topics come from headings.
+- **Drag-and-drop ingestion**: PDF (scanned PDFs are transcribed by the AI), PowerPoint (slides and speaker notes), Word, Markdown/text, images of handwritten notes, audio memos, lecture videos (transcribed on your device, see below), YouTube links, web links, and pasted notes. Each item is tagged as lecture notes, slides, video, sample exam, workshop, tutorial, reading, etc.
+- **Whole folders and .zip archives**: drop or choose a folder and ziLearn goes through every subfolder. Folder names like "Tutorials" or "Past exams" set the item type, system clutter (.DS_Store, .git, __MACOSX) is left out, and files already in the course are skipped, so importing the same folder again only adds what is new. A report lists anything skipped and why.
+- **Transcripts for videos**: a .srt or .vtt captions file next to a video becomes its transcript; otherwise the recording is transcribed in the browser. YouTube links (pasted, dragged, or saved as .url/.webloc shortcuts in a folder) import the video's captions; when a video has none and Gemini is the provider, Gemini watches it and writes the transcript. "Try again" re-fetches later.
+- **Brainmap** rendered with Mermaid: a colour-coded map you can click, a mindmap overview, and an outline. The AI organises the material by concept across all sources; offline, topics come from headings. You can fix the map: delete a wrongly detected branch (or just one level), add topics and subtopics, rename or move them. Rebuilding keeps your changes.
 - **Know / Familiar / Don't know** marks on any branch or topic. Marking a branch applies to everything under it; children can be overridden.
 - **Progressive study plan**: the course is covered in passes (Survey → Understand → Apply → Master). Unknown topics start at pass 1, familiar ones at pass 2, and "known" topics get a quick check first. Later passes interleave branches; each branch opens with an overview and closes with a synthesis; every pass ends with a checkpoint quiz; short recall warm-ups bring back topics from 1, 3 and 7 days earlier; and the last day before the exam is a mock exam plus weak-topic review. Ticking sessions off records the depth reached, so rebuilding from today never repeats finished work, and topics you later mark "Don't know" are repeated at the right depth.
 - **Calendar export**: download the plan as an `.ics` file or subscribe to it (one event per session or per day, your chosen start time and reminder, plus the exam day).
@@ -66,6 +68,6 @@ Layout:
 
 ## Known limits
 
-- YouTube transcripts depend on the video having captions.
+- YouTube transcripts depend on the video having captions (or on Gemini being the provider). Videos over 1 GB and other files over 150 MB are skipped.
 - On-device transcription of long lectures is slow without a GPU; the "tiny" model is the fastest. MP3 voices are English only.
 - Subscribing to the calendar feed from Google Calendar needs ziLearn to be reachable from the internet; on your own computer, download the `.ics` instead.

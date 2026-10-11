@@ -1,4 +1,5 @@
-import { getTopic, linksForTopic, getTopicsByIds, setMastery, listCourses } from "@/lib/store";
+import { editTopic, getTopic, linksForTopic, getTopicsByIds, removeTopic, setMastery, listCourses } from "@/lib/store";
+import { UserError } from "@/lib/ai";
 import { body, fail, handle, ok, type Ctx } from "@/lib/http";
 import type { Mastery } from "@/lib/types";
 
@@ -22,11 +23,29 @@ export const GET = handle(async (_req: Request, { params }: Ctx<{ id: string }>)
   });
 });
 
+/** Mark a topic, or edit it: `title`, `summary`, and `parent_id` (null moves it to the top level). */
 export const PATCH = handle(async (req: Request, { params }: Ctx<{ id: string }>) => {
   const { id } = await params;
-  const b = await body<{ mastery?: Mastery | null; applyToBranch?: boolean }>(req);
+  const b = await body<{ mastery?: Mastery | null; applyToBranch?: boolean; title?: string; summary?: string; parent_id?: string | null }>(req);
   if (!getTopic(id)) return fail("Not found", 404);
-  const m = b.mastery === "know" || b.mastery === "familiar" || b.mastery === "dont_know" ? b.mastery : null;
-  setMastery(id, m, b.applyToBranch !== false);
+  if ("mastery" in b) {
+    const m = b.mastery === "know" || b.mastery === "familiar" || b.mastery === "dont_know" ? b.mastery : null;
+    setMastery(id, m, b.applyToBranch !== false);
+  }
+  if (b.title !== undefined || b.summary !== undefined || b.parent_id !== undefined) {
+    if (b.title !== undefined && !b.title.trim()) return fail("A topic needs a name.");
+    try {
+      return ok(editTopic(id, { title: b.title?.slice(0, 200), summary: b.summary?.slice(0, 2000), parent_id: b.parent_id }));
+    } catch (err) {
+      throw new UserError((err as Error).message);
+    }
+  }
   return ok({ ok: true });
+});
+
+/** Delete a topic and its branch; `?keepChildren=1` deletes only the topic and moves its subtopics up. */
+export const DELETE = handle(async (req: Request, { params }: Ctx<{ id: string }>) => {
+  const { id } = await params;
+  const keepChildren = new URL(req.url).searchParams.get("keepChildren") === "1";
+  return removeTopic(id, keepChildren) ? ok({ ok: true }) : fail("Not found", 404);
 });

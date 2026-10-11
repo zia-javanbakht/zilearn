@@ -6,6 +6,7 @@ import { body, fail, handle, ok, type Ctx } from "@/lib/http";
 import { tidyTranscript } from "@/lib/extract";
 import { providerName } from "@/lib/ai";
 import { MATERIAL_KINDS } from "@/lib/types";
+import { fetchYoutube, youtubeId, youtubeNote } from "@/lib/youtube";
 
 export const dynamic = "force-dynamic";
 
@@ -16,12 +17,21 @@ export const GET = handle(async (_req: Request, { params }: Ctx<{ id: string }>)
 
 export const maxDuration = 300;
 
-/** Edit a material. `transcript: true` marks the text as a speech-to-text transcript made in the browser. */
+/**
+ * Edit a material. `transcript: true` marks the text as a speech-to-text transcript made in the browser;
+ * `refresh: true` fetches a YouTube video's transcript again (captions are often added after upload).
+ */
 export const PATCH = handle(async (req: Request, { params }: Ctx<{ id: string }>) => {
   const id = (await params).id;
-  const b = await body<{ title?: string; kind?: string; text?: string; transcript?: boolean; tidy?: boolean }>(req);
+  const b = await body<{ title?: string; kind?: string; text?: string; transcript?: boolean; tidy?: boolean; refresh?: boolean }>(req);
   const current = getMaterial(id);
   if (!current) return fail("Not found", 404);
+  if (b.refresh) {
+    if (!current.url || !youtubeId(current.url)) return fail("Only YouTube videos can be fetched again.");
+    const yt = await fetchYoutube(current.url);
+    if (!yt.transcript) return fail("This video still has no transcript YouTube will share. Paste a summary or your notes instead.");
+    return ok(updateMaterial(id, { text: yt.transcript, note: youtubeNote(yt, providerName()) }));
+  }
   const patch: { title?: string; kind?: string; text?: string; note?: string | null } = {
     title: typeof b.title === "string" && b.title.trim() ? b.title.trim().slice(0, 300) : undefined,
     kind: (MATERIAL_KINDS as readonly string[]).includes(b.kind ?? "") ? b.kind : undefined,

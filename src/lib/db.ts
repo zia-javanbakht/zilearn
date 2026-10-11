@@ -163,6 +163,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS topics_fts USING fts5(
 );
 
 CREATE INDEX IF NOT EXISTS idx_materials_course ON materials(course_id);
+
 CREATE INDEX IF NOT EXISTS idx_topics_course ON topics(course_id);
 CREATE INDEX IF NOT EXISTS idx_plan_items_plan ON plan_items(plan_id);
 CREATE INDEX IF NOT EXISTS idx_links_from ON links(from_topic);
@@ -174,6 +175,10 @@ CREATE INDEX IF NOT EXISTS idx_cards_course_due ON cards(course_id, due);
 const COLUMNS: [table: string, column: string, type: string][] = [
   ["podcasts", "audio", "TEXT"], // path of the recorded MP3, relative to the data dir
   ["podcasts", "audio_marks", "TEXT"], // JSON: start time in seconds of each segment in the MP3
+  ["materials", "sha256", "TEXT"], // content hash, so re-importing a folder skips files already added
+  ["materials", "rel_path", "TEXT"], // where the file sat in an imported folder or zip
+  ["topics", "manual", "INTEGER NOT NULL DEFAULT 0"], // added or edited by the student: kept when the brainmap is rebuilt
+  ["courses", "removed_topics", "TEXT"], // JSON: normalised titles the student deleted, left out of rebuilds
 ];
 
 function migrate(db: Database.Database) {
@@ -181,6 +186,7 @@ function migrate(db: Database.Database) {
     const have = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column);
     if (!have) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_materials_sha ON materials(course_id, sha256)");
 }
 
 let instance: Database.Database | null = null;

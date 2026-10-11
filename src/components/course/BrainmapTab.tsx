@@ -37,6 +37,7 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lesson, setLesson] = useState<{ id: string; title: string; depth: number } | null>(null);
+  const [adding, setAdding] = useState(false);
 
   const load = () => api<BrainmapView>(`/api/courses/${id}/brainmap`).then(setView).catch((e) => setError(e.message));
   useEffect(() => {
@@ -129,6 +130,37 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
     await persist(() => api(`/api/courses/${id}/brainmap`, { method: "PATCH", json: { mastery } }));
   }
 
+  /** Add, edit or delete topics; the map reloads from the server afterwards. */
+  async function changeTopics(req: () => Promise<unknown>, select?: (r: unknown) => string | null) {
+    setError(null);
+    try {
+      const r = await persist(req);
+      await load();
+      reload();
+      if (select) setSelected(select(r));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
+  const addTopic = (t: TopicDraft) =>
+    changeTopics(
+      () => api<{ id: string }>(`/api/courses/${id}/topics`, { method: "POST", json: t }),
+      (r) => (r as { id?: string })?.id ?? null,
+    );
+
+  const addForm = adding && (
+    <TopicForm
+      heading="Add a topic"
+      parents={[...flat.values()]}
+      onCancel={() => setAdding(false)}
+      onSave={(t) => {
+        setAdding(false);
+        return addTopic(t);
+      }}
+    />
+  );
+
   if (!view) return error ? <div className="alert error">{error}</div> : <p className="muted">Loading…</p>;
 
   if (!view.tree.length) {
@@ -141,9 +173,15 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
             : "Add materials first, then build the brainmap."}
         </p>
         {error && <div className="alert error">{error}</div>}
-        <button className="primary" disabled={busy || !data.materials.length} onClick={build}>
-          {busy ? <Busy label="Structuring your materials…" /> : "Build brainmap"}
-        </button>
+        <div className="row" style={{ justifyContent: "center" }}>
+          <button className="primary" disabled={busy || !data.materials.length} onClick={build}>
+            {busy ? <Busy label="Structuring your materials…" /> : "Build brainmap"}
+          </button>
+          <button onClick={() => setAdding(true)} disabled={busy}>
+            Add topics yourself
+          </button>
+        </div>
+        {addForm && <div style={{ textAlign: "left", marginTop: 12 }}>{addForm}</div>}
       </div>
     );
   }
@@ -178,6 +216,9 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
             ))}
             <option value="clear">Clear all marks</option>
           </select>
+          <button onClick={() => setAdding(true)} title="Add a topic the map missed">
+            + Add topic
+          </button>
           <button onClick={nextUnmarked} disabled={counts.none === 0} title="Jump to the next unmarked topic (n)">
             Next unmarked
           </button>
@@ -190,6 +231,7 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
         </div>
       </div>
 
+      {addForm}
       <div className="split">
         <div>
           {mode === "map" && (
@@ -232,7 +274,23 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
         </div>
         <div className="card" style={{ position: "sticky", top: 70 }}>
           {sel ? (
-            <TopicPanel node={sel} courseMaterials={data.materials} onMark={mark} onLesson={(depth) => setLesson({ id: sel.id, title: sel.title, depth })} onSelect={setSelected} />
+            <TopicPanel
+              key={sel.id}
+              node={sel}
+              all={[...flat.values()]}
+              courseMaterials={data.materials}
+              onMark={mark}
+              onLesson={(depth) => setLesson({ id: sel.id, title: sel.title, depth })}
+              onSelect={setSelected}
+              onAddChild={(t) => addTopic({ ...t, parent_id: sel.id })}
+              onEdit={(t) => changeTopics(() => api(`/api/topics/${sel.id}`, { method: "PATCH", json: t }), () => sel.id)}
+              onDelete={(keepChildren) =>
+                changeTopics(
+                  () => api(`/api/topics/${sel.id}${keepChildren ? "?keepChildren=1" : ""}`, { method: "DELETE" }),
+                  () => sel.parent_id,
+                )
+              }
+            />
           ) : (
             <div className="muted">
               <h3>Mark what you know</h3>
@@ -320,20 +378,121 @@ function Outline({
   );
 }
 
+interface TopicDraft {
+  title: string;
+  summary: string;
+  parent_id: string | null;
+}
+
+/** Name, description and place of a topic, for adding one or fixing a detected one. */
+function TopicForm({
+  heading,
+  initial,
+  parents,
+  exclude,
+  onSave,
+  onCancel,
+}: {
+  heading: string;
+  initial?: Partial<TopicDraft>;
+  parents: TopicNode[];
+  exclude?: Set<string>;
+  onSave: (t: TopicDraft) => Promise<void> | void;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState(initial?.title ?? "");
+  const [summary, setSummary] = useState(initial?.summary ?? "");
+  const [parent, setParent] = useState(initial?.parent_id ?? "");
+  const [saving, setSaving] = useState(false);
+  const depth = useMemo(() => {
+    const byId = new Map(parents.map((p) => [p.id, p]));
+    return (n: TopicNode) => {
+      let d = 0;
+      for (let p = n.parent_id; p && d < 20; p = byId.get(p)?.parent_id ?? null) d++;
+      return d;
+    };
+  }, [parents]);
+  return (
+    <form
+      className="card stack"
+      style={{ gap: 8 }}
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!title.trim()) return;
+        setSaving(true);
+        try {
+          await onSave({ title: title.trim(), summary: summary.trim(), parent_id: parent || null });
+        } finally {
+          setSaving(false);
+        }
+      }}
+    >
+      <strong>{heading}</strong>
+      <label className="stack" style={{ gap: 2 }}>
+        <span className="small muted">Name</span>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus required maxLength={200} placeholder="e.g. Regularisation" />
+      </label>
+      <label className="stack" style={{ gap: 2 }}>
+        <span className="small muted">What it covers (optional, helps lessons and exams)</span>
+        <textarea value={summary} onChange={(e) => setSummary(e.target.value)} maxLength={2000} style={{ minHeight: 60 }} />
+      </label>
+      {initial?.parent_id !== undefined || !initial ? (
+        <label className="stack" style={{ gap: 2 }}>
+          <span className="small muted">Under</span>
+          <select value={parent} onChange={(e) => setParent(e.target.value)}>
+            <option value="">Top level</option>
+            {parents
+              .filter((p) => !exclude?.has(p.id))
+              .map((p) => (
+                <option key={p.id} value={p.id}>
+                  {"\u00a0\u00a0".repeat(depth(p))}
+                  {p.title}
+                </option>
+              ))}
+          </select>
+        </label>
+      ) : null}
+      <div className="row">
+        <button className="primary sm" type="submit" disabled={saving || !title.trim()}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+        <button className="sm" type="button" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 function TopicPanel({
   node,
+  all,
   courseMaterials,
   onMark,
   onLesson,
   onSelect,
+  onAddChild,
+  onEdit,
+  onDelete,
 }: {
   node: TopicNode;
+  all: TopicNode[];
   courseMaterials: CourseData["materials"];
   onMark: (id: string, m: Mastery | null, branch?: boolean) => void;
   onLesson: (depth: number) => void;
   onSelect: (id: string) => void;
+  onAddChild: (t: TopicDraft) => Promise<void>;
+  onEdit: (t: TopicDraft) => Promise<void>;
+  onDelete: (keepChildren: boolean) => Promise<void>;
 }) {
   const [branch, setBranch] = useState(true);
+  const [editing, setEditing] = useState<"add" | "edit" | "delete" | null>(null);
+  const branchIds = useMemo(() => {
+    const ids = new Set<string>();
+    const walk = (n: TopicNode) => (ids.add(n.id), n.children.forEach(walk));
+    walk(node);
+    return ids;
+  }, [node]);
   const [related, setRelated] = useState<Related[]>([]);
   useEffect(() => {
     api<{ related: Related[] }>(`/api/topics/${node.id}`)
@@ -398,6 +557,52 @@ function TopicPanel({
           ))}
         </div>
       )}
+      <div className="stack" style={{ gap: 6, borderTop: "1px solid var(--border)", paddingTop: 8 }}>
+        <div className="row">
+          <button className="sm" onClick={() => setEditing(editing === "add" ? null : "add")}>
+            + Subtopic
+          </button>
+          <button className="sm" onClick={() => setEditing(editing === "edit" ? null : "edit")}>
+            Edit
+          </button>
+          <button className="sm danger" onClick={() => setEditing(editing === "delete" ? null : "delete")}>
+            Delete
+          </button>
+        </div>
+        {editing === "add" && <TopicForm heading={`New subtopic of "${node.title}"`} initial={{}} parents={[]} onCancel={() => setEditing(null)} onSave={(t) => onAddChild(t).then(() => setEditing(null))} />}
+        {editing === "edit" && (
+          <TopicForm
+            heading="Edit topic"
+            initial={{ title: node.title, summary: node.summary, parent_id: node.parent_id ?? "" }}
+            parents={all}
+            exclude={branchIds}
+            onCancel={() => setEditing(null)}
+            onSave={(t) => onEdit(t).then(() => setEditing(null))}
+          />
+        )}
+        {editing === "delete" && (
+          <div className="card stack" style={{ gap: 6 }}>
+            <span>
+              {node.children.length
+                ? `Delete "${node.title}" and its ${countAll(node)} subtopics? Rebuilding the map won't bring them back.`
+                : `Delete "${node.title}"? Rebuilding the map won't bring it back.`}
+            </span>
+            <div className="row">
+              <button className="sm danger" onClick={() => onDelete(false)}>
+                {node.children.length ? "Delete the whole branch" : "Delete"}
+              </button>
+              {node.children.length > 0 && (
+                <button className="sm" onClick={() => onDelete(true)} title="Remove only this level; its subtopics move up">
+                  Delete only this topic
+                </button>
+              )}
+              <button className="sm" onClick={() => setEditing(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
       {related.length > 0 && (
         <div className="small">
           <div className="muted">Connected in other courses</div>

@@ -93,7 +93,7 @@ export function deleteCourse(id: string) {
 /* ---------------- Materials ---------------- */
 
 export function listMaterials(courseId: string, withText = false): Material[] {
-  const cols = withText ? "*" : "id, course_id, kind, title, source_type, filename, mime, path, url, substr(text, 1, 400) AS text, status, note, created_at";
+  const cols = withText ? "*" : "id, course_id, kind, title, source_type, filename, mime, path, url, substr(text, 1, 400) AS text, status, note, rel_path, created_at";
   return db().prepare(`SELECT ${cols} FROM materials WHERE course_id = ? ORDER BY created_at`).all(courseId) as Material[];
 }
 
@@ -106,12 +106,22 @@ export function insertMaterial(m: Omit<Material, "id" | "created_at">): Material
   const d = db();
   d.transaction(() => {
     d.prepare(
-      `INSERT INTO materials (id, course_id, kind, title, source_type, filename, mime, path, url, text, status, note)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, m.course_id, m.kind, m.title, m.source_type, m.filename, m.mime, m.path, m.url, m.text, m.status, m.note);
+      `INSERT INTO materials (id, course_id, kind, title, source_type, filename, mime, path, url, text, status, note, sha256, rel_path)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, m.course_id, m.kind, m.title, m.source_type, m.filename, m.mime, m.path, m.url, m.text, m.status, m.note, m.sha256 ?? null, m.rel_path ?? null);
     indexMaterialText(id, m.course_id, `${m.title}\n${m.text ?? ""}`);
   })();
   return getMaterial(id)!;
+}
+
+/** A file with this exact content already in the course, if any. */
+export function findMaterialByHash(courseId: string, sha256: string): Material | null {
+  return (db().prepare("SELECT id, title, rel_path FROM materials WHERE course_id = ? AND sha256 = ? LIMIT 1").get(courseId, sha256) as Material) ?? null;
+}
+
+/** A link already in the course, if any. */
+export function findMaterialByUrl(courseId: string, url: string): Material | null {
+  return (db().prepare("SELECT id, title, url FROM materials WHERE course_id = ? AND url = ? LIMIT 1").get(courseId, url) as Material) ?? null;
 }
 
 export function updateMaterial(id: string, patch: { title?: string; kind?: string; text?: string; note?: string | null }) {
@@ -212,9 +222,10 @@ export interface NewTopic {
  * their id, so marks, achieved depth, lessons, plan items and knowledge-base links
  * all survive a rebuild.
  */
-export function replaceTopics(courseId: string, topics: NewTopic[]) {
+export function replaceTopics(courseId: string, generated: NewTopic[]) {
   const d = db();
   const old = listTopics(courseId);
+  const topics = withoutRemoved(generated, removedTitles(courseId));
   const prev = new Map<string, Topic>();
   for (const t of old) {
     const k = normTitle(t.title);
@@ -236,8 +247,10 @@ export function replaceTopics(courseId: string, topics: NewTopic[]) {
     d.prepare("UPDATE topics SET parent_id = NULL WHERE course_id = ?").run(courseId);
     const del = d.prepare("DELETE FROM topics WHERE id = ?");
     const orphanItems = d.prepare("UPDATE plan_items SET topic_id = NULL WHERE topic_id = ?");
+    // Topics the student added or edited stay, unless the new map has a topic of the same name.
+    const keep = old.filter((t) => t.manual && !reused.has(t.id));
     for (const t of old) {
-      if (reused.has(t.id)) continue;
+      if (reused.has(t.id) || keep.includes(t)) continue;
       orphanItems.run(t.id);
       del.run(t.id);
     }
@@ -282,7 +295,119 @@ export function replaceTopics(courseId: string, topics: NewTopic[]) {
       if (cyclic) parentOf.set(id, null);
       else if (pid) setParent.run(pid, id);
     }
+    // Put kept topics back under their parent when it survived, else at the top level, after the new ones.
+    const alive = new Set([...done, ...keep.map((t) => t.id)]);
+    keep.forEach((t, i) => {
+      d.prepare("UPDATE topics SET position = ?, parent_id = ? WHERE id = ?").run(topics.length + i, t.parent_id && alive.has(t.parent_id) ? t.parent_id : null, t.id);
+      fts.run(t.title, t.summary, t.keywords.join(" "), t.id, courseId);
+    });
   })();
+}
+
+function removedTitles(courseId: string): Set<string> {
+  const r = db().prepare("SELECT removed_topics FROM courses WHERE id = ?").get(courseId) as { removed_topics: string | null } | undefined;
+  return new Set(json<string[]>(r?.removed_topics ?? null, []));
+}
+
+function setRemovedTitles(courseId: string, titles: Set<string>) {
+  db().prepare("UPDATE courses SET removed_topics = ? WHERE id = ?").run(JSON.stringify([...titles].slice(-2000)), courseId);
+}
+
+/** Drop topics the student deleted; their surviving subtopics move up to the nearest kept ancestor. */
+export function withoutRemoved(topics: NewTopic[], removed: Set<string>): NewTopic[] {
+  if (!removed.size) return topics;
+  const byRef = new Map(topics.map((t) => [t.ref, t]));
+  const gone = (t: NewTopic) => removed.has(normTitle(t.title));
+  return topics
+    .filter((t) => !gone(t))
+    .map((t) => {
+      let parent = t.parent_ref;
+      for (let hops = 0; parent && hops < 1000; hops++) {
+        const p = byRef.get(parent);
+        if (!p || !gone(p)) break;
+        parent = p.parent_ref;
+      }
+      return { ...t, parent_ref: parent };
+    });
+}
+
+function descendants(courseId: string, id: string): Topic[] {
+  const all = listTopics(courseId);
+  const out: Topic[] = [];
+  const walk = (pid: string) => all.filter((t) => t.parent_id === pid).forEach((t) => (out.push(t), walk(t.id)));
+  walk(id);
+  return out;
+}
+
+/** Add a topic by hand, at the end of its parent's subtopics (or of the top level). */
+export function addTopic(courseId: string, t: { title: string; summary?: string; parent_id?: string | null }): Topic {
+  const d = db();
+  const id = newId();
+  const parent = t.parent_id && getTopic(t.parent_id)?.course_id === courseId ? t.parent_id : null;
+  const { pos } = d.prepare("SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM topics WHERE course_id = ?").get(courseId) as { pos: number };
+  d.transaction(() => {
+    d.prepare(
+      `INSERT INTO topics (id, course_id, parent_id, title, summary, keywords, material_ids, importance, position, mastery, achieved_depth, manual)
+       VALUES (?, ?, ?, ?, ?, '[]', '[]', 2, ?, NULL, 0, 1)`,
+    ).run(id, courseId, parent, t.title, t.summary ?? "", pos);
+    d.prepare("INSERT INTO topics_fts (title, summary, keywords, topic_id, course_id) VALUES (?, ?, '', ?, ?)").run(t.title, t.summary ?? "", id, courseId);
+    const removed = removedTitles(courseId);
+    if (removed.delete(normTitle(t.title))) setRemovedTitles(courseId, removed);
+  })();
+  return getTopic(id)!;
+}
+
+/**
+ * Rename, re-describe or move a topic. Edited topics are kept on rebuilds; a renamed topic's old name
+ * is remembered as removed, so a rebuild doesn't bring it back next to the new one.
+ */
+export function editTopic(id: string, patch: { title?: string; summary?: string; parent_id?: string | null }): Topic | null {
+  const t = getTopic(id);
+  if (!t) return null;
+  const d = db();
+  let parent = t.parent_id;
+  if (patch.parent_id !== undefined) {
+    const p = patch.parent_id ? getTopic(patch.parent_id) : null;
+    const inBranch = new Set([id, ...descendants(t.course_id, id).map((x) => x.id)]);
+    if (patch.parent_id && (!p || p.course_id !== t.course_id || inBranch.has(p.id))) throw new Error("A topic can't move under itself or one of its own subtopics.");
+    parent = p?.id ?? null;
+  }
+  const title = patch.title?.trim() || t.title;
+  const summary = patch.summary ?? t.summary;
+  d.transaction(() => {
+    d.prepare("UPDATE topics SET title = ?, summary = ?, parent_id = ?, manual = 1 WHERE id = ?").run(title, summary, parent, id);
+    d.prepare("UPDATE topics_fts SET title = ?, summary = ? WHERE topic_id = ?").run(title, summary, id);
+    if (normTitle(title) !== normTitle(t.title)) {
+      const removed = removedTitles(t.course_id);
+      removed.add(normTitle(t.title));
+      removed.delete(normTitle(title));
+      setRemovedTitles(t.course_id, removed);
+    }
+  })();
+  return getTopic(id);
+}
+
+/**
+ * Delete a wrongly detected topic with its whole branch, or just the topic (its subtopics move up a level).
+ * Deleted names are remembered so rebuilding the brainmap doesn't bring them back.
+ */
+export function removeTopic(id: string, keepChildren = false): boolean {
+  const t = getTopic(id);
+  if (!t) return false;
+  const d = db();
+  const branch = keepChildren ? [t] : [t, ...descendants(t.course_id, id)];
+  d.transaction(() => {
+    if (keepChildren) d.prepare("UPDATE topics SET parent_id = ? WHERE parent_id = ?").run(t.parent_id, id);
+    const removed = removedTitles(t.course_id);
+    for (const b of branch) {
+      d.prepare("UPDATE plan_items SET topic_id = NULL WHERE topic_id = ?").run(b.id);
+      d.prepare("DELETE FROM topics_fts WHERE topic_id = ?").run(b.id);
+      removed.add(normTitle(b.title));
+    }
+    setRemovedTitles(t.course_id, removed);
+    d.prepare("DELETE FROM topics WHERE id = ?").run(id); // subtopics go with it (ON DELETE CASCADE)
+  })();
+  return true;
 }
 
 /** Mark a topic; by default the whole branch takes the new mark (children's own marks are cleared). */

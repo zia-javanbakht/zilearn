@@ -12,6 +12,7 @@ import {
   DEFAULT_SETTINGS,
   type TranscribeSettings,
 } from "../transcribe";
+import { batches, filterPicked, fromDrop, fromInput, type PickedFile } from "../folderImport";
 import { MATERIAL_KINDS, MATERIAL_KIND_LABELS, type Material, type MaterialKind } from "@/lib/types";
 import type { CourseData } from "./CourseWorkspace";
 
@@ -25,6 +26,8 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
   const [paste, setPaste] = useState({ title: "", text: "" });
   const [added, setAdded] = useState(0);
   const fileRef = useRef<HTMLInputElement>(null);
+  const folderRef = useRef<HTMLInputElement>(null);
+  const [report, setReport] = useState<{ added: number; skipped: { name: string; reason: string }[]; ignored: number } | null>(null);
 
   // Transcription runs one recording at a time, in the browser.
   const [settings, setSettings] = useState<TranscribeSettings>(DEFAULT_SETTINGS);
@@ -52,16 +55,22 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
     setBusy(label);
     setError(null);
     try {
-      const r = await fn();
-      if (Array.isArray(r)) {
-        setAdded((n) => n + r.length);
-        if (loadSettings().auto) for (const m of r as Material[]) if (isRecording(m) && m.status !== "ready") transcribe(m);
-      }
+      const r = (await fn()) as { materials?: Material[] } | undefined;
+      if (r?.materials) onAdded(r.materials);
       reload();
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setBusy(null);
+    }
+  }
+
+  /** Count new materials; recordings without text are transcribed (after the whole import, so captions found later win). */
+  function onAdded(list: Material[], defer?: Map<string, Material>) {
+    setAdded((n) => n + list.filter((m) => !defer?.has(m.id)).length);
+    for (const m of list) {
+      if (defer) defer.set(m.id, m);
+      else if (loadSettings().auto && isRecording(m) && m.status !== "ready") transcribe(m);
     }
   }
 
@@ -71,13 +80,46 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
     saveSettings(next);
   }
 
-  function upload(files: FileList | File[], forceKind?: MaterialKind) {
-    const list = Array.from(files);
-    if (!list.length) return;
-    const fd = new FormData();
-    list.forEach((f) => fd.append("files", f));
-    if (forceKind || kind) fd.append("kind", forceKind || kind);
-    return run(`Reading ${list.length} file${list.length > 1 ? "s" : ""}…`, () => api(`/api/courses/${id}/materials`, { method: "POST", body: fd }));
+  /** Upload files (or a whole folder) a few at a time, so big folders show progress and one bad file doesn't stop the rest. */
+  async function upload(picked: PickedFile[], forceKind?: MaterialKind) {
+    const { keep, ignored } = filterPicked(picked);
+    if (!keep.length) {
+      if (ignored) setReport({ added: 0, skipped: [], ignored });
+      return;
+    }
+    setBusy(`Importing ${keep.length} file${keep.length > 1 ? "s" : ""}…`);
+    setError(null);
+    setReport(null);
+    const total = { added: 0, skipped: [] as { name: string; reason: string }[], ignored };
+    const fresh = new Map<string, Material>();
+    let done = 0;
+    // Keep each folder's files together, so a video and its captions file usually arrive in the same batch.
+    keep.sort((a, b) => (a.path || a.file.name).localeCompare(b.path || b.file.name));
+    try {
+      for (const group of batches(keep)) {
+        const fd = new FormData();
+        for (const p of group) {
+          fd.append("files", p.file);
+          fd.append("paths", p.path);
+        }
+        if (forceKind || kind) fd.append("kind", forceKind || kind);
+        try {
+          const r = await api<{ materials: Material[]; skipped: { name: string; reason: string }[] }>(`/api/courses/${id}/materials`, { method: "POST", body: fd });
+          onAdded(r.materials, fresh);
+          total.skipped.push(...r.skipped);
+        } catch (e) {
+          total.skipped.push(...group.map((p) => ({ name: p.path || p.file.name, reason: (e as Error).message })));
+        }
+        done += group.length;
+        setBusy(`Importing ${done} of ${keep.length} files…`);
+        reload();
+      }
+      total.added = fresh.size; // a video updated by its captions later counts once
+      if (keep.length > 1 || total.skipped.length || ignored) setReport(total);
+      if (loadSettings().auto) for (const m of fresh.values()) if (isRecording(m) && m.status !== "ready") transcribe(m);
+    } finally {
+      setBusy(null);
+    }
   }
 
   function addUrl(url: string) {
@@ -87,7 +129,12 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
     setOver(false);
-    if (e.dataTransfer.files.length) return upload(e.dataTransfer.files);
+    if (e.dataTransfer.files.length) {
+      fromDrop(e.dataTransfer)
+        .then((list) => upload(list))
+        .catch(() => upload(Array.from(e.dataTransfer.files).map((file) => ({ file, path: "" }))));
+      return;
+    }
     const uri = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain");
     const urls = uri.split(/\s+/).filter((u) => /^https?:\/\//.test(u));
     if (urls.length) urls.forEach((u) => addUrl(u));
@@ -107,13 +154,70 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
         onDrop={onDrop}
         onClick={() => fileRef.current?.click()}
       >
-        <strong>{busy ?? "Drop files or links here"}</strong>
+        <strong>{busy ?? "Drop files, a whole folder, or links here"}</strong>
         <span className="muted small">
-          PDF, slides (PPTX), Word, text/Markdown, images of notes, audio memos, sample exams, workshop and tutorial sheets. You can also drag a
-          YouTube link from your browser.
+          PDF, slides (PPTX), Word, text/Markdown, images of notes, audio and video recordings (with .srt/.vtt captions), saved YouTube links, sample exams, workshop and tutorial sheets, or a .zip of them.
+          Folders are read with all their subfolders, and folder names like &quot;Tutorials&quot; or &quot;Past exams&quot; set the item type. You can
+          also drag a YouTube link from your browser.
         </span>
-        <input ref={fileRef} type="file" multiple hidden onChange={(e) => e.target.files && upload(e.target.files)} />
+        <div className="row" style={{ justifyContent: "center" }} onClick={(e) => e.stopPropagation()}>
+          <button className="sm" disabled={!!busy} onClick={() => fileRef.current?.click()}>
+            Choose files
+          </button>
+          <button className="sm" disabled={!!busy} onClick={() => folderRef.current?.click()}>
+            📁 Choose a folder
+          </button>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files) upload(fromInput(e.target.files));
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={folderRef}
+          type="file"
+          hidden
+          // @ts-expect-error: non-standard but supported by every current browser
+          webkitdirectory=""
+          onChange={(e) => {
+            if (e.target.files) upload(fromInput(e.target.files));
+            e.target.value = "";
+          }}
+        />
       </div>
+      {report && (
+        <div className="alert info stack" role="status">
+          <div className="spread">
+            <span>
+              Added {report.added} item{report.added === 1 ? "" : "s"}.
+              {report.skipped.length > 0 && ` Skipped ${report.skipped.length}.`}
+              {report.ignored > 0 && ` Left out ${report.ignored} system or non-study file${report.ignored === 1 ? "" : "s"}.`}
+            </span>
+            <button className="sm ghost" onClick={() => setReport(null)} aria-label="Dismiss">
+              ✕
+            </button>
+          </div>
+          {report.skipped.length > 0 && (
+            <details>
+              <summary style={{ cursor: "pointer" }} className="small">
+                What was skipped
+              </summary>
+              <ul className="small" style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                {report.skipped.slice(0, 200).map((s, i) => (
+                  <li key={i}>
+                    {s.name}: {s.reason}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
 
       <div className="row">
         <label className="field">
@@ -144,7 +248,7 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
       </div>
 
       <div className="row">
-        <Recorder onRecorded={(f) => upload([f], "audio_memo")} disabled={!!busy} />
+        <Recorder onRecorded={(f) => upload([{ file: f, path: "" }], "audio_memo")} disabled={!!busy} />
         <details className="grow">
           <summary style={{ cursor: "pointer" }} className="small">
             Transcription settings
@@ -248,7 +352,19 @@ function MaterialRow({
   const [text, setText] = useState("");
   const isAudio = isRecording(m);
   const running = job && !job.error;
-  const yt = m.url?.match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([\w-]{6,})/)?.[1];
+  const yt = m.url?.match(/(?:v=|youtu\.be\/|shorts\/|embed\/|live\/)([\w-]{6,})/)?.[1];
+  const [refetch, setRefetch] = useState<{ busy?: boolean; error?: string } | null>(null);
+
+  async function fetchAgain() {
+    setRefetch({ busy: true });
+    try {
+      await api(`/api/materials/${m.id}`, { method: "PATCH", json: { refresh: true } });
+      setRefetch(null);
+      reload();
+    } catch (e) {
+      setRefetch({ error: (e as Error).message });
+    }
+  }
 
   async function toggle() {
     if (!open && !full) {
@@ -276,6 +392,11 @@ function MaterialRow({
             ))}
           </select>
           <strong style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{m.title}</strong>
+          {m.rel_path && (
+            <span className="small muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={m.rel_path}>
+              {m.rel_path.split("/").slice(0, -1).join(" / ")}
+            </span>
+          )}
           {m.status !== "ready" && <span className={`badge ${m.status === "error" ? "dont_know" : "familiar"}`}>{m.status === "error" ? "error" : "needs text"}</span>}
         </div>
         <div className="row">
@@ -288,6 +409,11 @@ function MaterialRow({
             <a className="btn sm" href={m.url} target="_blank" rel="noreferrer">
               Link
             </a>
+          )}
+          {yt && m.status !== "ready" && (
+            <button className="sm" disabled={refetch?.busy} onClick={fetchAgain} title="Fetch the video's transcript again">
+              {refetch?.busy ? "Fetching…" : "Try again"}
+            </button>
           )}
           {isAudio && m.path && (
             <button className={`sm${m.status === "ready" ? "" : " primary"}`} disabled={!!running} onClick={onTranscribe}>
@@ -316,8 +442,16 @@ function MaterialRow({
       ) : (
         m.note && <div className="small muted">{m.note}</div>
       )}
+      {refetch?.error && (
+        <div className="small" role="status" style={{ color: "var(--dont)" }}>
+          {refetch.error}
+        </div>
+      )}
       {isAudio && m.path && (m.mime ?? "").startsWith("audio/") && (
         <audio controls preload="none" src={`/api/materials/${m.id}/file`} style={{ width: "100%", marginTop: 6 }} />
+      )}
+      {isAudio && m.path && (m.mime ?? "").startsWith("video/") && open && (
+        <video controls preload="metadata" src={`/api/materials/${m.id}/file`} style={{ width: "100%", maxWidth: 640, maxHeight: 360, marginTop: 6, borderRadius: 8 }} />
       )}
       {yt && open && (
         <iframe

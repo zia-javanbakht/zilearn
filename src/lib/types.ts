@@ -4,6 +4,7 @@ export const MATERIAL_KINDS = [
   "pdf",
   "youtube",
   "audio_memo",
+  "video",
   "sample_exam",
   "workshop",
   "tutorial",
@@ -18,6 +19,7 @@ export const MATERIAL_KIND_LABELS: Record<MaterialKind, string> = {
   pdf: "PDF",
   youtube: "YouTube",
   audio_memo: "Audio memo",
+  video: "Video",
   sample_exam: "Sample exam",
   workshop: "Workshop",
   tutorial: "Tutorial",
@@ -85,6 +87,8 @@ export interface Material {
   text: string | null;
   status: "ready" | "error" | "partial";
   note: string | null;
+  sha256?: string | null; // content hash of an uploaded file
+  rel_path?: string | null; // e.g. "Week 3/Lecture notes.pdf" when imported from a folder or zip
   created_at: string;
 }
 
@@ -100,6 +104,7 @@ export interface Topic {
   position: number;
   mastery: Mastery | null;
   achieved_depth: number;
+  manual?: number; // 1 when the student added or edited it
 }
 
 export interface TopicNode extends Topic {

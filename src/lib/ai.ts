@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
-import { ApiError as GeminiApiError, FinishReason, GoogleGenAI, type Part } from "@google/genai";
+import { ApiError as GeminiApiError, FinishReason, GoogleGenAI, MediaResolution, type Part } from "@google/genai";
 import { z } from "zod";
 
 /**
@@ -150,6 +150,32 @@ async function geminiCall(opts: CallOpts, schema?: z.ZodType): Promise<{ text: s
   if (finish && [FinishReason.SAFETY, FinishReason.PROHIBITED_CONTENT, FinishReason.BLOCKLIST, FinishReason.SPII, FinishReason.RECITATION].includes(finish))
     throw new AIRefusalError("Gemini declined this request.");
   return { text: text.trim(), truncated: finish === FinishReason.MAX_TOKENS };
+}
+
+/**
+ * Transcript of a public YouTube video, written by Gemini watching it (for videos without captions).
+ * Low media resolution keeps an hour-long lecture well inside the context window: the speech is what matters.
+ */
+export async function transcribeVideoUrl(url: string): Promise<string | null> {
+  if (provider() !== "gemini") return null;
+  const stream = await geminiClient().models.generateContentStream({
+    model: GEMINI_MODEL,
+    contents: [
+      {
+        role: "user",
+        parts: [
+          { fileData: { fileUri: url, mimeType: "video/*" } },
+          {
+            text: "Transcribe the speech in this video for a student's study notes. Start a new paragraph about every minute, beginning with its [mm:ss] timestamp. Write maths in LaTeX ($...$). Where a slide or the board shows something important that is not said aloud (a formula, a diagram, a definition), add it in [brackets]. Output only the transcript.",
+          },
+        ],
+      },
+    ],
+    config: { maxOutputTokens: 60000, mediaResolution: MediaResolution.MEDIA_RESOLUTION_LOW, abortSignal: requestSignal.getStore() },
+  });
+  let text = "";
+  for await (const chunk of stream) text += chunk.text ?? "";
+  return text.trim() || null;
 }
 
 /* ---------------- Public API ---------------- */
