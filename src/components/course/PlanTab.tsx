@@ -185,6 +185,7 @@ export function PlanTab({ data, reload, go }: { data: CourseData; reload: () => 
         <p className="muted">Loading…</p>
       ) : plan === null ? null : (
         <>
+          <CalendarExport courseId={course.id} />
           {cards && cards.due + cards.fresh > 0 && (
             <div className="alert info spread">
               <span>
@@ -346,4 +347,60 @@ function formatDay(d: string) {
 /** The user's local calendar date (not UTC). */
 function localDate(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Put the plan in the student's calendar: download an .ics file or subscribe to a live feed. */
+function CalendarExport({ courseId }: { courseId: string }) {
+  const [opts, setOpts] = useState({ start: "18:00", mode: "sessions", remind: "10" });
+  const [copied, setCopied] = useState(false);
+  const query = new URLSearchParams({ start: opts.start, mode: opts.mode, remind: opts.remind, from: localToday() }).toString();
+  const path = `/api/courses/${courseId}/plan/ics?${query}`;
+  // A subscription keeps following plan rebuilds, so it shouldn't be pinned to today's date.
+  const feed = typeof window === "undefined" ? "" : `${window.location.origin}/api/courses/${courseId}/plan/ics?${new URLSearchParams({ start: opts.start, mode: opts.mode, remind: opts.remind })}`;
+  const local = typeof window !== "undefined" && /^(localhost|127\.|\[::1\])/.test(window.location.hostname);
+  return (
+    <details className="card">
+      <summary style={{ cursor: "pointer", fontWeight: 600 }}>📅 Add the plan to your calendar</summary>
+      <div className="row" style={{ marginTop: 10 }}>
+        <label className="field">
+          Study time each day
+          <input type="time" value={opts.start} onChange={(e) => setOpts({ ...opts, start: e.target.value || "18:00" })} />
+        </label>
+        <label className="field">
+          Events
+          <select value={opts.mode} onChange={(e) => setOpts({ ...opts, mode: e.target.value })}>
+            <option value="sessions">One per session</option>
+            <option value="days">One per day</option>
+          </select>
+        </label>
+        <label className="field">
+          Reminder
+          <select value={opts.remind} onChange={(e) => setOpts({ ...opts, remind: e.target.value })}>
+            <option value="none">None</option>
+            <option value="0">At start</option>
+            <option value="10">10 min before</option>
+            <option value="30">30 min before</option>
+            <option value="60">1 hour before</option>
+          </select>
+        </label>
+        <a className="btn primary" style={{ alignSelf: "flex-end" }} href={`${path}&download=1`} download>
+          Download .ics
+        </a>
+        <a className="btn" style={{ alignSelf: "flex-end" }} href={feed.replace(/^https?:/, "webcal:")}>
+          Subscribe
+        </a>
+        <button
+          style={{ alignSelf: "flex-end" }}
+          onClick={() => navigator.clipboard?.writeText(feed).then(() => (setCopied(true), setTimeout(() => setCopied(false), 1500)))}
+        >
+          {copied ? "Copied" : "Copy feed link"}
+        </button>
+      </div>
+      <p className="small muted" style={{ margin: "8px 0 0" }}>
+        Download imports the remaining sessions once (Google Calendar: Settings → Import). Subscribe keeps your calendar in step when you rebuild the
+        plan (Apple Calendar, Outlook).
+        {local && " Subscribing from Google Calendar needs ziLearn to be reachable from the internet; on this computer, use Download instead."}
+      </p>
+    </details>
+  );
 }
