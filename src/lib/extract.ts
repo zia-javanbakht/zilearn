@@ -47,7 +47,7 @@ export async function extractFile(buf: Buffer, filename: string, mime: string): 
       return {
         text: "",
         status: "partial",
-        note: "Audio saved. Paste a transcript or your notes for this memo so it can be included in the brainmap and search.",
+        note: "Recording saved. Use Transcribe to turn it into text on this device (nothing is uploaded), or paste your own notes.",
       };
     }
     return { text: "", status: "partial", note: "Unsupported file type. Add a description or notes for this item." };
@@ -164,4 +164,24 @@ export function stripHtml(html: string) {
   )
     .replace(/&nbsp;/g, " ")
     .replace(/\n{3,}/g, "\n\n");
+}
+
+/**
+ * Turn a raw speech-recognition transcript into study notes with Claude. Keeps the [mm:ss] markers
+ * so the student can jump back to the recording. Returns null when Claude isn't available or the
+ * transcript is too long to rewrite in one pass (the raw transcript is kept then).
+ */
+export async function tidyTranscript(title: string, kind: string, raw: string): Promise<string | null> {
+  if (!aiEnabled() || raw.length > 150_000) return null;
+  const { text, truncated } = await generateText({
+    effort: "low",
+    maxTokens: 32000,
+    context: `<transcript title="${title.replace(/"/g, "'")}" kind="${kind}">\n${raw}\n</transcript>`,
+    prompt: `Above is an automatic speech-to-text transcript of a student's recording (a lecture, tutorial or voice memo). Rewrite it as clean study notes in Markdown:
+- Fix obvious recognition errors using the context (technical terms, names, formulas). Write maths in LaTeX ($...$).
+- Organise it under headings by topic, in the order it was said. Start each heading with the [mm:ss] marker where that part begins.
+- Keep every substantive point, definition, example, and anything flagged as important or examinable ("this will be on the exam"). Drop filler, repetition and small talk.
+- Do not add facts that are not in the recording.`,
+  });
+  return truncated || !text ? null : text;
 }

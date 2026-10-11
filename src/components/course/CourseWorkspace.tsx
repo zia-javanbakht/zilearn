@@ -31,7 +31,7 @@ const TABS = [
   ["settings", "Settings"],
 ] as const;
 type Tab = (typeof TABS)[number][0];
-const KEEP: Tab[] = ["cards", "exams", "notes", "podcasts"];
+const KEEP: Tab[] = ["materials", "cards", "exams", "notes", "podcasts"];
 
 export function CourseWorkspace({ id }: { id: string }) {
   const [data, setData] = useState<CourseData | null>(null);
@@ -106,7 +106,11 @@ export function CourseWorkspace({ id }: { id: string }) {
         ))}
       </div>
 
-      {tab === "materials" && <MaterialsTab data={data} reload={reload} onBrainmap={() => go("brainmap")} />}
+      {(tab === "materials" || kept.has("materials")) && (
+        <div hidden={tab !== "materials"}>
+          <MaterialsTab data={data} reload={reload} onBrainmap={() => go("brainmap")} />
+        </div>
+      )}
       {tab === "brainmap" && <BrainmapTab data={data} reload={reload} onPlan={() => go("plan")} />}
       {tab === "plan" && <PlanTab data={data} reload={reload} go={go} />}
       {(tab === "cards" || kept.has("cards")) && (
