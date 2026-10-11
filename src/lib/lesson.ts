@@ -287,7 +287,13 @@ export function lessonMermaid(doc: LessonDoc): string {
   doc.map.after.forEach((b, i) => lines.push(`  A${i}[${q(b)}]:::side`, `  T -. leads to .-> A${i}`));
   doc.map.children.slice(0, 8).forEach((c, i) => lines.push(`  C${i}[${q(c.title)}]`, `  T --> C${i}`));
   doc.map.related.slice(0, 4).forEach((r, i) => lines.push(`  R${i}[${q(`${r.title} · ${r.course}`)}]:::other`, `  T <-. related .-> R${i}`));
-  lines.push("  classDef me fill:#e8edff,stroke:#3b5bdb,stroke-width:2px", "  classDef side fill:#f5f5f5,stroke:#999", "  classDef other fill:#fff4e6,stroke:#e8590c");
+    // Explicit text colours so the light boxes stay readable when the app is in dark mode.
+  lines.push(
+    "  classDef default fill:#f8f9fa,stroke:#868e96,color:#1f2433",
+    "  classDef me fill:#e8edff,stroke:#3b5bdb,stroke-width:2px,color:#1f2433",
+    "  classDef side fill:#f5f5f5,stroke:#999,color:#1f2433",
+    "  classDef other fill:#fff4e6,stroke:#e8590c,color:#1f2433",
+  );
   return lines.filter(Boolean).join("\n");
 }
 

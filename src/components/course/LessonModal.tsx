@@ -209,7 +209,8 @@ export function LessonModal({
                 {title}
               </h2>
               <div className="small muted">
-                Level {depth} · {level.name}: {level.goal}
+                Level {depth} · {level.name}
+                <span className="reader-goal">: {level.goal}</span>
               </div>
             </div>
             <button className="ghost" onClick={onClose} aria-label="Close" title="Close (Esc)">
