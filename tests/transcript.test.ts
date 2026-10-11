@@ -50,3 +50,44 @@ describe("saving a transcript", () => {
     expect(search("entropy").length).toBeGreaterThan(0);
   });
 });
+
+describe("podcast audio", () => {
+  beforeEach(() => setDb(openDb(":memory:")));
+
+  it("stores an MP3 with segment marks, serves byte ranges, and rejects non-MP3 uploads", async () => {
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    process.env.ZILEARN_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "zl-"));
+    const { savePodcast } = await import("@/lib/store");
+    const route = await import("@/app/api/podcasts/[id]/audio/route");
+    const c = createCourse({ name: "Audio" });
+    const p = savePodcast({ course_id: c.id, title: "Ep 1", scope: "All", hosts: { A: "Alex", B: "Sam" }, segments: [{ speaker: "A", text: "Hi" }, { speaker: "B", text: "Hello" }], generated_by: "heuristic" });
+    const ctx = { params: Promise.resolve({ id: p.id }) };
+    const put = (bytes: number[], marks: unknown) => {
+      const fd = new FormData();
+      fd.append("audio", new File([new Uint8Array(bytes)], "x.mp3"));
+      fd.append("marks", JSON.stringify(marks));
+      return route.PUT(new Request("http://x", { method: "PUT", body: fd }), ctx);
+    };
+    expect((await put([0x3c, 0x68, 0x74], [0, 1])).status).toBe(400);
+    const mp3 = [0x49, 0x44, 0x33, ...Array.from({ length: 97 }, (_, i) => i)];
+    const saved = await (await put(mp3, [0, 1.5])).json();
+    expect(saved.audio).toMatch(/podcasts/);
+    expect(saved.audio_marks).toEqual([0, 1.5]);
+    const full = await route.GET(new Request("http://x"), ctx);
+    expect(full.headers.get("content-type")).toBe("audio/mpeg");
+    expect((await full.arrayBuffer()).byteLength).toBe(100);
+    const part = await route.GET(new Request("http://x", { headers: { range: "bytes=10-19" } }), ctx);
+    expect(part.status).toBe(206);
+    expect(part.headers.get("content-range")).toBe("bytes 10-19/100");
+    expect(new Uint8Array(await part.arrayBuffer())[0]).toBe(7);
+  });
+});
+
+describe("segmentAt", () => {
+  it("finds the segment playing at a time", async () => {
+    const { segmentAt } = await import("@/components/podcastAudio");
+    expect([0, 0.5, 2, 2.1, 9].map((t) => segmentAt([0, 2, 5], t))).toEqual([0, 0, 1, 1, 2]);
+  });
+});

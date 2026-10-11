@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { describeRecordProgress, recordPodcast, segmentAt, VOICES, type Voice } from "../podcastAudio";
 import { Busy } from "../Busy";
 import { ScopePicker, type ScopeValue } from "./ScopePicker";
 import type { Podcast } from "@/lib/types";
@@ -15,6 +16,20 @@ export function PodcastsTab({ data }: { data: CourseData }) {
   const [minutes, setMinutes] = useState(10);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // MP3 recordings in progress, kept here so they survive switching episodes.
+  const [jobs, setJobs] = useState<Record<string, { label: string; error?: boolean }>>({});
+
+  async function record(p: Podcast, voices: { A: Voice; B: Voice }) {
+    setJobs((j) => ({ ...j, [p.id]: { label: "Starting…" } }));
+    try {
+      const updated = await recordPodcast(p, voices, (x) => setJobs((j) => ({ ...j, [p.id]: { label: describeRecordProgress(x) } })));
+      setJobs(({ [p.id]: _, ...rest }) => rest);
+      setPodcasts((list) => list?.map((x) => (x.id === p.id ? updated : x)) ?? list);
+      setOpen((o) => (o?.id === p.id ? updated : o));
+    } catch (e) {
+      setJobs((j) => ({ ...j, [p.id]: { label: (e as Error).message, error: true } }));
+    }
+  }
 
   const load = () =>
     api<Podcast[]>(`/api/courses/${id}/podcasts`)
@@ -77,14 +92,36 @@ export function PodcastsTab({ data }: { data: CourseData }) {
               </div>
             ))}
           </div>
-          {open && <Player key={open.id} podcast={open} onDelete={async () => (await api(`/api/podcasts/${open.id}`, { method: "DELETE" }), setOpen(null), load())} />}
+          {open && (
+            <Player
+              key={open.id}
+              podcast={open}
+              job={jobs[open.id]}
+              onRecord={(v) => record(open, v)}
+              onDelete={async () => (await api(`/api/podcasts/${open.id}`, { method: "DELETE" }), setOpen(null), load())}
+            />
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function Player({ podcast, onDelete }: { podcast: Podcast; onDelete: () => void }) {
+function Player({
+  podcast,
+  job,
+  onRecord,
+  onDelete,
+}: {
+  podcast: Podcast;
+  job?: { label: string; error?: boolean };
+  onRecord: (voices: { A: Voice; B: Voice }) => void;
+  onDelete: () => void;
+}) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [hostVoices, setHostVoices] = useState<{ A: Voice; B: Voice }>({ A: "af_heart", B: "am_michael" });
+  const recorded = !!podcast.audio;
+  const recording = !!job && !job.error;
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [voiceA, setVoiceA] = useState("");
   const [voiceB, setVoiceB] = useState("");
@@ -117,6 +154,12 @@ function Player({ podcast, onDelete }: { podcast: Podcast; onDelete: () => void 
   }, [supported]);
 
   function playFrom(i: number) {
+    const a = audioRef.current;
+    if (recorded && a && podcast.audio_marks) {
+      a.currentTime = podcast.audio_marks[i] ?? 0;
+      a.play().catch(() => {});
+      return;
+    }
     if (!supported) return;
     const gen = ++genRef.current;
     speechSynthesis.cancel();
@@ -181,8 +224,33 @@ function Player({ podcast, onDelete }: { podcast: Podcast; onDelete: () => void 
           </button>
         </div>
       </div>
-      {!supported ? (
-        <div className="alert">This browser can&apos;t read text aloud. You can still read or download the script.</div>
+      {recorded ? (
+        <div className="stack">
+          <audio
+            ref={audioRef}
+            controls
+            preload="metadata"
+            src={`/api/podcasts/${podcast.id}/audio?v=${encodeURIComponent(podcast.audio ?? "")}`}
+            style={{ width: "100%" }}
+            onTimeUpdate={(e) => {
+              if (!podcast.audio_marks) return;
+              const k = segmentAt(podcast.audio_marks, e.currentTarget.currentTime);
+              if (k !== current) {
+                setCurrent(k);
+                document.getElementById(`seg-${k}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+              }
+            }}
+            onEnded={() => setCurrent(null)}
+          />
+          <div className="row small">
+            <a className="btn sm primary" href={`/api/podcasts/${podcast.id}/audio?download=1`} download>
+              ⬇ Download MP3
+            </a>
+            <span className="muted">Put it on your phone and listen anywhere.</span>
+          </div>
+        </div>
+      ) : !supported ? (
+        <div className="alert">This browser can&apos;t read text aloud. Make an MP3 below, or read or download the script.</div>
       ) : (
         <div className="row">
           {!playing && current === null && (
@@ -214,6 +282,31 @@ function Player({ podcast, onDelete }: { podcast: Podcast; onDelete: () => void 
           </label>
         </div>
       )}
+      <details open={!recorded} className="small">
+        <summary style={{ cursor: "pointer" }}>{recorded ? "Record again with different voices" : "Make an MP3 with natural voices"}</summary>
+        <div className="row" style={{ marginTop: 8 }}>
+          {(["A", "B"] as const).map((h) => (
+            <label key={h} className="field">
+              {podcast.hosts[h]}
+              <select value={hostVoices[h]} onChange={(e) => setHostVoices({ ...hostVoices, [h]: e.target.value as Voice })}>
+                {Object.entries(VOICES).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+          <button className={recorded ? "" : "primary"} style={{ alignSelf: "flex-end" }} disabled={recording} onClick={() => onRecord(hostVoices)}>
+            {recording ? <Busy label={job!.label} hint="runs on this device" /> : recorded ? "Record again" : "🎙 Make MP3"}
+          </button>
+        </div>
+        {job?.error && <div className="alert error">{job.label}</div>}
+        <p className="muted" style={{ margin: "6px 0 0" }}>
+          The voices run in your browser (Kokoro, an open text-to-speech model, about 90 MB downloaded once). English only. Long episodes take a few
+          minutes; you can keep using the app meanwhile.
+        </p>
+      </details>
       <div style={{ maxHeight: 520, overflow: "auto" }}>
         {podcast.segments.map((s, i) => (
           <div key={i} id={`seg-${i}`} className={`segment ${s.speaker}${current === i ? " playing" : ""}`} onClick={() => playFrom(i)}

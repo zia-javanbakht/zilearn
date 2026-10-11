@@ -190,6 +190,8 @@ export interface Podcast {
   scope: string;
   hosts: { A: string; B: string };
   segments: PodcastSegment[];
+  audio: string | null; // recorded MP3 (path relative to the data dir)
+  audio_marks: number[] | null; // start second of each segment in the MP3
   created_at: string;
   generated_by: "claude" | "heuristic";
 }

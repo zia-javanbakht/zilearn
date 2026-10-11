@@ -432,10 +432,24 @@ export function listNotes(courseId: string): ReviewNote[] {
 }
 
 function mapPodcast(r: Row): Podcast {
-  return { ...(r as unknown as Podcast), hosts: json(r.hosts, { A: "Alex", B: "Sam" }), segments: json(r.segments, []) };
+  return {
+    ...(r as unknown as Podcast),
+    hosts: json(r.hosts, { A: "Alex", B: "Sam" }),
+    segments: json(r.segments, []),
+    audio_marks: json(r.audio_marks, null),
+  };
 }
 
-export function savePodcast(p: Omit<Podcast, "id" | "created_at">): Podcast {
+export function getPodcast(id: string): Podcast | null {
+  const r = db().prepare("SELECT * FROM podcasts WHERE id = ?").get(id) as Row | undefined;
+  return r ? mapPodcast(r) : null;
+}
+
+export function setPodcastAudio(id: string, audio: string | null, marks: number[] | null) {
+  db().prepare("UPDATE podcasts SET audio = ?, audio_marks = ? WHERE id = ?").run(audio, marks ? JSON.stringify(marks) : null, id);
+}
+
+export function savePodcast(p: Omit<Podcast, "id" | "created_at" | "audio" | "audio_marks">): Podcast {
   const id = newId();
   db()
     .prepare("INSERT INTO podcasts (id, course_id, title, scope, hosts, segments, generated_by) VALUES (?, ?, ?, ?, ?, ?, ?)")

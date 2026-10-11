@@ -129,6 +129,8 @@ CREATE TABLE IF NOT EXISTS podcasts (
   scope TEXT NOT NULL,
   hosts TEXT NOT NULL,
   segments TEXT NOT NULL,
+  audio TEXT,
+  audio_marks TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   generated_by TEXT NOT NULL
 );
@@ -168,6 +170,19 @@ CREATE INDEX IF NOT EXISTS idx_links_to ON links(to_topic);
 CREATE INDEX IF NOT EXISTS idx_cards_course_due ON cards(course_id, due);
 `;
 
+/** Columns added after the first release; CREATE TABLE IF NOT EXISTS doesn't add them to old databases. */
+const COLUMNS: [table: string, column: string, type: string][] = [
+  ["podcasts", "audio", "TEXT"], // path of the recorded MP3, relative to the data dir
+  ["podcasts", "audio_marks", "TEXT"], // JSON: start time in seconds of each segment in the MP3
+];
+
+function migrate(db: Database.Database) {
+  for (const [table, column, type] of COLUMNS) {
+    const have = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column);
+    if (!have) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
+
 let instance: Database.Database | null = null;
 
 export function openDb(file?: string): Database.Database {
@@ -175,6 +190,7 @@ export function openDb(file?: string): Database.Database {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+  migrate(db);
   return db;
 }
 
