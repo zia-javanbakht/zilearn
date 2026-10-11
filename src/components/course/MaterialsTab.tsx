@@ -14,6 +14,7 @@ import {
 } from "../transcribe";
 import { batches, filterPicked, fromDrop, fromInput, type PickedFile } from "../folderImport";
 import { MATERIAL_KINDS, MATERIAL_KIND_LABELS, type Material, type MaterialKind } from "@/lib/types";
+import { hasTimestamps } from "@/lib/transcript";
 import type { CourseData } from "./CourseWorkspace";
 
 export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; reload: () => void; onBrainmap: () => void }) {
@@ -68,10 +69,19 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
   /** Count new materials; recordings without text are transcribed (after the whole import, so captions found later win). */
   function onAdded(list: Material[], defer?: Map<string, Material>) {
     setAdded((n) => n + list.filter((m) => !defer?.has(m.id)).length);
+    if (defer) for (const m of list) defer.set(m.id, m);
+    else afterImport(list);
+  }
+
+  /** Transcribe recordings that came without text, and clean up imported transcripts if the student turned timestamps off. */
+  function afterImport(list: Iterable<Material>) {
+    const s = loadSettings();
+    const cleanups: Promise<unknown>[] = [];
     for (const m of list) {
-      if (defer) defer.set(m.id, m);
-      else if (loadSettings().auto && isRecording(m) && m.status !== "ready") transcribe(m);
+      if (s.auto && isRecording(m) && m.status !== "ready") transcribe(m);
+      else if (!s.stamps && hasTimestamps(m.text)) cleanups.push(api(`/api/materials/${m.id}`, { method: "PATCH", json: { clean: true } }));
     }
+    if (cleanups.length) Promise.allSettled(cleanups).then(reload);
   }
 
   function update(p: Partial<TranscribeSettings>) {
@@ -116,7 +126,7 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
       }
       total.added = fresh.size; // a video updated by its captions later counts once
       if (keep.length > 1 || total.skipped.length || ignored) setReport(total);
-      if (loadSettings().auto) for (const m of fresh.values()) if (isRecording(m) && m.status !== "ready") transcribe(m);
+      afterImport(fresh.values());
     } finally {
       setBusy(null);
     }
@@ -281,6 +291,9 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
             <label className="row">
               <input type="checkbox" checked={settings.auto} onChange={(e) => update({ auto: e.target.checked })} /> Transcribe new recordings automatically
             </label>
+            <label className="row" title="Timestamps help you find a spot in the recording; without them transcripts read like plain notes">
+              <input type="checkbox" checked={!settings.stamps} onChange={(e) => update({ stamps: !e.target.checked })} /> Clean up transcripts: remove [mm:ss] timestamps
+            </label>
           </div>
           <p className="small muted">
             Speech recognition runs in your browser with OpenAI&apos;s open Whisper model; your recordings are not uploaded anywhere. The model downloads once and
@@ -418,6 +431,22 @@ function MaterialRow({
           {isAudio && m.path && (
             <button className={`sm${m.status === "ready" ? "" : " primary"}`} disabled={!!running} onClick={onTranscribe}>
               {m.status === "ready" ? "Re-transcribe" : "Transcribe"}
+            </button>
+          )}
+          {hasTimestamps(m.text) && !running && (
+            <button
+              className="sm"
+              title="Remove the [mm:ss] timestamps so the transcript reads like plain notes"
+              onClick={async () => {
+                const f = await api<Material>(`/api/materials/${m.id}`, { method: "PATCH", json: { clean: true } });
+                if (full) {
+                  setFull(f);
+                  setText(f.text ?? "");
+                }
+                reload();
+              }}
+            >
+              Clean up
             </button>
           )}
           <button className="sm" onClick={toggle}>

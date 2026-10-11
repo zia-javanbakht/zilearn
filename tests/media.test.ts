@@ -150,3 +150,14 @@ describe("importing recordings", () => {
     expect(listMaterials(c.id)[0].rel_path).toBe("ML/v.webloc");
   });
 });
+
+describe("cleaning transcripts", () => {
+  it("removes timestamps but keeps paragraphs, headings and lists", async () => {
+    const { stripTimestamps, hasTimestamps } = await import("@/lib/transcript");
+    const raw = "[00:01] Welcome to lecture five.\n\n[01:05] Today: gradient descent.\n\n## [02:10] Momentum\n- [02:15] adds velocity\n[1:02:03]\n\nA range [03:00]-[03:10] and [04:00] inline.";
+    expect(hasTimestamps(raw)).toBe(true);
+    expect(stripTimestamps(raw)).toBe("Welcome to lecture five.\n\nToday: gradient descent.\n\n## Momentum\n- adds velocity\n\nA range and inline.");
+    expect(hasTimestamps(stripTimestamps(raw))).toBe(false);
+    expect(stripTimestamps("No stamps here.\n\nAt 10:30 we meet.")).toBe("No stamps here.\n\nAt 10:30 we meet.");
+  });
+});

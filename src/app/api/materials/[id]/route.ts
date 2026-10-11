@@ -7,6 +7,7 @@ import { tidyTranscript } from "@/lib/extract";
 import { providerName } from "@/lib/ai";
 import { MATERIAL_KINDS } from "@/lib/types";
 import { fetchYoutube, youtubeId, youtubeNote } from "@/lib/youtube";
+import { stripTimestamps } from "@/lib/transcript";
 
 export const dynamic = "force-dynamic";
 
@@ -19,11 +20,12 @@ export const maxDuration = 300;
 
 /**
  * Edit a material. `transcript: true` marks the text as a speech-to-text transcript made in the browser;
- * `refresh: true` fetches a YouTube video's transcript again (captions are often added after upload).
+ * `refresh: true` fetches a YouTube video's transcript again (captions are often added after upload);
+ * `clean: true` removes the [mm:ss] timestamps (from the text sent, or else from the saved text).
  */
 export const PATCH = handle(async (req: Request, { params }: Ctx<{ id: string }>) => {
   const id = (await params).id;
-  const b = await body<{ title?: string; kind?: string; text?: string; transcript?: boolean; tidy?: boolean; refresh?: boolean }>(req);
+  const b = await body<{ title?: string; kind?: string; text?: string; transcript?: boolean; tidy?: boolean; refresh?: boolean; clean?: boolean }>(req);
   const current = getMaterial(id);
   if (!current) return fail("Not found", 404);
   if (b.refresh) {
@@ -56,6 +58,13 @@ export const PATCH = handle(async (req: Request, { params }: Ctx<{ id: string }>
         : "Transcribed on this device. [mm:ss] marks where each part is in the recording.";
   } else if (patch.text?.trim() && current.status !== "ready") {
     patch.note = null;
+  }
+  if (b.clean) {
+    const source = patch.text ?? current.text ?? "";
+    patch.text = stripTimestamps(source);
+    // Drop the sentence telling the student what the (now removed) markers mean.
+    const note = patch.note !== undefined ? patch.note : current.note;
+    patch.note = note?.replace(/\s*\[mm:ss\][^.]*\./, "").trim() || null;
   }
   const m = updateMaterial(id, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)));
   return m ? ok(m) : fail("Not found", 404);

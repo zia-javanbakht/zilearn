@@ -92,3 +92,24 @@ export function decodeEntities(s: string): string {
     .replace(/&nbsp;/g, " ")
     .replace(/&amp;/g, "&");
 }
+
+const STAMP = /\[(?:\d{1,2}:)?\d{1,2}:\d{2}\]/;
+
+/** Whether a text has [mm:ss] markers to clean up. */
+export function hasTimestamps(text: string | null | undefined): boolean {
+  return STAMP.test(text ?? "");
+}
+
+/**
+ * Remove [mm:ss] / [h:mm:ss] markers (and timestamp-only lines), keeping paragraphs and headings,
+ * for reading a transcript as plain notes.
+ */
+export function stripTimestamps(text: string): string {
+  return text
+    .split("\n")
+    .map((l) => l.replace(new RegExp(`\\s*${STAMP.source}(?:\\s*[-–—:]\\s*${STAMP.source})?\\s*[-–—:]?\\s*`, "g"), " ").replace(/^(#+|[-*]|\d+\.)?\s+/, (m, mark) => (mark ? `${mark} ` : "")).trimEnd())
+    .filter((l, i, all) => l.trim() || (i > 0 && all[i - 1].trim()))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
