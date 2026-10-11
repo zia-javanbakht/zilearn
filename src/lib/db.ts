@@ -178,8 +178,9 @@ const COLUMNS: [table: string, column: string, type: string][] = [
   ["materials", "sha256", "TEXT"], // content hash, so re-importing a folder skips files already added
   ["materials", "rel_path", "TEXT"], // where the file sat in an imported folder or zip
   ["topics", "manual", "INTEGER NOT NULL DEFAULT 0"], // added or edited by the student: kept when the brainmap is rebuilt
-  ["courses", "removed_topics", "TEXT"],
-  ["materials", "digest", "TEXT"], // JSON Digest: summary, key terms and topics of the material // JSON: normalised titles the student deleted, left out of rebuilds
+  ["courses", "removed_topics", "TEXT"], // JSON: normalised titles the student deleted, left out of rebuilds
+  ["materials", "digest", "TEXT"], // JSON Digest: summary, key terms and topics of the material
+  ["lessons", "doc", "TEXT"], // JSON LessonDoc: the structured lesson the Markdown and LaTeX are made from
 ];
 
 function migrate(db: Database.Database) {

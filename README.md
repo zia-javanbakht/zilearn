@@ -11,6 +11,8 @@ A study suite for university students and academics. Each course collects all of
 - **Summaries of each item**: every material gets a summary, key terms and its topics with where each starts in the recording; click a timestamp to play from there, or view the topics as a mindmap. Recordings and YouTube videos are summarised by the AI when a key is set (other items on request); offline, topics come from headings or, for transcripts, from the phrases that set each stretch apart. "Add to brainmap" adds an item's topics as a new branch without rebuilding, and rebuilds use the summaries too.
 - **Formulas** render with KaTeX everywhere text is shown: lessons, notes, exams, flashcards, summaries, topics, and a Preview of any material's text.
 - **Brainmap** rendered with Mermaid: a colour-coded map you can click, a mindmap overview, and an outline. The AI organises the material by concept across all sources; offline, topics come from headings. You can fix the map: delete a wrongly detected branch (or just one level), add topics and subtopics, rename or move them. Rebuilding keeps your changes.
+- **Structured lessons** for every topic at each of the four levels, built from the brainmap: where the topic fits (with a map of its parent, what it builds on, what comes next, its subtopics and related topics in other courses), then categorised blocks (definitions, key points, intuitions, examples with worked solutions, formulas, procedures, pitfalls, comparisons), key points, common mistakes, connections, check-yourself questions with answers, and critical takeaways.
+- **Printable lessons with the Z LaTeX class**: "LaTeX (.tex)" downloads the lesson as a Z document (Z's definition, key point, intuition and example environments and its coloured boxes, plus a TikZ mindmap of the topic's neighbourhood). "Print (PDF)" compiles it with XeLaTeX on your computer when TeX Live and Z are installed; set `Z_TEX_DIR` if Z isn't in your TeX tree. Lessons made before this change print as they are; press Regenerate to get the structured version.
 - **Know / Familiar / Don't know** marks on any branch or topic. Marking a branch applies to everything under it; children can be overridden.
 - **Progressive study plan**: the course is covered in passes (Survey → Understand → Apply → Master). Unknown topics start at pass 1, familiar ones at pass 2, and "known" topics get a quick check first. Later passes interleave branches; each branch opens with an overview and closes with a synthesis; every pass ends with a checkpoint quiz; short recall warm-ups bring back topics from 1, 3 and 7 days earlier; and the last day before the exam is a mock exam plus weak-topic review. Ticking sessions off records the depth reached, so rebuilding from today never repeats finished work, and topics you later mark "Don't know" are repeated at the right depth.
 - **Calendar export**: download the plan as an `.ics` file or subscribe to it (one event per session or per day, your chosen start time and reminder, plus the exam day).
@@ -61,7 +63,8 @@ Layout:
 - `src/lib/plan.ts` progressive planning algorithm
 - `src/lib/brainmap.ts` structuring and Mermaid output
 - `src/lib/kb.ts` search and cross-course links
-- `src/lib/generate.ts` lessons, mock exams and grading, review notes, podcasts, flashcards
+- `src/lib/lesson.ts` structured lessons; `src/lib/latex.ts` LaTeX export with the Z class
+- `src/lib/generate.ts` mock exams and grading, review notes, podcasts, flashcards
 - `src/lib/srs.ts` spaced-repetition scheduling; `src/lib/ics.ts` calendar export; `src/lib/transcript.ts` transcript formatting
 - `src/lib/ai.ts` Claude calls (streaming, prompt caching of course sources, cancellation)
 - `src/lib/extract.ts`, `src/lib/youtube.ts` ingestion

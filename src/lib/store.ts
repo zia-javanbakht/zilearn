@@ -2,6 +2,7 @@ import { inheritMastery } from "./tree";
 import { db, newId } from "./db";
 import { chunkText } from "./text";
 import { NEW_CARD, nextDueIn, review, type Rating } from "./srs";
+import type { LessonDoc } from "./lesson";
 import type {
   Digest,
   Card,
@@ -461,19 +462,17 @@ export function completeTopicDepth(topicId: string, depth: number): number {
 
 /* ---------------- Lessons ---------------- */
 
-export function getLesson(topicId: string, depth: number): { content: string; generated_by: string } | null {
-  return (
-    (db().prepare("SELECT content, generated_by FROM lessons WHERE topic_id = ? AND depth = ?").get(topicId, depth) as {
-      content: string;
-      generated_by: string;
-    }) ?? null
-  );
+export function getLesson(topicId: string, depth: number): { content: string; generated_by: string; doc: LessonDoc | null } | null {
+  const row = db().prepare("SELECT content, generated_by, doc FROM lessons WHERE topic_id = ? AND depth = ?").get(topicId, depth) as
+    | { content: string; generated_by: string; doc: string | null }
+    | undefined;
+  return row ? { content: row.content, generated_by: row.generated_by, doc: row.doc ? (JSON.parse(row.doc) as LessonDoc) : null } : null;
 }
 
-export function saveLesson(topicId: string, depth: number, content: string, generatedBy: string) {
+export function saveLesson(topicId: string, depth: number, content: string, generatedBy: string, doc: LessonDoc | null = null) {
   db()
-    .prepare("INSERT OR REPLACE INTO lessons (topic_id, depth, content, generated_by) VALUES (?, ?, ?, ?)")
-    .run(topicId, depth, content, generatedBy);
+    .prepare("INSERT OR REPLACE INTO lessons (topic_id, depth, content, generated_by, doc) VALUES (?, ?, ?, ?, ?)")
+    .run(topicId, depth, content, generatedBy, doc ? JSON.stringify(doc) : null);
 }
 
 /* ---------------- Plans ---------------- */

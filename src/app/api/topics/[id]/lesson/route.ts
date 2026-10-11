@@ -1,4 +1,4 @@
-import { generateLesson } from "@/lib/generate";
+import { generateLessonDoc, lessonToMarkdown } from "@/lib/lesson";
 import { getLesson, getTopic, saveLesson } from "@/lib/store";
 import { requestSignal } from "@/lib/ai";
 import { fail, handle, ok, type Ctx } from "@/lib/http";
@@ -15,10 +15,10 @@ function depthOf(req: Request) {
 const inFlight = new Map<string, ReturnType<typeof run>>();
 
 async function run(id: string, depth: number) {
-  const { content, by, truncated } = await generateLesson(id, depth);
-  // A cut-off lesson is shown but not cached, so opening it again tries for a complete one.
-  if (!truncated) saveLesson(id, depth, content, by);
-  return { content, generated_by: by, depth };
+  const doc = await generateLessonDoc(id, depth);
+  const content = lessonToMarkdown(doc);
+  saveLesson(id, depth, content, doc.by, doc);
+  return { content, generated_by: doc.by, depth, printable: true };
 }
 
 function generate(id: string, depth: number) {
@@ -38,7 +38,7 @@ export const GET = handle(async (req: Request, { params }: Ctx<{ id: string }>) 
   const depth = depthOf(req);
   if (!getTopic(id)) return fail("This topic no longer exists. Rebuild the study plan.", 404);
   const cached = getLesson(id, depth);
-  if (cached) return ok({ ...cached, depth });
+  if (cached) return ok({ content: cached.content, generated_by: cached.generated_by, depth, printable: true });
   return ok(await generate(id, depth));
 });
 

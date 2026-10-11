@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { aiEnabled, CUT_OFF_NOTE, generateStructured, generateText, UserError } from "./ai";
 import { excerptsFor } from "./kb";
-import { buildTree, flattenTree, getCourse, getLesson, getTopic, listMaterials, listTopics } from "./store";
+import { buildTree, flattenTree, getCourse, listMaterials, listTopics } from "./store";
 import { truncate } from "./text";
 import {
   DEPTH_LEVELS,
@@ -118,69 +118,6 @@ function renderOutline(roots: TopicNode[], include: Set<string>, depth = 0): str
     if (sub) lines.push(sub);
   }
   return lines.join("\n");
-}
-
-/* ---------------- Lessons (one topic at one depth) ---------------- */
-
-export async function generateLesson(
-  topicId: string,
-  depth: number,
-): Promise<{ content: string; by: "claude" | "heuristic"; truncated?: boolean }> {
-  const topic = getTopic(topicId);
-  if (!topic) throw new UserError("Topic not found");
-  const course = getCourse(topic.course_id)!;
-  const level = DEPTH_LEVELS[Math.min(4, Math.max(1, depth)) - 1];
-  const excerpts = excerptsFor(topic.course_id, `${topic.title} ${topic.keywords.join(" ")}`, 20000, topic.material_ids);
-  const all = flattenTree(buildTree(listTopics(topic.course_id)));
-  const node = all.find((n) => n.id === topic.id);
-  const byId = new Map(all.map((n) => [n.id, n]));
-  const ancestors: string[] = [];
-  for (let p = topic.parent_id; p && byId.has(p) && ancestors.length < 10; p = byId.get(p)!.parent_id) ancestors.unshift(byId.get(p)!.title);
-  const siblings = all.filter((n) => n.parent_id === topic.parent_id && n.id !== topic.id).map((n) => n.title);
-  const previous = depth > 1 ? getLesson(topic.id, depth - 1) : null;
-  const mark = node?.effective_mastery ? MASTERY_LABELS[node.effective_mastery] : "not marked";
-
-  if (!aiEnabled()) {
-    const body = [
-      `## ${topic.title} - pass ${depth}: ${level.name}`,
-      `**Goal:** ${level.goal}`,
-      topic.summary,
-      topic.keywords.length ? `**Key terms:** ${topic.keywords.join(", ")}` : "",
-      "### From your materials",
-      ...(excerpts.length ? excerpts.slice(0, 4).map((e) => "> " + truncate(e, 1200).replace(/\n/g, "\n> ")) : ["_No matching excerpts found._"]),
-      "### Check yourself",
-      `- Can you explain **${topic.title}** in two sentences without notes?`,
-      depth >= 2 ? "- How does it connect to the topics around it?" : "- What are the key terms and what do they mean?",
-      depth >= 3 ? "- Solve one problem that uses it, then check against your sources." : "",
-    ];
-    return { content: body.filter(Boolean).join("\n\n"), by: "heuristic" };
-  }
-
-  const { text, truncated } = await generateText({
-    maxTokens: 12000,
-    prompt: `Course: ${course.name}
-Topic: ${topic.title}
-Where it sits in the course: ${[...ancestors, topic.title].join(" > ")}
-Neighbouring topics: ${siblings.slice(0, 15).join(", ") || "(none)"}
-Topic summary: ${topic.summary}
-Key terms: ${topic.keywords.join(", ")}
-Student's self-assessment: ${mark}
-${previous ? `\nThe student already studied this lesson in the previous pass (assume it is covered; build on it, do not repeat it):\n<previous_lesson>\n${truncate(previous.content, 6000)}\n</previous_lesson>\n` : ""}
-Excerpts from the student's own materials:
-${excerpts.join("\n\n---\n\n") || "(none found)"}
-
-The student is studying this topic progressively. This is pass ${depth} of up to 4, at the "${level.name}" level: ${level.goal}
-Earlier passes covered the shallower levels; later passes go deeper, so do not cover everything now.
-
-Write the lesson for this pass in Markdown:
-- Start with a 2-3 sentence "Where this fits" orientation that names how it relates to the neighbouring topics.
-- What this level's lesson contains: ${level.lesson}
-- Teach the content at exactly this depth. Use examples, and LaTeX ($...$) for maths where relevant.
-- You may include one small Mermaid diagram in a \`\`\`mermaid block if it genuinely helps.
-- Point to which of the student's materials to look at (by title) when useful.
-- End with "Check yourself": 3-5 questions appropriate to this level, with brief answers in a collapsed <details> block.`,
-  });
-  return { content: truncated ? text + CUT_OFF_NOTE : text, by: "claude", truncated };
 }
 
 /* ---------------- Mock exams ---------------- */

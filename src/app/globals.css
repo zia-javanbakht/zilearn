@@ -213,3 +213,16 @@ button.link:hover { text-decoration: underline; }
 .digest-topics { margin: 0; padding-left: 1.4em; display: grid; gap: 6px; }
 .digest-topics ul { margin: 2px 0 0; padding-left: 1.2em; }
 .digest-topics .markdown p { margin: 0.1em 0; }
+
+/* Lesson blocks, coloured like the Z class's boxes */
+.lb { border-left: 4px solid var(--lb, #888); background: color-mix(in srgb, var(--lb, #888) 9%, transparent); border-radius: 6px; padding: 2px 14px; margin: 12px 0; }
+.lb > p:first-child { margin-top: 10px; }
+.lb-definition { --lb: #1e6fd9; }
+.lb-keypoint { --lb: #c92a2a; }
+.lb-intuition { --lb: #6741d9; }
+.lb-example { --lb: #2b8a3e; }
+.lb-formula { --lb: #1c7ed6; }
+.lb-procedure { --lb: #862e9c; }
+.lb-pitfall { --lb: #e8590c; }
+.lb-comparison { --lb: #0c8599; }
+.lb-note { --lb: #868e96; }

@@ -24,6 +24,7 @@ export function LessonModal({
   const [content, setContent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [printing, setPrinting] = useState<"tex" | "pdf" | null>(null);
   // Ignore responses that arrive after the user switched level or regenerated again.
   const reqRef = useRef(0);
 
@@ -39,6 +40,26 @@ export function LessonModal({
       if (req === reqRef.current) setError((e as Error).message);
     } finally {
       if (req === reqRef.current) setBusy(false);
+    }
+  }
+
+  /** Download the printable version made with the Z class: the LaTeX source, or a PDF compiled here. */
+  async function download(format: "tex" | "pdf") {
+    setPrinting(format);
+    setError(null);
+    try {
+      const r = await fetch(`/api/topics/${topicId}/lesson/print?depth=${depth}&format=${format}`);
+      if (!r.ok) throw new Error(((await r.json().catch(() => null)) as { error?: string } | null)?.error ?? `Couldn't make the ${format.toUpperCase()}.`);
+      const name = r.headers.get("content-disposition")?.match(/filename="([^"]+)"/)?.[1] ?? `lesson.${format}`;
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(await r.blob());
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setPrinting(null);
     }
   }
 
@@ -106,9 +127,16 @@ export function LessonModal({
           </button>
         </div>
         <p className="small muted">{DEPTH_LEVELS[depth - 1].goal}</p>
-        {error && <div className="alert error">{error}</div>}
+        {error && <div className="alert error" style={{ whiteSpace: "pre-wrap" }}>{error}</div>}
         {content && (
           <div className="row" style={{ justifyContent: "flex-end", marginBottom: 8 }}>
+            <button className="sm" disabled={!!printing || busy} onClick={() => download("pdf")} title="Compile a printable PDF with your Z LaTeX class (needs XeLaTeX on this computer)">
+              {printing === "pdf" ? "Making the PDF…" : "Print (PDF)"}
+            </button>
+            <button className="sm" disabled={!!printing || busy} onClick={() => download("tex")} title="The lesson as a LaTeX file that uses the Z class">
+              LaTeX (.tex)
+            </button>
+            <span className="grow" />
             {completed === depth ? (
               <span className="badge know">Level {depth} recorded</span>
             ) : (

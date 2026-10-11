@@ -12,7 +12,12 @@ import { Mermaid } from "./Mermaid";
 // Allow <details>/<summary> from generated lessons and keep code-block language classes.
 const schema = {
   ...defaultSchema,
-  attributes: { ...defaultSchema.attributes, code: [...(defaultSchema.attributes?.code ?? []), ["className", /^language-/, /^math-/]] },
+  attributes: {
+    ...defaultSchema.attributes,
+    code: [...(defaultSchema.attributes?.code ?? []), ["className", /^language-/, /^math-/]],
+    // Lesson block boxes (definition, intuition, example, ...).
+    div: [...(defaultSchema.attributes?.div ?? []), ["className", "lb", /^lb-[a-z]+$/]],
+  },
 };
 
 // Module-level so re-renders of the parent don't remount code blocks (and re-render diagrams).
