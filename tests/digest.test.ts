@@ -83,3 +83,11 @@ describe("digest of a recording", () => {
     expect(buildTree(listTopics(c.id))).toHaveLength(2);
   });
 });
+
+describe("key sentences", () => {
+  it("leaves headings out of summaries", async () => {
+    const { keySentences } = await import("@/lib/digest");
+    const out = keySentences("# Linear Regression\nLinear regression fits a line minimising squared error.\n# Gradient Descent\nGradient descent minimises the loss by stepping against the gradient.", 2);
+    expect(out).toBe("Linear regression fits a line minimising squared error. Gradient descent minimises the loss by stepping against the gradient.");
+  });
+});

@@ -294,7 +294,7 @@ export function lessonMermaid(doc: LessonDoc): string {
 const KIND_TAG: Record<string, string> = { recall: "Recall", explain: "Explain", apply: "Apply", transfer: "Transfer" };
 
 function questions(qs: QA[], answerLabel: string): string {
-  const list = qs.map((q, i) => `${i + 1}. ${q.kind ? `*${KIND_TAG[q.kind]}.* ` : ""}${q.question}${q.hint ? `\n\n   ${details("Hint", q.hint)}` : ""}`).join("\n");
+  const list = qs.map((q, i) => `${i + 1}. ${q.kind ? `*${KIND_TAG[q.kind]}.* ` : ""}${q.question}${q.hint ? `\n\n${details("Hint", q.hint).replace(/^(?=.)/gm, "   ")}` : ""}`).join("\n\n");
   return `${list}\n\n${details(answerLabel, qs.map((q, i) => `**${i + 1}.** ${q.answer}`).join("\n\n"))}`;
 }
 

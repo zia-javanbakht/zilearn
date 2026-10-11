@@ -271,7 +271,7 @@ export function mapTikz(doc: LessonDoc): string {
 export function lessonToTex(raw: LessonDoc): string {
   const doc = normalizeDoc(raw);
   const s: string[] = [];
-  const sec = (title: string, body: string) => body.trim() && s.push(`\\section{${heading(title)}}\n${body.trim()}\n`);
+  const sec = (title: string, body: string) => body.trim() && s.push(`\\Needspace{14\\baselineskip}\n\\section{${heading(title)}}\n${body.trim()}\n`);
   const ask = (q: QA) => `${q.kind ? `\\textit{${KIND[q.kind]}.} ` : ""}${blockTex(q.question)}${q.hint ? ` \\hfill{\\footnotesize\\itshape Hint: ${inline(q.hint)}}` : ""}`;
   const answers = [
     ...(doc.recall.length ? [`\\subsection*{Warm-up}\n\\begin{enumerate}\n${doc.recall.map((r) => `\\item ${blockTex(r.answer)}`).join("\n")}\n\\end{enumerate}`] : []),
@@ -317,6 +317,8 @@ function zDocument(doc: Head, body: string): string {
 \\usetikzlibrary{mindmap,arrows.meta}
 \\usepackage{pgfplots}
 \\usepackage{cancel}
+\\usepackage{needspace}
+\\raggedbottom
 \\pgfplotsset{compat=1.18}
 
 \\title{${tex(doc.title)}}

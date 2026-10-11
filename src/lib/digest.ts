@@ -227,7 +227,12 @@ function titleFor(text: string, spread: Map<string, number>, total: number): str
 }
 
 /** The n sentences that best cover the text's frequent terms, in their original order. */
-export function keySentences(text: string, n: number): string {
+export function keySentences(raw: string, n: number): string {
+  // Headings aren't sentences: left in, they'd run into the sentence after them ("Gradient Descent Gradient descent ...").
+  const text = raw
+    .replace(/^\s*#{1,6}\s+.*$/gm, "")
+    .replace(/^\s*([-*+]|\d+[.)])\s+/gm, "")
+    .trim();
   const sentences = (text.replace(/\s+/g, " ").match(/[^.!?]+[.!?]+/g) ?? [text]).map((s) => s.trim()).filter((s) => s.split(" ").length >= 6 && s.length <= 400);
   if (!sentences.length) return truncate(text.replace(/\s+/g, " ").trim(), 300);
   const weight = new Map(topKeywords(text, 25).map((w, i) => [stem(w), 25 - i]));
