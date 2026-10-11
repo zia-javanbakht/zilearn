@@ -199,3 +199,10 @@ mark, .hl { background: #ffe58f; color: #141a2e; border-radius: 3px; padding: 0 
 .plan-item.diagnostic { border-left: 3px solid var(--know); }
 .plan-item.final { background: var(--familiar-soft); border-color: transparent; }
 .stepper button.primary { color: #fff; }
+
+/* Flashcards */
+.flashcard { display: flex; flex-direction: column; gap: 12px; min-height: 260px; font-size: 1.05rem; }
+.flashcard hr { border: none; border-top: 1px dashed var(--border); width: 100%; margin: 4px 0; }
+.rate button { display: flex; flex-direction: column; align-items: center; min-width: 96px; gap: 2px; }
+.rate .rate-1 { border-color: var(--dont); }
+.rate .rate-3 { border-color: var(--accent); }

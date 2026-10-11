@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../api";
+import { api, localToday } from "../api";
 import { LessonModal } from "./LessonModal";
-import { DEPTH_LEVELS, type Exam, type Plan, type PlanItem, type PlanItemKind, type TopicNode } from "@/lib/types";
+import { DEPTH_LEVELS, type CardStats, type Exam, type Plan, type PlanItem, type PlanItemKind, type TopicNode } from "@/lib/types";
 import type { CourseData } from "./CourseWorkspace";
 
-type Go = (t: "exams" | "notes" | "podcasts", opts?: { examId?: string }) => void;
+type Go = (t: "exams" | "notes" | "podcasts" | "cards", opts?: { examId?: string }) => void;
 
 const KIND_LABEL: Partial<Record<PlanItemKind, string>> = {
   overview: "Branch overview",
@@ -27,8 +27,12 @@ export function PlanTab({ data, reload, go }: { data: CourseData; reload: () => 
   const [lesson, setLesson] = useState<{ id: string; title: string; depth: number } | null>(null);
 
   const load = () => api<Plan | null>(`/api/courses/${course.id}/plan`).then(setPlan).catch((e) => setError(e.message));
+  const [cards, setCards] = useState<CardStats | null>(null);
   useEffect(() => {
     load();
+    api<{ stats: CardStats }>(`/api/courses/${course.id}/cards?due=1&today=${localToday()}`)
+      .then((r) => setCards(r.stats))
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [course.id]);
 
@@ -181,6 +185,17 @@ export function PlanTab({ data, reload, go }: { data: CourseData; reload: () => 
         <p className="muted">Loading…</p>
       ) : plan === null ? null : (
         <>
+          {cards && cards.due + cards.fresh > 0 && (
+            <div className="alert info spread">
+              <span>
+                {cards.due > 0 ? `${cards.due} flashcard${cards.due === 1 ? " is" : "s are"} due today` : `${cards.fresh} new flashcard${cards.fresh === 1 ? "" : "s"} to learn`}. A few
+                minutes a day keeps everything you have studied fresh.
+              </span>
+              <button className="sm primary" onClick={() => go("cards")}>
+                Review flashcards
+              </button>
+            </div>
+          )}
           {overdue > 0 && (
             <div className="alert spread">
               <span>

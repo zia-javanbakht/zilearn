@@ -151,6 +151,7 @@ function ExamRunner({ exam: initial, courseId, onBack, onPlan }: { exam: Exam; c
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [applied, setApplied] = useState<string | null>(null);
+  const [cardsMsg, setCardsMsg] = useState<string | null>(null);
   const [timeUp, setTimeUp] = useState(false);
   const answered = Object.values(answers).some((a) => a.trim());
 
@@ -200,6 +201,19 @@ function ExamRunner({ exam: initial, courseId, onBack, onPlan }: { exam: Exam; c
     }
   }
 
+  async function mistakesToCards() {
+    try {
+      const r = await api<{ added: number; mistakes: number }>(`/api/exams/${exam.id}/cards`, { method: "POST" });
+      setCardsMsg(
+        r.mistakes
+          ? `Added ${r.added} flashcard${r.added === 1 ? "" : "s"} from ${r.mistakes} mistake${r.mistakes === 1 ? "" : "s"}${r.added < r.mistakes ? " (the rest were already cards)" : ""}. Review them in the Flashcards tab.`
+          : "No mistakes to turn into cards. Nice work.",
+      );
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
+
   async function reschedule() {
     setBusy(true);
     try {
@@ -235,6 +249,9 @@ function ExamRunner({ exam: initial, courseId, onBack, onPlan }: { exam: Exam; c
             <button className="sm" onClick={applyMarks}>
               Update my brainmap marks
             </button>
+            <button className="sm" onClick={mistakesToCards}>
+              Make flashcards from my mistakes
+            </button>
           </div>
         ) : (
           <div className="row">
@@ -254,6 +271,7 @@ function ExamRunner({ exam: initial, courseId, onBack, onPlan }: { exam: Exam; c
           </button>
         </div>
       )}
+      {cardsMsg && <div className="alert info">{cardsMsg}</div>}
       {error && <div className="alert error">{error}</div>}
 
       {exam.questions.map((q, i) => (

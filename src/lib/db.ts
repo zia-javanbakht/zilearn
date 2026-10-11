@@ -133,6 +133,23 @@ CREATE TABLE IF NOT EXISTS podcasts (
   generated_by TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS cards (
+  id TEXT PRIMARY KEY,
+  course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  topic_id TEXT REFERENCES topics(id) ON DELETE SET NULL,
+  front TEXT NOT NULL,
+  back TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'generated',
+  ease REAL NOT NULL DEFAULT 2.5,
+  interval INTEGER NOT NULL DEFAULT 0,
+  reps INTEGER NOT NULL DEFAULT 0,
+  lapses INTEGER NOT NULL DEFAULT 0,
+  due TEXT,
+  last_review TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  generated_by TEXT NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
   content, material_id UNINDEXED, course_id UNINDEXED, chunk_index UNINDEXED,
   tokenize = 'porter unicode61'
@@ -148,6 +165,7 @@ CREATE INDEX IF NOT EXISTS idx_topics_course ON topics(course_id);
 CREATE INDEX IF NOT EXISTS idx_plan_items_plan ON plan_items(plan_id);
 CREATE INDEX IF NOT EXISTS idx_links_from ON links(from_topic);
 CREATE INDEX IF NOT EXISTS idx_links_to ON links(to_topic);
+CREATE INDEX IF NOT EXISTS idx_cards_course_due ON cards(course_id, due);
 `;
 
 let instance: Database.Database | null = null;

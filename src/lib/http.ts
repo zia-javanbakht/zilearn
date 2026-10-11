@@ -33,3 +33,9 @@ export async function body<T = Record<string, unknown>>(req: Request): Promise<T
     return {} as T;
   }
 }
+
+/** The student's local date (YYYY-MM-DD) from the client, falling back to the server's date. */
+export function todayFrom(v: unknown): string {
+  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v))) return v;
+  return new Date().toISOString().slice(0, 10);
+}

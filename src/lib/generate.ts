@@ -496,3 +496,81 @@ Make it engaging and accurate: concrete examples and analogies, recap key points
   segments.push({ speaker: "A", text: "That's the overview. Rebuild this episode with an Anthropic API key for a full, conversational script." });
   return { title: `${ctx.label}: audio overview`, scope: ctx.label, hosts, segments, by: "heuristic" as const };
 }
+
+/* ---------------- Flashcards ---------------- */
+
+const CardSchema = z.object({
+  cards: z.array(
+    z.object({
+      topic: z.string().describe("Title of the topic the card tests, copied from the outline"),
+      front: z.string().describe("Question or cue, one idea per card, Markdown"),
+      back: z.string().describe("Short answer, 1-3 sentences or a formula, Markdown"),
+    }),
+  ),
+});
+
+export async function generateCards(courseId: string, scope: Scope, count: number) {
+  const ctx = resolveScope(courseId, scope);
+  if (!ctx.nodes.length) throw new UserError("Build the brainmap first.");
+  const n = Math.min(60, Math.max(5, Math.round(count)));
+  const leaves = ctx.nodes.filter((x) => !x.children.length);
+  const pool = leaves.length ? leaves : ctx.nodes;
+  const byTitle = new Map(pool.map((x) => [x.title.toLowerCase(), x]));
+  const topicOf = (title: string) =>
+    byTitle.get(title.toLowerCase()) ?? pool.find((x) => title.toLowerCase().includes(x.title.toLowerCase())) ?? null;
+
+  if (aiEnabled()) {
+    const out = await generateStructured({
+      schema: CardSchema,
+      effort: "medium",
+      maxTokens: 16000,
+      context: sourcesBlock(ctx),
+      prompt: `Write ${n} spaced-repetition flashcards for "${ctx.course.name}" (scope: ${ctx.label}).
+
+Topic outline with the student's self-assessment:
+${ctx.outline}
+
+The course source material is given above in <course_sources>.
+
+Good flashcards:
+- Test one atomic fact, definition, formula, distinction or step per card; never a list of more than three items.
+- Fronts are specific questions that have one right answer ("Why does X need Y?", "What is the formula for Z?"), not "Explain X".
+- Mix recall of definitions with "why" and "when would you use" cards, and a few that contrast easily confused ideas.
+- Backs are short: the answer first, then at most one sentence of explanation. Use LaTeX ($...$) for maths.
+- Spend more cards on topics the student doesn't know yet; cover every topic in scope at least once if the count allows.`,
+    });
+    return {
+      cards: out.cards.map((c) => ({ front: c.front, back: c.back, topic_id: topicOf(c.topic)?.id ?? null })),
+      by: "claude" as const,
+    };
+  }
+
+  // Offline: a definition card per topic, then key-term cards, weak topics first.
+  const order = [...pool].sort((a, b) => WEIGHT[b.effective_mastery ?? "dont_know"] - WEIGHT[a.effective_mastery ?? "dont_know"]);
+  const cards: { front: string; back: string; topic_id: string | null }[] = [];
+  for (const t of order) if (t.summary) cards.push({ front: `What is **${t.title}**?`, back: t.summary, topic_id: t.id });
+  for (const t of order) {
+    for (const k of t.keywords.slice(0, 3)) {
+      const sentence = excerptsFor(courseId, k, 600, t.material_ids)
+        .flatMap((e) => e.split(/(?<=[.!?])\s+/))
+        .find((s) => s.toLowerCase().includes(k.toLowerCase()) && s.length > 30 && s.length < 300);
+      if (sentence) cards.push({ front: `In **${t.title}**, what does "${k}" refer to?`, back: sentence.trim(), topic_id: t.id });
+    }
+  }
+  return { cards: cards.slice(0, n), by: "heuristic" as const };
+}
+
+/** Flashcards from the questions a student got wrong or only partly right in a graded exam. */
+export function cardsFromMistakes(questions: ExamQuestion[], grades: ExamGrade[]) {
+  const byId = new Map(grades.map((g) => [g.question_id, g]));
+  return questions
+    .filter((q) => {
+      const g = byId.get(q.id);
+      return g && !g.feedback.startsWith("Needs marking") && g.score < g.max * 0.75;
+    })
+    .map((q) => ({
+      front: q.type === "mcq" ? `${q.prompt}\n\n${q.options.map((o, i) => `- **${String.fromCharCode(65 + i)}.** ${o}`).join("\n")}` : q.prompt,
+      back: q.type === "mcq" ? `**${String.fromCharCode(65 + (q.answer_index ?? 0))}.** ${q.options[q.answer_index ?? 0]}` : q.model_answer,
+      topic_id: q.topic_id,
+    }));
+}

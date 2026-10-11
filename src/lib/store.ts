@@ -1,7 +1,10 @@
 import { inheritMastery } from "./tree";
 import { db, newId } from "./db";
 import { chunkText } from "./text";
+import { NEW_CARD, nextDueIn, review, type Rating } from "./srs";
 import type {
+  Card,
+  CardStats,
   Course,
   Exam,
   KnowledgeLink,
@@ -477,4 +480,93 @@ export function normTitle(s: string) {
 
 export function clampInt(n: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, Math.round(Number.isFinite(n) ? n : lo)));
+}
+
+/* ---------------- Flashcards ---------------- */
+
+const CARD_COLS = "c.*, t.title AS topic_title";
+
+export function addCards(
+  courseId: string,
+  cards: { front: string; back: string; topic_id: string | null }[],
+  source: Card["source"],
+  by: Card["generated_by"],
+): number {
+  const d = db();
+  const have = new Set((d.prepare("SELECT front FROM cards WHERE course_id = ?").all(courseId) as { front: string }[]).map((r) => normTitle(r.front)));
+  const ins = d.prepare("INSERT INTO cards (id, course_id, topic_id, front, back, source, generated_by) VALUES (?, ?, ?, ?, ?, ?, ?)");
+  const topicOk = d.prepare("SELECT 1 FROM topics WHERE id = ? AND course_id = ?");
+  let n = 0;
+  d.transaction(() => {
+    for (const c of cards) {
+      const front = c.front.trim();
+      const back = c.back.trim();
+      const key = normTitle(front);
+      if (!front || !back || have.has(key)) continue;
+      have.add(key);
+      ins.run(newId(), courseId, c.topic_id && topicOk.get(c.topic_id, courseId) ? c.topic_id : null, front, back, source, by);
+      n++;
+    }
+  })();
+  return n;
+}
+
+export function listCards(courseId: string): Card[] {
+  return db()
+    .prepare(`SELECT ${CARD_COLS} FROM cards c LEFT JOIN topics t ON t.id = c.topic_id WHERE c.course_id = ? ORDER BY c.created_at DESC`)
+    .all(courseId) as Card[];
+}
+
+export function getCard(id: string): Card | null {
+  return (db().prepare(`SELECT ${CARD_COLS} FROM cards c LEFT JOIN topics t ON t.id = c.topic_id WHERE c.id = ?`).get(id) as Card) ?? null;
+}
+
+/** Cards to study today: overdue reviews first (most overdue first), then up to `newLimit` new cards in creation order. */
+export function dueCards(courseId: string, today: string, newLimit = 20): Card[] {
+  const d = db();
+  const reviews = d
+    .prepare(`SELECT ${CARD_COLS} FROM cards c LEFT JOIN topics t ON t.id = c.topic_id WHERE c.course_id = ? AND c.due IS NOT NULL AND c.due <= ? ORDER BY c.due, c.ease`)
+    .all(courseId, today) as Card[];
+  const fresh = d
+    .prepare(`SELECT ${CARD_COLS} FROM cards c LEFT JOIN topics t ON t.id = c.topic_id WHERE c.course_id = ? AND c.due IS NULL ORDER BY c.created_at LIMIT ?`)
+    .all(courseId, newLimit) as Card[];
+  return [...reviews, ...fresh];
+}
+
+export function cardStats(courseId: string, today: string): CardStats {
+  const r = db()
+    .prepare(
+      `SELECT COUNT(*) AS total,
+        COALESCE(SUM(due IS NOT NULL AND due <= ?), 0) AS due,
+        COALESCE(SUM(due IS NULL), 0) AS fresh
+       FROM cards WHERE course_id = ?`,
+    )
+    .get(today, courseId) as { total: number; due: number; fresh: number };
+  return { ...r, learned: r.total - r.due - r.fresh };
+}
+
+export function reviewCard(id: string, rating: Rating, today: string): Card | null {
+  const card = getCard(id);
+  if (!card) return null;
+  const course = getCourse(card.course_id);
+  const daysToExam = course?.exam_date ? Math.round((Date.parse(course.exam_date) - Date.parse(today)) / 86400000) : null;
+  const next = review(card.due == null ? NEW_CARD : card, rating);
+  const due = new Date(Date.parse(today) + nextDueIn(next, daysToExam) * 86400000).toISOString().slice(0, 10);
+  db()
+    .prepare("UPDATE cards SET ease = ?, interval = ?, reps = ?, lapses = ?, due = ?, last_review = ? WHERE id = ?")
+    .run(next.ease, next.interval, next.reps, next.lapses, due, today, id);
+  return getCard(id);
+}
+
+export function updateCard(id: string, patch: { front?: string; back?: string }) {
+  const c = getCard(id);
+  if (!c) return null;
+  db()
+    .prepare("UPDATE cards SET front = ?, back = ? WHERE id = ?")
+    .run(patch.front?.trim() || c.front, patch.back?.trim() || c.back, id);
+  return getCard(id);
+}
+
+export function deleteCard(id: string) {
+  db().prepare("DELETE FROM cards WHERE id = ?").run(id);
 }

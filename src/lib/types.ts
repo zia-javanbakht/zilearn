@@ -194,6 +194,31 @@ export interface Podcast {
   generated_by: "claude" | "heuristic";
 }
 
+export interface Card {
+  id: string;
+  course_id: string;
+  topic_id: string | null;
+  topic_title?: string | null;
+  front: string;
+  back: string;
+  source: "generated" | "exam" | "manual";
+  ease: number;
+  interval: number;
+  reps: number;
+  lapses: number;
+  due: string | null; // YYYY-MM-DD; null = new, never reviewed
+  last_review: string | null;
+  created_at: string;
+  generated_by: "claude" | "heuristic" | "student";
+}
+
+export interface CardStats {
+  total: number;
+  due: number; // reviewed before and due today or earlier
+  fresh: number; // never reviewed
+  learned: number; // reviewed at least once and not currently due
+}
+
 export interface KnowledgeLink {
   id: string;
   from_topic: string;

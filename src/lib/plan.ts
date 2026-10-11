@@ -295,7 +295,7 @@ export function buildPlan(input: PlanInput): DraftPlan {
           topic_title: `Recall warm-up (${due.length} topic${due.length === 1 ? "" : "s"})`,
           depth: 1,
           minutes: reserve,
-          activities: [`From memory, jot down the key ideas of: ${due.slice(0, 8).join(", ")}${due.length > 8 ? ` and ${due.length - 8} more` : ""}`, "Then check against your notes and fix what you missed"],
+          activities: [`From memory, jot down the key ideas of: ${due.slice(0, 8).join(", ")}${due.length > 8 ? ` and ${due.length - 8} more` : ""}`, "Then check against your notes and fix what you missed", "Clear today's due flashcards"],
         });
       }
     }
