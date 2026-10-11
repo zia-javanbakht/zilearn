@@ -96,3 +96,39 @@ describe("offline lessons from a question sheet", () => {
     expect(doc.takeaways.join(" ")).not.toMatch(/Explain|Compare/);
   });
 });
+
+describe("student record", () => {
+  it("brings the topic's mock exam slips and forgotten flashcards into the lesson request", async () => {
+    const { saveExam, saveExamResult, addCards, listCards } = await import("@/lib/store");
+    const { db } = await import("@/lib/db");
+    const { lessonRequest } = await import("@/lib/lesson");
+    const { gd, ml } = setup();
+    const momentum = listTopics(ml.id).find((x) => x.title === "Momentum")!;
+    const q = (id: string, topic_id: string, prompt: string) => ({ id, type: "short" as const, topic_id, topic_title: "", prompt, options: [], answer_index: null, model_answer: "", marks: 3 });
+    const e = saveExam({ course_id: ml.id, title: "Mock", duration_minutes: 30, generated_by: "heuristic", questions: [q("a", momentum.id, "Why does momentum speed up descent?"), q("b", gd.id, "What is the learning rate?"), q("c", gd.id, "Define a gradient.")] });
+    saveExamResult(e.id, { a: "It makes steps smaller", b: "the step size" }, [
+      { question_id: "a", score: 1, max: 3, feedback: "Momentum accumulates past gradients." },
+      { question_id: "b", score: 3, max: 3, feedback: "Good." },
+      { question_id: "c", score: 0, max: 3, feedback: "Needs marking: compare with the model answer." },
+    ]);
+    addCards(ml.id, [{ front: "What does the learning rate control?", back: "The step size", topic_id: gd.id }], "manual", "heuristic");
+    db().prepare("UPDATE cards SET lapses = 2 WHERE id = ?").run(listCards(ml.id)[0].id);
+
+    const r = lessonRequest(gd.id, 2);
+    expect(r.record.mistakes).toBe(2);
+    expect(r.prompt).toContain("<student_record>");
+    expect(r.prompt).toContain("Their answer: It makes steps smaller");
+    expect(r.prompt).toContain("forgotten 2 times");
+    expect(r.prompt).not.toContain("What is the learning rate?\n"); // full marks, not a slip
+    expect(r.prompt).not.toContain("Define a gradient"); // waiting for self-marking
+    expect(lessonRequest(listTopics(ml.id).find((x) => x.title === "Derivatives")!.id, 2).prompt).not.toContain("<student_record>");
+    expect(r.prompt).toContain('1 question checking "Derivatives"');
+    const { updateCourse } = await import("@/lib/store");
+    updateCourse(ml.id, { exam_date: new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10), target_level: 2 });
+    expect(lessonRequest(gd.id, 2).prompt).toMatch(/exam is in \d days: favour exam-style practice/);
+    updateCourse(ml.id, { exam_date: null });
+    expect(lessonRequest(gd.id, 4).prompt).toContain("The exam only needs level 2");
+    const offline = await generateLessonDoc(gd.id, 1);
+    expect(offline.sections.flatMap((x) => x.blocks).find((b) => b.title === "From your mock exam")?.body).toContain("Momentum accumulates past gradients.");
+  });
+});

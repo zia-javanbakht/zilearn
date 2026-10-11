@@ -2,6 +2,7 @@ import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
 import { sourcesFor } from "./kb";
 import { checkLesson } from "./lessonCheck";
+import { studentRecord, type StudentRecord } from "./lessonRecord";
 import { offlineLesson } from "./lessonOffline";
 import { diagramMermaid, figureProblems, FigureSchema, type Figure } from "./figure";
 import { buildTree, flattenTree, getCourse, getLesson, getTopic, getTopicsByIds, linksForTopic, listCourses, listMaterials, listTopics } from "./store";
@@ -145,7 +146,7 @@ const RULES = `How to write it:
 - British spelling. Plain, direct sentences; avoid em dashes.`;
 
 /** Where a topic sits in its course brainmap and how it links to other courses. */
-export function lessonMap(topicId: string): LessonMap & { mastery: Mastery | null; summary: string; keywords: string[]; material_ids: string[] } {
+export function lessonMap(topicId: string): LessonMap & { mastery: Mastery | null; weakBefore: string | null; summary: string; keywords: string[]; material_ids: string[] } {
   const topic = getTopic(topicId)!;
   const course = getCourse(topic.course_id)!;
   const all = flattenTree(buildTree(listTopics(topic.course_id)));
@@ -170,10 +171,20 @@ export function lessonMap(topicId: string): LessonMap & { mastery: Mastery | nul
       .slice(0, 6)
       .map((t) => ({ course: courses.get(t.course_id) ?? "", title: t.title, relation: links.find((l) => l.from_topic === t.id || l.to_topic === t.id)?.relation ?? null })),
     mastery: node?.effective_mastery ?? null,
+    // The nearest earlier topic the student hasn't marked as known: worth a warm-up question.
+    weakBefore: siblings.slice(Math.max(0, at - 3), Math.max(0, at)).reverse().find((n) => n.effective_mastery !== "know")?.title ?? null,
     summary: topic.summary,
     keywords: topic.keywords,
     material_ids: topic.material_ids,
   };
+}
+
+/** How the time left and the level the exam needs change what this lesson should spend its words on. */
+function focus(d: number, r: StudentRecord): string {
+  if (r.days !== null && r.days >= 0 && r.days <= 7)
+    return `The exam is ${r.days === 0 ? "today" : `in ${r.days} day${r.days === 1 ? "" : "s"}`}: favour exam-style practice and the student's own slips over new breadth, and leave out material the exam won't ask for.`;
+  if (d > r.target) return `The exam only needs level ${r.target}, so this pass is enrichment: keep it to the ideas that deepen understanding of what is examined, and say so in where_it_fits.`;
+  return "";
 }
 
 /** Everything the AI is sent for a lesson: the sources (cached context) and the instructions. */
@@ -187,6 +198,7 @@ export function lessonRequest(topicId: string, depth: number) {
   const head = { title: topic.title, depth: d, level: level.name, goal: level.goal, map: stripMap(map) };
   const prev = d > 1 ? getLesson(topic.id, d - 1) : null;
   const previous = prev ? (prev.doc ? lessonOutline(normalizeDoc(prev.doc)) : truncate(prev.content, 6000)) : null;
+  const record = studentRecord(topicId);
   const mapText = [
     `Course: ${map.course}`,
     `Path in the brainmap: ${[...map.path, topic.title].join(" > ")}`,
@@ -207,22 +219,23 @@ ${mapText}
 Topic: ${topic.title}
 Topic summary: ${topic.summary}
 Key terms: ${topic.keywords.join(", ") || "(none listed)"}
-Student's self-assessment: ${map.mastery ? MASTERY_LABELS[map.mastery] : "not marked"}
+Student's self-assessment: ${map.mastery ? MASTERY_LABELS[map.mastery] : "not marked"}${record.goal ? `\n${record.goal}` : ""}
 </brainmap>
-${previous ? `\nThe student has done the level ${d - 1} lesson; build on it and don't repeat it:\n<previous_lesson>\n${previous}\n</previous_lesson>\n` : ""}
+${record.text ? `\n<student_record>\n${record.text}\n</student_record>\nUse this record: put each mock exam slip and forgotten flashcard into common_mistakes (or a pitfall block) with the correction, and make at least one check_yourself question retest it in a new form. Don't name or shame; just fix the misunderstanding.\n` : ""}${previous ? `\nThe student has done the level ${d - 1} lesson; build on it and don't repeat it:\n<previous_lesson>\n${previous}\n</previous_lesson>\n` : ""}
 Write the lesson on "${topic.title}" for pass ${d} of 4, the "${level.name}" level: ${level.goal}
 Earlier passes covered shallower levels and later ones go deeper, so teach exactly this depth.
 
 At this level: ${LEVEL_BLOCKS[d]}
-${d === 1 ? "recall: empty." : `recall: 2 quick questions on the level ${d - 1} ideas.`}
+${focus(d, record)}
+${[d > 1 ? `2 quick questions on the level ${d - 1} ideas` : "", map.weakBefore ? `1 question checking "${map.weakBefore}", which this topic builds on and the student hasn't marked as known` : ""].filter(Boolean).join(", and ").replace(/^(.)/, "recall: $1") || "recall: empty"}.
 
 ${RULES}`;
-  return { topic, head, map, sources, materials, context, prompt };
+  return { topic, head, map, sources, materials, context, prompt, record };
 }
 
 export async function generateLessonDoc(topicId: string, depth: number): Promise<LessonDoc> {
-  const { head, map, sources, context, prompt } = lessonRequest(topicId, depth);
-  if (!aiEnabled()) return offlineLesson(head, { summary: map.summary, keywords: map.keywords, mastery: map.mastery }, sources);
+  const { head, map, sources, context, prompt, record } = lessonRequest(topicId, depth);
+  if (!aiEnabled()) return offlineLesson(head, { summary: map.summary, keywords: map.keywords, mastery: map.mastery, slips: record.slips }, sources);
   const out = await generateStructured({ schema: LessonSchema, effort: "medium", maxTokens: 20000, context, prompt });
   return checkLesson(fromAi(head, out));
 }

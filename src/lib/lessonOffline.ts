@@ -163,7 +163,7 @@ const dedupe = <T extends { text: string }>(xs: T[]) => {
 
 export function offlineLesson(
   head: Pick<LessonDoc, "title" | "depth" | "level" | "goal" | "map">,
-  info: { summary: string; keywords: string[]; mastery: string | null },
+  info: { summary: string; keywords: string[]; mastery: string | null; slips?: { question: string; feedback: string }[] },
   sources: Source[],
 ): LessonDoc {
   const t = head.title;
@@ -217,6 +217,13 @@ export function offlineLesson(
     ...(eqs.length ? [{ kind: "formula" as const, title: `Key results for ${t}`, body: take(eqs, d === 2 ? 4 : 6).map((e) => `${e.lead ? `${e.lead}\n\n` : ""}${e.math}`).join("\n\n"), source: eqs[0].source }] : []),
     ...lists.slice(0, d === 2 ? 2 : 3).map((l) => ({ kind: "comparison" as const, title: l.section ?? "Side by side", body: l.md, source: l.source })),
   ];
+  // The student's own mock exam slips come first: they are the mistakes this student actually makes.
+  const slipBlocks: LessonBlock[] = (info.slips ?? []).slice(0, 2).map((x) => ({
+    kind: "pitfall" as const,
+    title: "From your mock exam",
+    body: `You lost marks on: *${x.question.replace(/\s+/g, " ").trim()}*\n\n${x.feedback}`,
+    source: "Your mock exam",
+  }));
   const cautions: LessonBlock[] = warnings.slice(0, 3).map((s) => ({ kind: "pitfall" as const, title: s.stamp ? "Your lecturer's warning" : "Watch out", body: s.text, source: s.source }));
   for (const b of [...intuitions, ...warnings.slice(0, 3)]) used.add(b.text);
   const worked: LessonBlock[] = practice.slice(0, 2).map((q) => ({ kind: "example" as const, title: q.source, body: `${q.text}\n\nTry it before looking at your solutions. Write down the formula you use and the units at each step.`, source: q.source }));
@@ -229,7 +236,7 @@ export function offlineLesson(
     { heading: d === 1 ? "The big idea" : "The idea", blocks: blocks(d === 1 ? 4 : 5, idea) },
     ...(d >= 2 ? [{ heading: "How it works", blocks: mechanism }] : []),
     ...(d >= 3 ? [{ heading: "Practise with your tutorial questions", blocks: worked }] : []),
-    ...(d >= 2 ? [{ heading: "Where students slip", blocks: cautions }] : []),
+    ...(d >= 2 || slipBlocks.length ? [{ heading: "Where students slip", blocks: [...slipBlocks, ...(d >= 2 ? cautions : [])] }] : []),
     ...(d >= 4 || !mechanism.length ? [{ heading: "More from your materials", blocks: more }] : []),
   ].filter((s) => s.blocks.length);
   if (!sections.length) sections.push({ heading: "From your materials", blocks: [{ kind: "definition", title: t, body: summary || `${t}, as covered in your materials.` }] });
