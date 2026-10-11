@@ -4,6 +4,7 @@ import { dataDir } from "@/lib/db";
 import { deleteMaterial, getMaterial, updateMaterial } from "@/lib/store";
 import { body, fail, handle, ok, type Ctx } from "@/lib/http";
 import { tidyTranscript } from "@/lib/extract";
+import { providerName } from "@/lib/ai";
 import { MATERIAL_KINDS } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -39,9 +40,9 @@ export const PATCH = handle(async (req: Request, { params }: Ctx<{ id: string }>
     }
     patch.text = tidied ?? patch.text;
     patch.note = tidied
-      ? "Transcribed on this device and organised into notes by Claude."
+      ? `Transcribed on this device and organised into notes by ${providerName()}.`
       : tidyFailed
-        ? "Transcribed on this device. Claude couldn't tidy it this time, so this is the raw transcript."
+        ? `Transcribed on this device. ${providerName()} couldn't tidy it this time, so this is the raw transcript.`
         : "Transcribed on this device. [mm:ss] marks where each part is in the recording.";
   } else if (patch.text?.trim() && current.status !== "ready") {
     patch.note = null;

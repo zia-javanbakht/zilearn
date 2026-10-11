@@ -1,5 +1,5 @@
 import JSZip from "jszip";
-import { aiEnabled, generateText } from "./ai";
+import { aiEnabled, generateText, providerName } from "./ai";
 import type { MaterialKind } from "./types";
 
 export interface Extracted {
@@ -84,10 +84,10 @@ async function extractPdf(buf: Buffer): Promise<Extracted> {
       ],
     });
     return truncated
-      ? { text: md, status: "partial", note: "Scanned PDF transcribed by Claude, but it was too long to finish. Split the PDF for the rest." }
-      : { text: md, status: "ready", note: "Scanned PDF transcribed by Claude." };
+      ? { text: md, status: "partial", note: `Scanned PDF transcribed by ${providerName()}, but it was too long to finish. Split the PDF for the rest.` }
+      : { text: md, status: "ready", note: `Scanned PDF transcribed by ${providerName()}.` };
   }
-  return { text: joined, status: "partial", note: "This PDF has little selectable text (likely scanned). Add an Anthropic API key to transcribe it, or paste notes." };
+  return { text: joined, status: "partial", note: "This PDF has little selectable text (likely scanned). Add a Claude or Gemini API key to transcribe it, or paste notes." };
 }
 
 async function extractDocx(buf: Buffer): Promise<Extracted> {
@@ -124,7 +124,7 @@ async function extractPptx(buf: Buffer): Promise<Extracted> {
 }
 
 async function extractImage(buf: Buffer, mime: string): Promise<Extracted> {
-  if (!aiEnabled()) return { text: "", status: "partial", note: "Image saved. Add an Anthropic API key to read text from images, or type notes." };
+  if (!aiEnabled()) return { text: "", status: "partial", note: "Image saved. Add a Claude or Gemini API key to read text from images, or type notes." };
   const media = (["image/png", "image/jpeg", "image/gif", "image/webp"].includes(mime) ? mime : "image/png") as
     | "image/png"
     | "image/jpeg"
@@ -138,7 +138,7 @@ async function extractImage(buf: Buffer, mime: string): Promise<Extracted> {
       { type: "text", text: "Transcribe all text in this image (e.g. handwritten notes, a whiteboard, a slide) into Markdown. Describe any diagram briefly in [brackets]. Output only the transcription." },
     ],
   });
-  return { text: md, status: "ready", note: "Image transcribed by Claude." };
+  return { text: md, status: "ready", note: `Image transcribed by ${providerName()}.` };
 }
 
 function num(f: string) {

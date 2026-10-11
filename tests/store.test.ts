@@ -8,6 +8,8 @@ import { buildPlan } from "@/lib/plan";
 
 delete process.env.ANTHROPIC_API_KEY;
 delete process.env.ANTHROPIC_AUTH_TOKEN;
+delete process.env.GEMINI_API_KEY;
+delete process.env.GOOGLE_API_KEY;
 
 beforeEach(() => setDb(openDb(":memory:")));
 

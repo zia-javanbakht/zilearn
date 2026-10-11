@@ -493,7 +493,7 @@ Make it engaging and accurate: concrete examples and analogies, recap key points
     segments.push({ speaker: "A", text: n.summary || `It covers ${n.keywords.join(", ")}.` });
     if (n.keywords.length) segments.push({ speaker: "B", text: `The key terms to remember are ${n.keywords.slice(0, 5).join(", ")}.` });
   }
-  segments.push({ speaker: "A", text: "That's the overview. Rebuild this episode with an Anthropic API key for a full, conversational script." });
+  segments.push({ speaker: "A", text: "That's the overview. Rebuild this episode with a Claude or Gemini API key for a full, conversational script." });
   return { title: `${ctx.label}: audio overview`, scope: ctx.label, hosts, segments, by: "heuristic" as const };
 }
 

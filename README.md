@@ -31,13 +31,18 @@ Requires Node.js 20+.
 
 ```bash
 npm install
-cp .env.example .env.local   # add ANTHROPIC_API_KEY to enable Claude
+cp .env.example .env.local   # add ANTHROPIC_API_KEY (Claude) or GEMINI_API_KEY (Gemini)
 npm run dev                  # http://localhost:3000
 ```
 
 Data (SQLite database and uploaded files) lives in `./data` unless `ZILEARN_DATA_DIR` is set.
 
-Without an API key everything still works with built-in heuristics (heading-based brainmaps, template lessons, summary-based exams, notes and podcasts); the header shows "Offline mode". With a key, Claude (`claude-opus-5-5` by default, override with `ZILEARN_MODEL`) does the structuring, lessons, exams, marking, notes and podcast scripts.
+Without an API key everything still works with built-in heuristics (heading-based brainmaps, template lessons, summary-based exams, notes and podcasts); the header shows "Offline mode". With a key, the AI does the structuring, lessons, exams, marking, notes, flashcards and podcast scripts. Two providers are supported:
+
+- **Claude**: set `ANTHROPIC_API_KEY`. Uses `claude-opus-5-5` by default; override with `ZILEARN_MODEL`.
+- **Gemini**: set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). Uses `gemini-flash-latest` by default; override with `GEMINI_MODEL` (for example a Pro model).
+
+If both keys are set, Claude is used unless `ZILEARN_PROVIDER=gemini`. The header shows which provider is connected.
 
 ## Development
 

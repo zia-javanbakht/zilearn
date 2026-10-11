@@ -6,6 +6,8 @@ import { PATCH } from "@/app/api/materials/[id]/route";
 
 delete process.env.ANTHROPIC_API_KEY;
 delete process.env.ANTHROPIC_AUTH_TOKEN;
+delete process.env.GEMINI_API_KEY;
+delete process.env.GOOGLE_API_KEY;
 
 describe("transcript formatting", () => {
   it("stamps paragraphs, breaks at sentence ends and drops noise and loops", () => {

@@ -124,7 +124,7 @@ export default function KnowledgePage() {
         </div>
         <p className="small muted" style={{ margin: 0 }}>
           ziLearn links topics that overlap, across courses and between distant parts of the same course. Links update automatically when a brainmap is built;
-          {" "}&ldquo;Rebuild links&rdquo; also asks Claude to check them and explain each connection.
+          {" "}&ldquo;Rebuild links&rdquo; also asks the AI to check them and explain each connection.
         </p>
         {graph && graph.courses.length < 2 && <div className="alert info">Links appear between related topics. Add more courses to connect them with each other.</div>}
         {graph?.mermaid && <Mermaid code={graph.mermaid} />}

@@ -172,7 +172,7 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
               </select>
             </label>
             <label className="row">
-              <input type="checkbox" checked={settings.tidy} onChange={(e) => update({ tidy: e.target.checked })} /> Organise transcripts into notes with Claude
+              <input type="checkbox" checked={settings.tidy} onChange={(e) => update({ tidy: e.target.checked })} /> Organise transcripts into notes with AI (Claude or Gemini)
             </label>
             <label className="row">
               <input type="checkbox" checked={settings.auto} onChange={(e) => update({ auto: e.target.checked })} /> Transcribe new recordings automatically

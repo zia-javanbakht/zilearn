@@ -6,6 +6,8 @@ import { cardsFromMistakes, generateCards } from "@/lib/generate";
 
 delete process.env.ANTHROPIC_API_KEY;
 delete process.env.ANTHROPIC_AUTH_TOKEN;
+delete process.env.GEMINI_API_KEY;
+delete process.env.GOOGLE_API_KEY;
 
 describe("spaced repetition schedule", () => {
   it("grows intervals with Good and resets on Again", () => {
