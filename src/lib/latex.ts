@@ -1,5 +1,5 @@
 import { diagramTikz, plotTikz, type Figure } from "./figure";
-import { normalizeDoc, type LessonBlock, type LessonDoc, type QA } from "./lesson";
+import { markProvenance, normalizeDoc, type LessonBlock, type LessonDoc, type QA } from "./lesson";
 
 /**
  * LaTeX for printing lessons with Zia's Z class (XeLaTeX): Z's theorem-style environments for
@@ -269,7 +269,7 @@ export function mapTikz(doc: LessonDoc): string {
 }
 
 export function lessonToTex(raw: LessonDoc): string {
-  const doc = normalizeDoc(raw);
+  const doc = markProvenance(normalizeDoc(raw));
   const s: string[] = [];
   const sec = (title: string, body: string) => body.trim() && s.push(`\\Needspace{14\\baselineskip}\n\\section{${heading(title)}}\n${body.trim()}\n`);
   const ask = (q: QA) => `${q.kind ? `\\textit{${KIND[q.kind]}.} ` : ""}${blockTex(q.question)}${q.hint ? ` \\hfill{\\footnotesize\\itshape Hint: ${inline(q.hint)}}` : ""}`;

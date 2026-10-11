@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
 import { sourcesFor } from "./kb";
-import { checkLesson } from "./lessonCheck";
+import { checkLesson, refereeLesson } from "./lessonCheck";
 import { studentRecord, type StudentRecord } from "./lessonRecord";
 import { offlineLesson, sourceQuestions } from "./lessonOffline";
 import { diagramMermaid, figureProblems, FigureSchema, type Figure } from "./figure";
@@ -81,6 +81,18 @@ export interface LessonDoc {
 }
 
 /** Brings a lesson saved by an earlier version to the current shape. */
+export const BEYOND_NOTES = "Beyond your notes";
+
+/**
+ * For display: an AI lesson that cites its sources marks the blocks that cite none as going beyond the
+ * student's notes, so they can tell what their course said from what was added.
+ */
+export function markProvenance(doc: LessonDoc): LessonDoc {
+  const tracked = doc.by !== "heuristic" && doc.sections.some((x) => x.blocks.some((b) => b.source));
+  if (!tracked) return doc;
+  return { ...doc, sections: doc.sections.map((x) => ({ ...x, blocks: x.blocks.map((b) => (b.source ? b : { ...b, source: BEYOND_NOTES })) })) };
+}
+
 export function normalizeDoc(raw: LessonDoc): LessonDoc {
   const d = raw as LessonDoc & { common_mistakes: (Mistake | string)[]; read: ({ title: string; focus: string } | string)[] };
   return {
@@ -138,6 +150,8 @@ const RULES = `How to write it:
 - Teach, don't summarise. Concrete before abstract: motivate with the situation or phenomenon, then give the idea, then the formal statement.
 - Use the student's sources as the backbone: their notation, their symbols, their examples and their lecturer's advice. Where a block comes from a source, set source to its title plus a timestamp, section or question number. You may add standard textbook knowledge to fill gaps, but never contradict the sources.
 - The numbered questions in the student's tutorial, workshop and exam sources are theirs to attempt: never solve them or give their answers anywhere (examples, solutions, check_yourself). Write your own on the same pattern with different numbers and a different setting, and point to the originals in read ("then try Q2").
+- A source must point to text that states that block's claim. Material from beyond the sources (standard textbook knowledge) has source null; the app marks it "Beyond your notes" so the student knows what their course said.
+- Figure captions say what the figure shows; they never state a quantity an example or question asks the student to find.
 - Each block teaches one idea. Titles name the idea. Don't repeat the same point across blocks, glossary and takeaways.
 - Worked solutions: numbered steps, each saying what is done and why; carry units; finish with the result in bold and a quick sanity check (order of magnitude, limiting case or units).
 - Maths: KaTeX-compatible LaTeX only. $...$ inline and $$...$$ display on their own lines; for multi-line working use $$\\begin{aligned} ... \\end{aligned}$$. No \\( \\), no \\[ \\], no equation/align environments, no \\label or \\eqref, no custom macros.
@@ -246,7 +260,9 @@ export async function generateLessonDoc(topicId: string, depth: number): Promise
   const { head, map, sources, context, prompt, record } = lessonRequest(topicId, depth);
   if (!aiEnabled()) return offlineLesson(head, { summary: map.summary, keywords: map.keywords, mastery: map.mastery, slips: record.slips }, sources);
   const out = await generateStructured({ schema: LessonSchema, effort: "medium", maxTokens: 20000, context, prompt });
-  return checkLesson(fromAi(head, out), sourceQuestions(sources));
+  const doc = fromAi(head, out);
+  await refereeLesson(doc, context);
+  return checkLesson(doc, sourceQuestions(sources));
 }
 
 /** The AI's answer, tidied, as a lesson document. */
@@ -339,7 +355,7 @@ function questions(qs: QA[], answerLabel: string): string {
 }
 
 export function lessonToMarkdown(raw: LessonDoc): string {
-  const doc = normalizeDoc(raw);
+  const doc = markProvenance(normalizeDoc(raw));
   const out: string[] = [];
   if (doc.objectives.length) out.push(`<div class="lb lb-goal">\n\n**🎯 By the end of this pass you can**\n\n${doc.objectives.map((o) => `- ${o}`).join("\n")}\n\n</div>`);
   out.push(`### Where this fits\n\n${doc.where_it_fits}`);
@@ -350,7 +366,7 @@ export function lessonToMarkdown(raw: LessonDoc): string {
     out.push(`### ${sec.heading}`);
     for (const b of sec.blocks) {
       const sol = b.solution ? `\n\n${details("Worked solution", b.solution)}` : "";
-      const src = b.source ? `\n\n<p class="lb-source">📎 ${b.source}</p>` : "";
+      const src = b.source ? `\n\n<p class="lb-source">${b.source === BEYOND_NOTES ? "📚" : "📎"} ${b.source}</p>` : "";
       const fig = b.figure ? `\n\n${figureMarkdown(b.figure)}` : "";
       // A coloured box per kind (styled in globals.css), like the Z class's boxes in print.
       out.push(`<div class="lb lb-${b.kind}">\n\n**${BLOCK_ICON[b.kind]} ${BLOCK_LABEL[b.kind]}: ${b.title}**\n\n${b.body}${fig}${sol}${src}\n\n</div>`);

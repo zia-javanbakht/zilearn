@@ -54,7 +54,7 @@ function stripHtml(s: string): string {
 }
 
 /** Every Markdown text field of a lesson, with its path. */
-function* texts(doc: LessonDoc): Generator<[string, string]> {
+export function* texts(doc: LessonDoc): Generator<[string, string]> {
   yield ["where_it_fits", doc.where_it_fits];
   for (const [k, list] of [["objectives", doc.objectives], ["takeaways", doc.takeaways]] as const) for (const [i, t] of list.entries()) yield [`${k}.${i}`, t];
   for (const [k, list] of [["recall", doc.recall], ["check_yourself", doc.check_yourself]] as const)
@@ -82,12 +82,12 @@ function* texts(doc: LessonDoc): Generator<[string, string]> {
   for (const [i, c] of doc.connections.entries()) yield [`connections.${i}.relation`, c.relation];
 }
 
-function setPath(doc: LessonDoc, path: string, value: string) {
+function setPath(doc: LessonDoc, path: string, value: string | null) {
   const keys = path.split(".");
   let o = doc as unknown as Record<string, unknown>;
   for (const k of keys.slice(0, -1)) o = o[k] as Record<string, unknown>;
   const last = keys[keys.length - 1];
-  if (typeof o?.[last] === "string") o[last] = value;
+  if (o && (typeof o[last] === "string" || o[last] === null || (last === "source" && !(last in o)))) o[last] = value;
 }
 
 /** Normalises delimiters and strips HTML in place; returns the fields that still have problems. */
@@ -210,4 +210,69 @@ ${[...fields].map(([path, ps]) => `<field path="${path}">\n<problems>${ps.join("
   for (const p of problems) setPath(doc, p.path, defuse(p.text));
   if (spoiled.length) dropSpoilers(doc, spoiled);
   return doc;
+}
+
+const RefereeSchema = z.object({
+  corrections: z.array(
+    z.object({
+      path: z.string(),
+      problem: z.string().describe("What is wrong, in one sentence"),
+      text: z.string().describe("The whole corrected text of that field (empty string to clear a source)"),
+    }),
+  ),
+});
+
+/** Every field a referee may correct: the text fields plus each block's source and figure caption. */
+function refereeFields(doc: LessonDoc): [string, string][] {
+  const out = [...texts(doc)];
+  for (const [i, x] of doc.sections.entries())
+    for (const [j, b] of x.blocks.entries()) {
+      out.push([`sections.${i}.blocks.${j}.source`, b.source ?? ""]);
+      if (b.figure) out.push([`sections.${i}.blocks.${j}.figure.caption`, b.figure.caption]);
+    }
+  return out;
+}
+
+/**
+ * A second reader for the lesson, with the student's sources: physics and maths errors, statements that
+ * contradict each other or the sources, numbers that don't agree between a question and its answer,
+ * citations that don't support their block, and captions that give an answer away. Fixes what it finds
+ * in place and returns the problems, for the log. Skipped without an AI.
+ */
+export async function refereeLesson(doc: LessonDoc, context: string): Promise<string[]> {
+  if (!aiEnabled()) return [];
+  const fields = refereeFields(doc);
+  const paths = new Set(fields.map(([p]) => p));
+  try {
+    const { corrections } = await generateStructured({
+      schema: RefereeSchema,
+      effort: "medium",
+      maxTokens: 10000,
+      context,
+      prompt: `You are refereeing a lesson written for a student from the materials above. Check it like a careful examiner and correct only real errors:
+- Physics, maths and engineering mistakes, including approximations stated with the wrong accuracy.
+- Statements that contradict another part of the lesson or the student's sources.
+- Questions whose data don't agree with their answers or with each other; recompute every number you can.
+- Sources that don't state the block's claim: set the right title plus timestamp, section or question number, or an empty string if the claim isn't in the sources.
+- Figure captions that state a quantity an example or question asks the student to find.
+Leave style alone, keep the student's notation, and keep maths KaTeX-compatible ($...$ and $$...$$). Return an empty list if nothing is wrong.
+
+${fields.map(([path, text]) => `<field path="${path}">\n${text}\n</field>`).join("\n")}`,
+    });
+    const done: string[] = [];
+    for (const c of corrections) {
+      if (!paths.has(c.path)) continue;
+      if (c.path.endsWith(".caption")) {
+        const [, i, , j] = c.path.split(".");
+        const f = doc.sections[+i]?.blocks[+j]?.figure;
+        if (f) f.caption = c.text;
+      } else setPath(doc, c.path, c.path.endsWith(".source") ? c.text.trim() || null : normalizeMath(c.text));
+      done.push(`${c.path}: ${c.problem}`);
+    }
+    if (done.length) console.info(`Lesson refereed: ${done.length} correction(s)\n${done.join("\n")}`);
+    return done;
+  } catch (e) {
+    console.error("Couldn't referee the lesson", e);
+    return [];
+  }
 }

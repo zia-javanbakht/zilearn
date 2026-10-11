@@ -73,3 +73,17 @@ describe("spoilers", () => {
     expect(out.check_yourself).toEqual([]);
   });
 });
+
+describe("provenance and referee", () => {
+  it("marks AI blocks without a source as beyond the notes, and skips the referee offline", async () => {
+    const { markProvenance, lessonToMarkdown } = await import("@/lib/lesson");
+    const { refereeLesson } = await import("@/lib/lessonCheck");
+    const d = doc("Body");
+    d.sections[0].blocks.push({ kind: "note", title: "Cited", body: "From the notes.", source: "Lecture 3 notes" });
+    const marked = markProvenance(d);
+    expect(marked.sections[0].blocks.map((b) => b.source)).toEqual(["Beyond your notes", "Lecture 3 notes"]);
+    expect(lessonToMarkdown(d)).toContain("📚 Beyond your notes");
+    expect(markProvenance({ ...d, by: "heuristic" }).sections[0].blocks[0].source ?? null).toBeNull();
+    expect(await refereeLesson(d, "")).toEqual([]);
+  });
+});
