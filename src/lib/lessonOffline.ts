@@ -138,7 +138,7 @@ function listsAndTables(u: Unit): string[] {
 }
 
 /** Practice questions: numbered questions (Q1., Question 2, 1.) in tutorials and exams. */
-function questions(sources: Source[], terms: Set<string>): { text: string; source: string }[] {
+function questions(sources: Source[], terms: Set<string> | null): { text: string; source: string }[] {
   const out: { text: string; source: string; score: number }[] = [];
   for (const s of sources) {
     if (!/tutorial|exam|workshop/.test(s.kind) && !/tutorial|exam|problem|exercise|workshop/i.test(s.title)) continue;
@@ -147,10 +147,15 @@ function questions(sources: Source[], terms: Set<string>): { text: string; sourc
       const m = p.trim().match(/^(?:Q(?:uestion)?\s*(\d+)|(\d+))[.):]\s*([\s\S]+)/i);
       if (!m) continue;
       const text = m[3].trim().replace(/\n+/g, " ");
-      out.push({ text, source: `${s.title}, Q${m[1] ?? m[2]}`, score: relevance(text, terms) });
+      out.push({ text, source: `${s.title}, Q${m[1] ?? m[2]}`, score: terms ? relevance(text, terms) : 1 });
     }
   }
   return out.filter((q) => q.score > 0).sort((a, b) => b.score - a.score);
+}
+
+/** Every numbered question in the student's tutorial, workshop and exam sheets: theirs to attempt, not for a lesson to solve. */
+export function sourceQuestions(sources: Source[]): { text: string; source: string }[] {
+  return questions(sources, null);
 }
 
 const dedupe = <T extends { text: string }>(xs: T[]) => {

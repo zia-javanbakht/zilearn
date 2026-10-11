@@ -3,7 +3,7 @@ import { aiEnabled, generateStructured } from "./ai";
 import { sourcesFor } from "./kb";
 import { checkLesson } from "./lessonCheck";
 import { studentRecord, type StudentRecord } from "./lessonRecord";
-import { offlineLesson } from "./lessonOffline";
+import { offlineLesson, sourceQuestions } from "./lessonOffline";
 import { diagramMermaid, figureProblems, FigureSchema, type Figure } from "./figure";
 import { buildTree, flattenTree, getCourse, getLesson, getTopic, getTopicsByIds, linksForTopic, listCourses, listMaterials, listTopics } from "./store";
 import { truncate } from "./text";
@@ -137,6 +137,7 @@ const LEVEL_BLOCKS: Record<number, string> = {
 const RULES = `How to write it:
 - Teach, don't summarise. Concrete before abstract: motivate with the situation or phenomenon, then give the idea, then the formal statement.
 - Use the student's sources as the backbone: their notation, their symbols, their examples and their lecturer's advice. Where a block comes from a source, set source to its title plus a timestamp, section or question number. You may add standard textbook knowledge to fill gaps, but never contradict the sources.
+- The numbered questions in the student's tutorial, workshop and exam sources are theirs to attempt: never solve them or give their answers anywhere (examples, solutions, check_yourself). Write your own on the same pattern with different numbers and a different setting, and point to the originals in read ("then try Q2").
 - Each block teaches one idea. Titles name the idea. Don't repeat the same point across blocks, glossary and takeaways.
 - Worked solutions: numbered steps, each saying what is done and why; carry units; finish with the result in bold and a quick sanity check (order of magnitude, limiting case or units).
 - Maths: KaTeX-compatible LaTeX only. $...$ inline and $$...$$ display on their own lines; for multi-line working use $$\\begin{aligned} ... \\end{aligned}$$. No \\( \\), no \\[ \\], no equation/align environments, no \\label or \\eqref, no custom macros.
@@ -196,8 +197,16 @@ export function lessonRequest(topicId: string, depth: number) {
   const sources = sourcesFor(topic.course_id, `${topic.title} ${topic.keywords.join(" ")}`, 24000, topic.material_ids);
   const materials = listMaterials(topic.course_id).filter((m) => topic.material_ids.includes(m.id));
   const head = { title: topic.title, depth: d, level: level.name, goal: level.goal, map: stripMap(map) };
-  const prev = d > 1 ? getLesson(topic.id, d - 1) : null;
-  const previous = prev ? (prev.doc ? lessonOutline(normalizeDoc(prev.doc)) : truncate(prev.content, 6000)) : null;
+  // Everything the earlier levels already used, so this level adds new material instead of repeating it.
+  const previous =
+    [...Array(d - 1).keys()]
+      .map((i) => {
+        const l = getLesson(topic.id, i + 1);
+        if (!l) return "";
+        return `<level n="${i + 1}">\n${l.doc ? lessonOutline(normalizeDoc(l.doc)) : truncate(l.content, 3000)}\n</level>`;
+      })
+      .filter(Boolean)
+      .join("\n") || null;
   const record = studentRecord(topicId);
   const mapText = [
     `Course: ${map.course}`,
@@ -221,7 +230,7 @@ Topic summary: ${topic.summary}
 Key terms: ${topic.keywords.join(", ") || "(none listed)"}
 Student's self-assessment: ${map.mastery ? MASTERY_LABELS[map.mastery] : "not marked"}${record.goal ? `\n${record.goal}` : ""}
 </brainmap>
-${record.text ? `\n<student_record>\n${record.text}\n</student_record>\nUse this record: put each mock exam slip and forgotten flashcard into common_mistakes (or a pitfall block) with the correction, and make at least one check_yourself question retest it in a new form. Don't name or shame; just fix the misunderstanding.\n` : ""}${previous ? `\nThe student has done the level ${d - 1} lesson; build on it and don't repeat it:\n<previous_lesson>\n${previous}\n</previous_lesson>\n` : ""}
+${record.text ? `\n<student_record>\n${record.text}\n</student_record>\nUse this record: put each mock exam slip and forgotten flashcard into common_mistakes (or a pitfall block) with the correction, and make at least one check_yourself question retest it in a new form. Don't name or shame; just fix the misunderstanding.\n` : ""}${previous ? `\nThe student has done the earlier levels. What they used:\n<earlier_levels>\n${previous}\n</earlier_levels>\nBuild on them and add new material: never reuse their examples, numbers, questions, figures, comparisons or pitfalls. Only recall may come back to their ideas, asking in a new form.\n` : ""}
 Write the lesson on "${topic.title}" for pass ${d} of 4, the "${level.name}" level: ${level.goal}
 Earlier passes covered shallower levels and later ones go deeper, so teach exactly this depth.
 
@@ -237,7 +246,7 @@ export async function generateLessonDoc(topicId: string, depth: number): Promise
   const { head, map, sources, context, prompt, record } = lessonRequest(topicId, depth);
   if (!aiEnabled()) return offlineLesson(head, { summary: map.summary, keywords: map.keywords, mastery: map.mastery, slips: record.slips }, sources);
   const out = await generateStructured({ schema: LessonSchema, effort: "medium", maxTokens: 20000, context, prompt });
-  return checkLesson(fromAi(head, out));
+  return checkLesson(fromAi(head, out), sourceQuestions(sources));
 }
 
 /** The AI's answer, tidied, as a lesson document. */
@@ -254,8 +263,20 @@ export function fromAi(head: Pick<LessonDoc, "title" | "depth" | "level" | "goal
 
 /** A short outline of a lesson, to tell the next level what was covered. */
 export function lessonOutline(doc: LessonDoc): string {
+  const clip = (s: string, n: number) => truncate(s.replace(/\s+/g, " ").trim(), n);
   return [
-    ...doc.sections.map((x) => `${x.heading}: ${x.blocks.map((b) => `${b.kind} "${b.title}"`).join("; ")}`),
+    ...doc.sections.map(
+      (x) =>
+        `${x.heading}: ${x.blocks
+          .map((b) => {
+            // Examples and figures by their content, since those are what tends to come back.
+            const detail = b.kind === "example" ? `: ${clip(b.body, 160)}` : b.figure ? ` [figure: ${clip(b.figure.caption, 100)}]` : "";
+            return `${b.kind} "${b.title}"${detail}`;
+          })
+          .join("; ")}`,
+    ),
+    doc.common_mistakes.length ? `Mistakes covered: ${doc.common_mistakes.map((m) => clip(m.mistake, 80)).join("; ")}` : "",
+    doc.check_yourself.length ? `Questions asked: ${[...doc.recall, ...doc.check_yourself].map((q) => clip(q.question, 120)).join(" | ")}` : "",
     doc.takeaways.length ? `Takeaways: ${doc.takeaways.join(" ")}` : "",
   ]
     .filter(Boolean)

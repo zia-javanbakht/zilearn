@@ -49,3 +49,27 @@ describe("lesson checks", () => {
     expect(d.sections[0].blocks[0].body).toBe("see `\\undefinedmacro{x}`");
   });
 });
+
+describe("spoilers", () => {
+  it("finds examples and questions that reuse the student's own tutorial question, and drops them when they can't be rewritten", async () => {
+    const { spoilers, checkLesson } = await import("@/lib/lessonCheck");
+    const { sourceQuestions } = await import("@/lib/lessonOffline");
+    const qs = sourceQuestions([{ title: "Tutorial 3", kind: "tutorial", text: "Q1. A frame of mass 120 t is pulled back 25 mm; after 5 cycles the amplitude is 12 mm. Find the damping ratio.\nQ2. Explain critical damping." }]);
+    expect(qs.map((q) => q.source)).toEqual(["Tutorial 3, Q1", "Tutorial 3, Q2"]);
+    const doc = {
+      version: 2, title: "T", depth: 3, level: "Apply", goal: "", by: "claude",
+      map: { course: "C", path: [], before: [], after: [], children: [], related: [] },
+      objectives: [], where_it_fits: "", recall: [], glossary: [], common_mistakes: [], connections: [], takeaways: [], read: [],
+      sections: [{ heading: "Worked", blocks: [
+        { kind: "example", title: "Pull-back test", body: "A 120 t frame is pulled back 25 mm and after 5 cycles reads 12 mm. Find $\\zeta$.", solution: "Steps", source: null, figure: null },
+        { kind: "example", title: "Fresh one", body: "A 40 t frame is pulled back 30 mm and after 4 cycles reads 18 mm.", solution: "Steps", source: null, figure: null },
+      ] }],
+      check_yourself: [{ question: "Pulled back 25 mm, 12 mm after 5 cycles: what is the damping ratio?", answer: "0.023", kind: "apply", hint: null }],
+    } as never;
+    const sp = spoilers(doc, qs);
+    expect(sp.map((x) => x.paths[0])).toEqual(["sections.0.blocks.0.body", "check_yourself.0.question"]);
+    const out = await checkLesson(doc, qs);
+    expect(out.sections[0].blocks.map((b) => b.title)).toEqual(["Fresh one"]);
+    expect(out.check_yourself).toEqual([]);
+  });
+});

@@ -120,28 +120,94 @@ export function defuse(text: string): string {
   });
 }
 
+/** The numbers in a text that identify a problem (not small counts like 1, 2, 3). */
+function numbersIn(s: string): Set<string> {
+  return new Set((s.match(/\d+(?:\.\d+)?/g) ?? []).map((n) => String(Number(n))).filter((n) => Number(n) >= 10 || n.includes(".")));
+}
+
+export interface Spoiler {
+  /** The fields to rewrite, e.g. ["sections.2.blocks.1.body", "sections.2.blocks.1.solution"]. */
+  paths: string[];
+  source: string;
+  numbers: string[];
+}
+
+/**
+ * Examples and questions that reuse one of the student's own tutorial or exam questions (the same data),
+ * which would hand them the answer before they have tried it.
+ */
+export function spoilers(doc: LessonDoc, questions: { text: string; source: string }[]): Spoiler[] {
+  const qs = questions.map((q) => ({ ...q, nums: numbersIn(q.text) })).filter((q) => q.nums.size >= 2);
+  if (!qs.length) return [];
+  const units: { paths: string[]; text: string }[] = [];
+  for (const [i, x] of doc.sections.entries())
+    for (const [j, b] of x.blocks.entries())
+      if (b.kind === "example" || b.solution) units.push({ paths: [`sections.${i}.blocks.${j}.body`, ...(b.solution ? [`sections.${i}.blocks.${j}.solution`] : [])], text: b.body });
+  for (const [k, list] of [["recall", doc.recall], ["check_yourself", doc.check_yourself]] as const)
+    for (const [i, q] of list.entries()) units.push({ paths: [`${k}.${i}.question`, `${k}.${i}.answer`], text: q.question });
+  const out: Spoiler[] = [];
+  for (const u of units) {
+    const nums = numbersIn(u.text);
+    for (const q of qs) {
+      const shared = [...q.nums].filter((n) => nums.has(n));
+      if (shared.length >= 2 && shared.length >= 0.6 * q.nums.size) {
+        out.push({ paths: u.paths, source: q.source, numbers: shared });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** Removes the blocks and questions behind spoilers that couldn't be rewritten. */
+function dropSpoilers(doc: LessonDoc, sp: Spoiler[]) {
+  const gone = new Set(sp.map((x) => x.paths[0].split(".").slice(0, -1).join(".")));
+  for (const x of doc.sections) x.blocks = x.blocks.filter((_, j) => !gone.has(`sections.${doc.sections.indexOf(x)}.blocks.${j}`));
+  doc.recall = doc.recall.filter((_, i) => !gone.has(`recall.${i}`));
+  doc.check_yourself = doc.check_yourself.filter((_, i) => !gone.has(`check_yourself.${i}`));
+  doc.sections = doc.sections.filter((x) => x.blocks.length);
+}
+
+function read(doc: LessonDoc, path: string): string {
+  let o: unknown = doc;
+  for (const k of path.split(".")) o = (o as Record<string, unknown> | undefined)?.[k];
+  return typeof o === "string" ? o : "";
+}
+
 const FixSchema = z.object({ fixes: z.array(z.object({ path: z.string(), text: z.string().describe("The whole corrected text of that field") })) });
 
-/** Checks the lesson, asks the AI once to fix what's broken, and defuses anything left. Mutates and returns doc. */
-export async function checkLesson(doc: LessonDoc): Promise<LessonDoc> {
+/**
+ * Checks the lesson, asks the AI once to fix what's broken (maths KaTeX can't render, and examples that
+ * give away the student's own tutorial questions), then defuses or drops whatever is left. Mutates and returns doc.
+ */
+export async function checkLesson(doc: LessonDoc, practice: { text: string; source: string }[] = []): Promise<LessonDoc> {
   let problems = lintLesson(doc);
-  if (problems.length && aiEnabled()) {
+  let spoiled = spoilers(doc, practice);
+  if ((problems.length || spoiled.length) && aiEnabled()) {
+    const fields = new Map<string, string[]>();
+    for (const p of problems) fields.set(p.path, p.problems.map((x) => `KaTeX: ${x}`));
+    for (const sp of spoiled)
+      for (const path of sp.paths)
+        (fields.get(path) ?? fields.set(path, []).get(path)!).push(
+          `Reuses the student's own question (${sp.source}, same numbers ${sp.numbers.join(", ")}), which would give its answer away. Rewrite it as a new problem of the same type with different numbers and a different setting, and recompute the working and answer so they stay correct and consistent across the fields listed together.`,
+        );
     try {
       const { fixes } = await generateStructured({
         schema: FixSchema,
         effort: "low",
-        maxTokens: 6000,
-        prompt: `These fields of a lesson have LaTeX that KaTeX cannot render. Correct only the maths (KaTeX-compatible LaTeX, $...$ inline and $$...$$ display; for multi-line working use $$\\begin{aligned}...\\end{aligned}$$), keeping the wording and meaning. Return each field's whole corrected text with the same path.
+        maxTokens: 8000,
+        prompt: `Fix the listed problems in these fields of a lesson, changing nothing else. Maths must be KaTeX-compatible LaTeX: $...$ inline and $$...$$ display; for multi-line working use $$\\begin{aligned}...\\end{aligned}$$. Return each field's whole corrected text with the same path.
 
-${problems.map((p) => `<field path="${p.path}">\n<problems>${p.problems.join("; ")}</problems>\n<text>\n${p.text}\n</text>\n</field>`).join("\n\n")}`,
+${[...fields].map(([path, ps]) => `<field path="${path}">\n<problems>${ps.join("; ")}</problems>\n<text>\n${read(doc, path)}\n</text>\n</field>`).join("\n\n")}`,
       });
-      const allowed = new Set(problems.map((p) => p.path));
-      for (const f of fixes) if (allowed.has(f.path)) setPath(doc, f.path, normalizeMath(f.text));
+      for (const f of fixes) if (fields.has(f.path)) setPath(doc, f.path, normalizeMath(f.text));
       problems = lintLesson(doc);
+      spoiled = spoilers(doc, practice);
     } catch (e) {
-      console.error("Couldn't fix the lesson's maths", e);
+      console.error("Couldn't fix the lesson", e);
     }
   }
   for (const p of problems) setPath(doc, p.path, defuse(p.text));
+  if (spoiled.length) dropSpoilers(doc, spoiled);
   return doc;
 }
