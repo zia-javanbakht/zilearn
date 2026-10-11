@@ -78,3 +78,21 @@ describe("structured lessons", () => {
     expect(tex).toContain("Some \\textbf{text} with $x^2$.");
   });
 });
+
+describe("offline lessons from a question sheet", () => {
+  it("teaches from statements, not from the questions or headings", async () => {
+    const { offlineLesson, isPrompt } = await import("@/lib/lessonOffline");
+    expect(isPrompt("Compare dropout with weight decay.")).toBe(true);
+    expect(isPrompt("What is the learning rate?")).toBe(true);
+    expect(isPrompt("Weight decay adds the squared norm of the weights to the loss.")).toBe(false);
+    const head = { title: "Regularisation", depth: 2, level: "Understand", goal: "", map: { course: "ML", path: [], before: [], after: [], children: [], related: [] } } as never;
+    const doc = offlineLesson(head, { summary: "Explain why L2 regularisation reduces overfitting. Compare dropout with weight decay.", keywords: ["compare", "decay", "weight decay"], mastery: null }, [
+      { title: "week3 tutorial", kind: "tutorial", text: "Tutorial 3: Regularisation\n\n1. Explain why L2 regularisation reduces overfitting.\n2. Compare dropout with weight decay." },
+      { title: "Lecture 7 notes", kind: "notes", text: "# Regularisation\nWeight decay is a penalty that adds the squared norm of the weights to the loss function. Regularisation reduces overfitting by keeping the weights small." },
+    ]);
+    const bodies = doc.sections.flatMap((s) => s.blocks.map((b) => b.body)).join("\n");
+    expect(bodies).not.toMatch(/^(Compare|Explain|Tutorial 3)/m);
+    expect(doc.glossary.map((g) => g.term)).toEqual(["weight decay"]);
+    expect(doc.takeaways.join(" ")).not.toMatch(/Explain|Compare/);
+  });
+});

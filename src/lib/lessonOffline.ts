@@ -89,6 +89,17 @@ const DEFINES = /\b(is|are|means|refers to|is defined as|is called|we call|we de
 const ANALOGY = /\b(think of|imagine|picture|like a|as if|analogy|for example, a)\b/i;
 const WARNING = /\b(mistakes?|mix(es|ed)? (this|it|them|these) up|confus\w*|be careful|common (error|slip)|watch out|wrong|trap|pitfall|don't (forget|waste|confuse|mix|use)|do not (forget|confuse|mix|use))\b/i;
 
+/** A question or an instruction to the student ("Compare ...", "Explain ..."), not a statement to teach from. */
+const PROMPT = /^(\(?[a-z]\)|q?\d+[.)]?\s+)?(compare|explain|derive|calculate|compute|show|find|describe|discuss|state|prove|sketch|estimate|determine|write|list|evaluate|give|plot|draw|outline|justify|use|consider|suppose|assume)\b/i;
+export function isPrompt(text: string): boolean {
+  return text.trim().endsWith("?") || PROMPT.test(text.trim());
+}
+
+/** A statement, as opposed to a heading or label that ended up on its own line ("Tutorial 3: Regularisation"). */
+function isStatement(text: string): boolean {
+  return text.split(/\s+/).length >= 6 && !isPrompt(text) && !/:$/.test(text);
+}
+
 function take<T>(xs: T[], n: number): T[] {
   return xs.slice(0, Math.max(0, n));
 }
@@ -163,14 +174,19 @@ export function offlineLesson(
   const all = dedupe(us.flatMap(sentences)).map((s) => ({ ...s, score: relevance(s.text, terms) }));
   const relevant = all.filter((s) => s.score > 0);
   const byScore = [...relevant].sort((a, b) => b.score - a.score);
+  // A summary of a question sheet is its questions; that isn't something to teach from.
+  const summary = info.summary.split(/(?<=[.!?])\s+/).filter((x) => x && !isPrompt(x)).join(" ");
 
   // Definitions: the best statement of each key term (and of the topic itself).
   const glossary: { term: string; meaning: string }[] = [];
   const defBlocks: LessonBlock[] = [];
   const used = new Set<string>();
-  for (const term of [t, ...info.keywords]) {
+  // Longer terms first, so "weight decay" claims its sentence before "decay" does.
+  for (const term of [t, ...[...info.keywords].sort((a, b) => b.split(/\s+/).length - a.split(/\s+/).length)]) {
     const def = definition(term, all);
-    if (!def) continue;
+    // A key term only gets a definition when the materials actually define it; a sentence that merely mentions it isn't one.
+    // The same sentence defining two terms ("decay", "weight decay") is one definition.
+    if (!def || (term !== t && def.score < 2) || used.has(def.text)) continue;
     used.add(def.text);
     if (term !== t) glossary.push({ term, meaning: def.meaning });
     if (defBlocks.length < (d === 1 ? 2 : 3)) defBlocks.push({ kind: "definition", title: term[0].toUpperCase() + term.slice(1), body: def.body, source: def.source });
@@ -193,7 +209,7 @@ export function offlineLesson(
 
   const blocks = (n: number, xs: LessonBlock[]) => take(xs, n);
   const idea: LessonBlock[] = [
-    ...(info.summary ? [{ kind: "keypoint" as const, title: `What ${t} is about`, body: info.summary }] : []),
+    ...(summary ? [{ kind: "keypoint" as const, title: `What ${t} is about`, body: summary }] : []),
     ...defBlocks,
     ...intuitions.map((s) => ({ kind: "intuition" as const, title: "A way to picture it", body: s.text, source: s.source })),
   ];
@@ -205,7 +221,7 @@ export function offlineLesson(
   for (const b of [...intuitions, ...warnings.slice(0, 3)]) used.add(b.text);
   const worked: LessonBlock[] = practice.slice(0, 2).map((q) => ({ kind: "example" as const, title: q.source, body: `${q.text}\n\nTry it before looking at your solutions. Write down the formula you use and the units at each step.`, source: q.source }));
   const more: LessonBlock[] = byScore
-    .filter((s) => !used.has(s.text) && !s.lead)
+    .filter((s) => !used.has(s.text) && !s.lead && isStatement(s.text))
     .slice(0, 3)
     .map((s) => ({ kind: "note" as const, title: "From your materials", body: s.text, source: s.source }));
 
@@ -216,7 +232,7 @@ export function offlineLesson(
     ...(d >= 2 ? [{ heading: "Where students slip", blocks: cautions }] : []),
     ...(d >= 4 || !mechanism.length ? [{ heading: "More from your materials", blocks: more }] : []),
   ].filter((s) => s.blocks.length);
-  if (!sections.length) sections.push({ heading: "From your materials", blocks: [{ kind: "definition", title: t, body: info.summary || `${t}, as covered in your materials.` }] });
+  if (!sections.length) sections.push({ heading: "From your materials", blocks: [{ kind: "definition", title: t, body: summary || `${t}, as covered in your materials.` }] });
 
   const neighbours = [
     ...map.before.map((x) => ({ topic: x, relation: "comes before it; make sure you can explain it first" })),
@@ -238,27 +254,27 @@ export function offlineLesson(
       ...(d >= 4 ? ["Spot where it stops applying and teach it back from memory."] : []),
     ],
     where_it_fits: `**${t}** is part of ${map.path.length ? `*${map.path.join(" › ")}*` : `*${map.course}*`}.${map.before.length ? ` It follows ${map.before.join(", ")}.` : ""}${map.after.length ? ` It leads to ${map.after.join(", ")}.` : ""}${map.related.length ? ` A similar idea appears in ${map.related.map((r) => `${r.title} (${r.course})`).join(", ")}.` : ""}`,
-    recall: d > 1 ? [qa(`In two sentences, what is ${t}?`, info.summary || "Compare with your notes.", "recall")] : [],
+    recall: d > 1 ? [qa(`In two sentences, what is ${t}?`, summary || "Compare with your notes.", "recall")] : [],
     sections,
     glossary,
     // The warnings are already pitfall blocks; without an AI there's no correction to add, so no separate list.
     common_mistakes: [],
     connections: neighbours,
     check_yourself: [
-      qa(`Explain ${t} to a classmate in two sentences, without notes.`, info.summary || "Compare with your sources.", "explain"),
+      qa(`Explain ${t} to a classmate in two sentences, without notes.`, summary || "Compare with your sources.", "explain"),
       ...glossary.slice(0, d === 1 ? 2 : 3).map((g) => qa(`What does "${g.term}" mean?`, g.meaning, "recall")),
       ...(d >= 2 && map.after[0] ? [qa(`Why do you need ${t} before ${map.after[0]}?`, `Look at how ${map.after[0]} uses the results above.`, "explain")] : []),
       ...(d >= 3 ? practice.slice(2, 5).map((q) => qa(q.text, `Check against your worked solutions (${q.source}).`, "apply", "Start from the formula block above.")) : []),
       ...(d >= 4 && map.related[0] ? [qa(`How is ${t} like ${map.related[0].title} in ${map.related[0].course}, and how is it different?`, map.related[0].relation ?? "Compare the equations and what each symbol means.", "transfer")] : []),
     ],
     // Statements from notes and readings (not questions, not the lecturer's spoken asides).
-    takeaways: dedupe([...(info.summary ? [{ text: info.summary }] : []), ...byScore.filter((s) => !s.lead && !s.stamp && !used.has(s.text) && !s.text.endsWith("?") && !practiceTitles.has(s.source.split(",")[0]))].slice(0, 3)).map((x) => x.text).slice(0, 4),
+    takeaways: dedupe([...(summary ? [{ text: summary }] : []), ...byScore.filter((s) => !s.lead && !s.stamp && !used.has(s.text) && isStatement(s.text) && !practiceTitles.has(s.source.split(",")[0]))].slice(0, 3)).map((x) => x.text).slice(0, 4),
     read: sources.slice(0, 4).map((s) => ({ title: s.title, focus: focusIn(s.title, relevant, rankedUnits.map((x) => x.u)) })),
   };
 }
 
 /** The best statement of what a term means, from the sentences of the sources. */
-function definition(term: string, all: (Sentence & { score: number })[]): { text: string; body: string; meaning: string; source: string } | null {
+function definition(term: string, all: (Sentence & { score: number })[]): { text: string; body: string; meaning: string; source: string; score: number } | null {
   const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").split(/\s+/).join("\\s+");
   const named = new RegExp(`\\b${esc}`, "i");
   const verb = new RegExp(`\\b${esc}\\b[^.]{0,30}?\\b(is|are|means|refers to|is defined as|is called)\\b`, "i");
@@ -274,10 +290,10 @@ function definition(term: string, all: (Sentence & { score: number })[]): { text
       const ans = all[i + 1].text.replace(/^it'?s\s+/i, "");
       offer(4, `${s.text} ${all[i + 1].text}`, ans[0].toUpperCase() + ans.slice(1), s.source);
     }
-    if (verb.test(s.text) && !s.lead) offer(3 - s.text.length / 1000, s.text, s.text, s.source);
+    if (verb.test(s.text) && !s.lead && !isPrompt(s.text)) offer(3 - s.text.length / 1000, s.text, s.text, s.source);
     const sym = s.text.match(symbol);
     if (sym) offer(2, s.text, sym[1], s.source, `The **${term}** is ${sym[1]}.`);
-    if (!s.lead && s.text.length < 220) offer(1 - s.text.length / 1000, s.text, s.text, s.source);
+    if (!s.lead && s.text.length < 220 && isStatement(s.text)) offer(1 - s.text.length / 1000, s.text, s.text, s.source);
   }
   return best;
 }

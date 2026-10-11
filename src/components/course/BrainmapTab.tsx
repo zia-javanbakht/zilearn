@@ -8,7 +8,7 @@ import { Mermaid } from "../Mermaid";
 import { LessonModal } from "./LessonModal";
 import { toFlowchart, toMindmap } from "@/lib/mermaid";
 import { applyMark } from "@/lib/tree";
-import { MASTERY_LABELS, MATERIAL_KIND_LABELS, type Mastery, type TopicNode } from "@/lib/types";
+import { DEPTH_LEVELS, MASTERY_LABELS, MATERIAL_KIND_LABELS, type Mastery, type TopicNode } from "@/lib/types";
 import type { CourseData } from "./CourseWorkspace";
 
 interface BrainmapView {
@@ -37,7 +37,7 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
   const [focus, setFocus] = useState<string | null>(selected);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lesson, setLesson] = useState<{ id: string; title: string; depth: number } | null>(null);
+  const [lesson, setLesson] = useState<{ id: string; title: string; depth: number; achieved: number } | null>(null);
   const [adding, setAdding] = useState(false);
 
   const load = () => api<BrainmapView>(`/api/courses/${id}/brainmap`).then(setView).catch((e) => setError(e.message));
@@ -281,7 +281,7 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
               all={[...flat.values()]}
               courseMaterials={data.materials}
               onMark={mark}
-              onLesson={(depth) => setLesson({ id: sel.id, title: sel.title, depth })}
+              onLesson={(depth) => setLesson({ id: sel.id, title: sel.title, depth, achieved: sel.achieved_depth })}
               onSelect={setSelected}
               onAddChild={(t) => addTopic({ ...t, parent_id: sel.id })}
               onEdit={(t) => changeTopics(() => api(`/api/topics/${sel.id}`, { method: "PATCH", json: t }), () => sel.id)}
@@ -308,7 +308,7 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
           )}
         </div>
       </div>
-      {lesson && <LessonModal topicId={lesson.id} title={lesson.title} depth={lesson.depth} onClose={() => setLesson(null)} />}
+      {lesson && <LessonModal topicId={lesson.id} title={lesson.title} depth={lesson.depth} achieved={lesson.achieved} onClose={() => setLesson(null)} onCompleted={reload} />}
     </div>
   );
 }
@@ -529,8 +529,9 @@ function TopicPanel({
         </div>
         <div className="row">
           {[1, 2, 3, 4].map((d) => (
-            <button key={d} className="sm" onClick={() => onLesson(d)}>
-              Level {d}
+            <button key={d} className={`sm ${d === node.achieved_depth + 1 ? "primary" : ""}`} onClick={() => onLesson(d)} title={`${DEPTH_LEVELS[d - 1].name}: ${DEPTH_LEVELS[d - 1].goal}`}>
+              {d <= node.achieved_depth ? "✓ " : ""}
+              {d} · {DEPTH_LEVELS[d - 1].name}
             </button>
           ))}
         </div>

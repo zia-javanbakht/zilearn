@@ -121,6 +121,13 @@ export function PlanTab({ data, reload, go }: { data: CourseData; reload: () => 
     walk(data.tree, []);
     return m;
   }, [data.tree]);
+  /** The highest level finished for each topic, so the lesson reader can tick them. */
+  const achieved = useMemo(() => {
+    const m = new Map<string, number>();
+    const walk = (ns: TopicNode[]) => ns.forEach((n) => (m.set(n.id, n.achieved_depth), walk(n.children)));
+    walk(data.tree);
+    return m;
+  }, [data.tree]);
 
   const days = useMemo(() => {
     const m = new Map<string, PlanItem[]>();
@@ -329,6 +336,7 @@ export function PlanTab({ data, reload, go }: { data: CourseData; reload: () => 
           topicId={lesson.id}
           title={lesson.title}
           depth={lesson.depth}
+          achieved={achieved.get(lesson.id) ?? 0}
           onClose={() => setLesson(null)}
           onCompleted={() => {
             load();
