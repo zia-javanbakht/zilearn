@@ -3,6 +3,7 @@ import { db, newId } from "./db";
 import { chunkText } from "./text";
 import { NEW_CARD, nextDueIn, review, type Rating } from "./srs";
 import type {
+  Digest,
   Card,
   CardStats,
   Course,
@@ -92,13 +93,22 @@ export function deleteCourse(id: string) {
 
 /* ---------------- Materials ---------------- */
 
+function mapMaterial(r: Row): Material {
+  return { ...(r as unknown as Material), digest: json<Material["digest"]>(r.digest, null) };
+}
+
 export function listMaterials(courseId: string, withText = false): Material[] {
-  const cols = withText ? "*" : "id, course_id, kind, title, source_type, filename, mime, path, url, substr(text, 1, 400) AS text, status, note, rel_path, created_at";
-  return db().prepare(`SELECT ${cols} FROM materials WHERE course_id = ? ORDER BY created_at`).all(courseId) as Material[];
+  const cols = withText ? "*" : "id, course_id, kind, title, source_type, filename, mime, path, url, substr(text, 1, 400) AS text, status, note, rel_path, digest, created_at";
+  return (db().prepare(`SELECT ${cols} FROM materials WHERE course_id = ? ORDER BY created_at, rowid`).all(courseId) as Row[]).map(mapMaterial);
 }
 
 export function getMaterial(id: string): Material | null {
-  return (db().prepare("SELECT * FROM materials WHERE id = ?").get(id) as Material) ?? null;
+  const r = db().prepare("SELECT * FROM materials WHERE id = ?").get(id) as Row | undefined;
+  return r ? mapMaterial(r) : null;
+}
+
+export function setDigest(id: string, digest: Digest | null) {
+  db().prepare("UPDATE materials SET digest = ? WHERE id = ?").run(digest ? JSON.stringify(digest) : null, id);
 }
 
 export function insertMaterial(m: Omit<Material, "id" | "created_at">): Material {
@@ -130,6 +140,7 @@ export function updateMaterial(id: string, patch: { title?: string; kind?: strin
   const next = { ...m, ...patch };
   const d = db();
   d.transaction(() => {
+    if ((next.text ?? "") !== (m.text ?? "")) d.prepare("UPDATE materials SET digest = NULL WHERE id = ?").run(id);
     d.prepare("UPDATE materials SET title = ?, kind = ?, text = ?, note = ?, status = ? WHERE id = ?").run(
       next.title,
       next.kind,
@@ -340,7 +351,10 @@ function descendants(courseId: string, id: string): Topic[] {
 }
 
 /** Add a topic by hand, at the end of its parent's subtopics (or of the top level). */
-export function addTopic(courseId: string, t: { title: string; summary?: string; parent_id?: string | null }): Topic {
+export function addTopic(
+  courseId: string,
+  t: { title: string; summary?: string; parent_id?: string | null; keywords?: string[]; material_ids?: string[]; manual?: boolean },
+): Topic {
   const d = db();
   const id = newId();
   const parent = t.parent_id && getTopic(t.parent_id)?.course_id === courseId ? t.parent_id : null;
@@ -348,9 +362,9 @@ export function addTopic(courseId: string, t: { title: string; summary?: string;
   d.transaction(() => {
     d.prepare(
       `INSERT INTO topics (id, course_id, parent_id, title, summary, keywords, material_ids, importance, position, mastery, achieved_depth, manual)
-       VALUES (?, ?, ?, ?, ?, '[]', '[]', 2, ?, NULL, 0, 1)`,
-    ).run(id, courseId, parent, t.title, t.summary ?? "", pos);
-    d.prepare("INSERT INTO topics_fts (title, summary, keywords, topic_id, course_id) VALUES (?, ?, '', ?, ?)").run(t.title, t.summary ?? "", id, courseId);
+       VALUES (?, ?, ?, ?, ?, ?, ?, 2, ?, NULL, 0, ?)`,
+    ).run(id, courseId, parent, t.title, t.summary ?? "", JSON.stringify(t.keywords ?? []), JSON.stringify(t.material_ids ?? []), pos, t.manual === false ? 0 : 1);
+    d.prepare("INSERT INTO topics_fts (title, summary, keywords, topic_id, course_id) VALUES (?, ?, ?, ?, ?)").run(t.title, t.summary ?? "", (t.keywords ?? []).join(" "), id, courseId);
     const removed = removedTitles(courseId);
     if (removed.delete(normTitle(t.title))) setRemovedTitles(courseId, removed);
   })();

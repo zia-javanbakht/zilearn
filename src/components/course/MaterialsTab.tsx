@@ -15,6 +15,8 @@ import {
 import { batches, filterPicked, fromDrop, fromInput, type PickedFile } from "../folderImport";
 import { MATERIAL_KINDS, MATERIAL_KIND_LABELS, type Material, type MaterialKind } from "@/lib/types";
 import { hasTimestamps } from "@/lib/transcript";
+import { Markdown } from "../Markdown";
+import { DigestKeywords, MaterialDigest } from "./MaterialDigest";
 import type { CourseData } from "./CourseWorkspace";
 
 export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; reload: () => void; onBrainmap: () => void }) {
@@ -26,6 +28,12 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
   const [link, setLink] = useState("");
   const [paste, setPaste] = useState({ title: "", text: "" });
   const [added, setAdded] = useState(0);
+  const [ai, setAi] = useState(false);
+  useEffect(() => {
+    api<{ ai: boolean }>("/api/status")
+      .then((st) => setAi(st.ai))
+      .catch(() => {});
+  }, []);
   const fileRef = useRef<HTMLInputElement>(null);
   const folderRef = useRef<HTMLInputElement>(null);
   const [report, setReport] = useState<{ added: number; skipped: { name: string; reason: string }[]; ignored: number } | null>(null);
@@ -340,7 +348,7 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
         ) : (
           <div className="list">
             {data.materials.map((m) => (
-              <MaterialRow key={m.id} m={m} reload={reload} job={jobs[m.id]} onTranscribe={() => transcribe(m)} />
+              <MaterialRow key={m.id} m={m} ai={ai} reload={reload} job={jobs[m.id]} onTranscribe={() => transcribe(m)} />
             ))}
           </div>
         )}
@@ -351,11 +359,13 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
 
 function MaterialRow({
   m,
+  ai,
   reload,
   job,
   onTranscribe,
 }: {
   m: Material;
+  ai: boolean;
   reload: () => void;
   job?: { label: string; error?: boolean };
   onTranscribe: () => void;
@@ -367,6 +377,18 @@ function MaterialRow({
   const running = job && !job.error;
   const yt = m.url?.match(/(?:v=|youtu\.be\/|shorts\/|embed\/|live\/)([\w-]{6,})/)?.[1];
   const [refetch, setRefetch] = useState<{ busy?: boolean; error?: string } | null>(null);
+  const [preview, setPreview] = useState(false);
+  const media = useRef<HTMLMediaElement | null>(null);
+  const [ytStart, setYtStart] = useState(0);
+
+  /** Jump the recording (or the YouTube player) to a topic's timestamp. */
+  function seek(sec: number) {
+    if (yt) setYtStart(sec);
+    else if (media.current) {
+      media.current.currentTime = sec;
+      media.current.play().catch(() => {});
+    }
+  }
 
   async function fetchAgain() {
     setRefetch({ busy: true });
@@ -471,31 +493,42 @@ function MaterialRow({
       ) : (
         m.note && <div className="small muted">{m.note}</div>
       )}
+      <DigestKeywords d={m.digest} />
       {refetch?.error && (
         <div className="small" role="status" style={{ color: "var(--dont)" }}>
           {refetch.error}
         </div>
       )}
       {isAudio && m.path && (m.mime ?? "").startsWith("audio/") && (
-        <audio controls preload="none" src={`/api/materials/${m.id}/file`} style={{ width: "100%", marginTop: 6 }} />
+        <audio ref={(el) => void (media.current = el)} controls preload="none" src={`/api/materials/${m.id}/file`} style={{ width: "100%", marginTop: 6 }} />
       )}
       {isAudio && m.path && (m.mime ?? "").startsWith("video/") && open && (
-        <video controls preload="metadata" src={`/api/materials/${m.id}/file`} style={{ width: "100%", maxWidth: 640, maxHeight: 360, marginTop: 6, borderRadius: 8 }} />
+        <video ref={(el) => void (media.current = el)} controls preload="metadata" src={`/api/materials/${m.id}/file`} style={{ width: "100%", maxWidth: 640, maxHeight: 360, marginTop: 6, borderRadius: 8 }} />
       )}
       {yt && open && (
         <iframe
           style={{ width: "100%", maxWidth: 560, aspectRatio: "16/9", border: 0, borderRadius: 8, marginTop: 6 }}
-          src={`https://www.youtube-nocookie.com/embed/${yt}`}
+          src={`https://www.youtube-nocookie.com/embed/${yt}${ytStart ? `?start=${ytStart}&autoplay=1` : ""}`}
           allowFullScreen
           title={m.title}
         />
       )}
       {open && full && (
         <div className="stack" style={{ marginTop: 8 }}>
-          <textarea value={text} onChange={(e) => setText(e.target.value)} style={{ minHeight: 220, fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }} />
+          {full.text?.trim() && <MaterialDigest m={m} ai={ai} onChanged={reload} onSeek={isAudio || yt ? seek : undefined} />}
+          {preview ? (
+            <div className="card" style={{ maxHeight: 420, overflow: "auto" }}>
+              <Markdown>{text}</Markdown>
+            </div>
+          ) : (
+            <textarea value={text} onChange={(e) => setText(e.target.value)} style={{ minHeight: 220, fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }} />
+          )}
           <div className="row">
             <button className="primary sm" onClick={() => patch({ text })} disabled={text === (full.text ?? "")}>
               Save text
+            </button>
+            <button className="sm" onClick={() => setPreview(!preview)} title="Show the text formatted, with formulas rendered">
+              {preview ? "Edit" : "Preview"}
             </button>
             <span className="small muted">{text.length.toLocaleString()} characters. Edits are searchable and used for the brainmap.</span>
           </div>

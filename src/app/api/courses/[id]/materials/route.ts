@@ -1,6 +1,7 @@
+import { digestNow, upgradeDigests } from "@/lib/digest";
 import { importFile, importLink, sizeLabel, sizeLimit, type ImportResult } from "@/lib/importer";
 import { getCourse, insertMaterial, listMaterials } from "@/lib/store";
-import { fail, handle, ok, type Ctx } from "@/lib/http";
+import { fail, handle, later, ok, type Ctx } from "@/lib/http";
 import { MATERIAL_KINDS, type MaterialKind } from "@/lib/types";
 
 function kindOr(v: unknown, fallback: MaterialKind): MaterialKind {
@@ -9,6 +10,14 @@ function kindOr(v: unknown, fallback: MaterialKind): MaterialKind {
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
+
+/** Answer with the new materials and their digests; recordings get an AI digest in the background. */
+function created(result: ImportResult) {
+  result.materials = digestNow(result.materials);
+  const ids = result.materials.map((m) => m.id);
+  later(() => upgradeDigests(ids));
+  return ok(result, 201);
+}
 
 export const GET = handle(async (_req: Request, { params }: Ctx<{ id: string }>) => {
   const { id } = await params;
@@ -43,7 +52,7 @@ export const POST = handle(async (req: Request, { params }: Ctx<{ id: string }>)
       }
       await importFile(courseId, { name, mime: file.type, buf: Buffer.from(await file.arrayBuffer()), relPath, kind: kindOverride }, result);
     }
-    return ok(result, 201);
+    return created(result);
   }
 
   const b = (await req.json().catch(() => ({}))) as { url?: string; text?: string; title?: string; kind?: string };
@@ -58,11 +67,11 @@ export const POST = handle(async (req: Request, { params }: Ctx<{ id: string }>)
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return fail("Only http and https links are supported.");
     const result: ImportResult = { materials: [], skipped: [] };
     await importLink(courseId, url, { kind: b.kind, title: b.title }, result);
-    return ok(result, 201);
+    return created(result);
   }
   if (b.text && b.text.trim()) {
     const m = insertMaterial({ course_id: courseId, kind: kindOr(b.kind, "lecture_notes"), title: b.title?.trim() || "Pasted notes", source_type: "text", filename: null, mime: null, path: null, url: null, text: b.text, status: "ready", note: null });
-    return ok({ materials: [m], skipped: [] }, 201);
+    return created({ materials: [m], skipped: [] });
   }
   return fail("Send files, a url, or text.");
 });

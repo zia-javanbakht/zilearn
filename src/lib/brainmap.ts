@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
+import { offlineDigest } from "./digest";
 import { splitSections, topKeywords, truncate } from "./text";
 import type { NewTopic } from "./store";
 import type { Course, Material } from "./types";
@@ -46,7 +47,11 @@ async function structureWithClaude(course: Course, materials: Material[]) {
     const ref = `M${i + 1}`;
     refs.set(ref, m.id);
     const body = m.text ? truncate(m.text, Math.max(floor, Math.floor(m.text.length * ratio))) : "(no text available)";
-    return `<material id="${ref}" kind="${MATERIAL_KIND_LABELS[m.kind]}" title="${m.title.replace(/"/g, "'")}">\n${body}\n</material>`;
+    // A digest keeps the whole of a long recording in view even when its transcript is cut to fit.
+    const digest = m.digest
+      ? `<digest>\n${m.digest.summary}\nKey terms: ${m.digest.keywords.join(", ")}\nTopics: ${m.digest.topics.map((t) => t.title).join("; ")}\n</digest>\n`
+      : "";
+    return `<material id="${ref}" kind="${MATERIAL_KIND_LABELS[m.kind]}" title="${m.title.replace(/"/g, "'")}">\n${digest}${body}\n</material>`;
   });
   const prompt = `Course: ${course.name}${course.code ? ` (${course.code})` : ""}
 ${course.description ? `Description: ${course.description}\n` : ""}
@@ -88,15 +93,27 @@ export function heuristicTopics(materials: Material[]): NewTopic[] {
     const ref = `M${i}`;
     const text = m.text ?? "";
     const sections = splitSections(text).filter((s) => s.heading);
+    // Transcripts have no headings: their topics come from the material's digest instead.
+    const digest = m.digest ?? (sections.length < 2 && text.trim() ? offlineDigest(text) : null);
     topics.push({
       ref,
       parent_ref: null,
       title: m.title,
-      summary: firstSentences(text, 2) || `${MATERIAL_KIND_LABELS[m.kind]} for this course.`,
-      keywords: topKeywords(text, 6),
+      summary: digest?.summary || firstSentences(text, 2) || `${MATERIAL_KIND_LABELS[m.kind]} for this course.`,
+      keywords: digest?.keywords.slice(0, 8) ?? topKeywords(text, 6),
       material_ids: [m.id],
       importance: m.kind === "sample_exam" ? 3 : 2,
     });
+    if (sections.length < 2 && digest?.topics.length) {
+      digest.topics.slice(0, 15).forEach((t, j) => {
+        const tref = `${ref}.d${j}`;
+        topics.push({ ref: tref, parent_ref: ref, title: truncate(t.title, 60), summary: t.summary, keywords: topKeywords(`${t.title} ${t.summary}`, 6), material_ids: [m.id], importance: 2 });
+        (t.subtopics ?? []).forEach((st, k) =>
+          topics.push({ ref: `${tref}.${k}`, parent_ref: tref, title: truncate(st.title, 60), summary: st.summary, keywords: topKeywords(`${st.title} ${st.summary}`, 6), material_ids: [m.id], importance: 2 }),
+        );
+      });
+      return;
+    }
     const seen = new Set<string>();
     for (const s of sections) {
       const key = s.heading.toLowerCase();

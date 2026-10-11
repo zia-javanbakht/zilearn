@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { Busy } from "../Busy";
+import { Markdown } from "../Markdown";
 import { Mermaid } from "../Mermaid";
 import { LessonModal } from "./LessonModal";
 import { toFlowchart, toMindmap } from "@/lib/mermaid";
@@ -512,7 +513,7 @@ function TopicPanel({
           {node.mastery === null && node.effective_mastery && <span className="small muted">(inherited)</span>}
         </div>
       </div>
-      <p style={{ margin: 0 }}>{node.summary}</p>
+      {node.summary && <Markdown>{node.summary}</Markdown>}
       {node.keywords.length > 0 && <div className="small muted">Key terms: {node.keywords.join(", ")}</div>}
       <div className="stack" style={{ gap: 6 }}>
         <MarkButtons node={node} onMark={onMark} branch={branch} />

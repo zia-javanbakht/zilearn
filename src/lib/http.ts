@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { aiErrorMessage, errorStatus, requestSignal } from "./ai";
 
 export type Ctx<P> = { params: Promise<P> };
@@ -66,4 +66,14 @@ export function fileResponse(req: Request, buf: Buffer, opts: { mime: string; fi
     });
   }
   return new Response(new Uint8Array(buf), { headers: { ...headers, "content-length": String(buf.length) } });
+}
+
+/** Run work after the response is sent; outside a request (scripts, tests) it simply runs in the background. */
+export function later(fn: () => Promise<unknown>) {
+  const run = () => fn().catch((err) => console.error(err));
+  try {
+    after(run);
+  } catch {
+    void run();
+  }
 }

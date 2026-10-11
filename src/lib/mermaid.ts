@@ -1,4 +1,4 @@
-import type { Mastery, TopicNode } from "./types";
+import type { Digest, Mastery, TopicNode } from "./types";
 
 /* Pure Mermaid generators, safe to use on both server and client. */
 
@@ -95,4 +95,16 @@ export function toFlowchart(courseName: string, roots: TopicNode[], opts: Flowch
   };
   walk(roots, "root", 0, -1);
   return { code: lines.join("\n"), nodeIds, collapsed: collapse };
+}
+
+/** Mermaid mindmap of one material's digest. */
+export function digestMindmap(title: string, d: Digest): string {
+  const label = (s: string) => s.replace(/[()[\]{}"`<>$\\]/g, " ").replace(/\s+/g, " ").trim().slice(0, 50) || "untitled";
+  const lines = ["mindmap", `  root((${label(title)}))`];
+  let i = 0;
+  for (const t of d.topics) {
+    lines.push(`    n${i++}[${label(t.title)}]`);
+    for (const s of t.subtopics ?? []) lines.push(`      n${i++}[${label(s.title)}]`);
+  }
+  return lines.join("\n");
 }

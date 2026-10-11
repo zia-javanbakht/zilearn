@@ -2,12 +2,13 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { dataDir } from "@/lib/db";
 import { deleteMaterial, getMaterial, updateMaterial } from "@/lib/store";
-import { body, fail, handle, ok, type Ctx } from "@/lib/http";
+import { body, fail, handle, later, ok, type Ctx } from "@/lib/http";
 import { tidyTranscript } from "@/lib/extract";
 import { providerName } from "@/lib/ai";
-import { MATERIAL_KINDS } from "@/lib/types";
+import { MATERIAL_KINDS, type Material } from "@/lib/types";
 import { fetchYoutube, youtubeId, youtubeNote } from "@/lib/youtube";
 import { stripTimestamps } from "@/lib/transcript";
+import { digestNow, upgradeDigests } from "@/lib/digest";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,7 @@ export const PATCH = handle(async (req: Request, { params }: Ctx<{ id: string }>
     if (!current.url || !youtubeId(current.url)) return fail("Only YouTube videos can be fetched again.");
     const yt = await fetchYoutube(current.url);
     if (!yt.transcript) return fail("This video still has no transcript YouTube will share. Paste a summary or your notes instead.");
-    return ok(updateMaterial(id, { text: yt.transcript, note: youtubeNote(yt, providerName()) }));
+    return ok(withDigest(updateMaterial(id, { text: yt.transcript, note: youtubeNote(yt, providerName()) })));
   }
   const patch: { title?: string; kind?: string; text?: string; note?: string | null } = {
     title: typeof b.title === "string" && b.title.trim() ? b.title.trim().slice(0, 300) : undefined,
@@ -67,8 +68,16 @@ export const PATCH = handle(async (req: Request, { params }: Ctx<{ id: string }>
     patch.note = note?.replace(/\s*\[mm:ss\][^.]*\./, "").trim() || null;
   }
   const m = updateMaterial(id, Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)));
-  return m ? ok(m) : fail("Not found", 404);
+  return m ? ok(withDigest(m)) : fail("Not found", 404);
 });
+
+/** New text needs a new digest: the offline one now, the AI one for recordings after answering. */
+function withDigest(m: Material | null): Material | null {
+  if (!m || m.digest) return m;
+  const [done] = digestNow([m]);
+  later(() => upgradeDigests([m.id]));
+  return done;
+}
 
 export const DELETE = handle(async (_req: Request, { params }: Ctx<{ id: string }>) => {
   const { id } = await params;

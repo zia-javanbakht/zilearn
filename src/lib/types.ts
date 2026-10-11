@@ -89,7 +89,22 @@ export interface Material {
   note: string | null;
   sha256?: string | null; // content hash of an uploaded file
   rel_path?: string | null; // e.g. "Week 3/Lecture notes.pdf" when imported from a folder or zip
+  digest?: Digest | null; // summary, key terms and topics of this material
   created_at: string;
+}
+
+export interface DigestTopic {
+  title: string;
+  start: string | null; // "mm:ss" in a recording
+  summary: string;
+  subtopics?: DigestTopic[];
+}
+
+export interface Digest {
+  summary: string;
+  keywords: string[];
+  topics: DigestTopic[];
+  by: "ai" | "offline";
 }
 
 export interface Topic {
