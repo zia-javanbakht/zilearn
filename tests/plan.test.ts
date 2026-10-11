@@ -132,3 +132,20 @@ describe("plan structure", () => {
     expect(plan.items.filter((i) => i.kind !== "final" && i.kind !== "recall").every((i) => i.date < "2026-01-20")).toBe(true);
   });
 });
+
+describe("applyMark (client-side marking)", () => {
+  it("matches the server: branch marks clear descendants, which then inherit", async () => {
+    const { applyMark } = await import("@/lib/tree");
+    const leaf = (id: string, mastery: TopicNode["mastery"] = null) => ({ id, mastery, children: [], effective_mastery: null }) as unknown as TopicNode;
+    const tree = [{ ...leaf("a"), children: [leaf("a1", "know"), leaf("a2")] }, leaf("b", "familiar")] as TopicNode[];
+    const t1 = applyMark(tree, "a", "dont_know");
+    expect(t1[0].children.map((c) => [c.mastery, c.effective_mastery])).toEqual([[null, "dont_know"], [null, "dont_know"]]);
+    expect(t1[1].effective_mastery).toBe("familiar");
+    expect(tree[0].children[0].mastery).toBe("know"); // input untouched
+    const t2 = applyMark(t1, "a2", "know", false);
+    expect(t2[0].children[1].effective_mastery).toBe("know");
+    const t3 = applyMark(t2, null, "familiar");
+    expect(t3.every((r) => r.mastery === "familiar")).toBe(true);
+    expect(t3[0].children.every((c) => c.mastery === null && c.effective_mastery === "familiar")).toBe(true);
+  });
+});

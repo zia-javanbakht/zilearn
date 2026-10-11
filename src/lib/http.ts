@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { aiErrorMessage } from "./ai";
+import { aiErrorMessage, errorStatus, requestSignal } from "./ai";
 
 export type Ctx<P> = { params: Promise<P> };
 
@@ -15,10 +15,13 @@ export function fail(message: string, status = 400) {
 export function handle<A extends unknown[]>(fn: (...args: A) => Promise<Response> | Response) {
   return async (...args: A): Promise<Response> => {
     try {
-      return await fn(...args);
+      const req = args[0];
+      // Expose the request's abort signal to Claude calls made while handling it.
+      return req instanceof Request ? await requestSignal.run(req.signal, () => fn(...args)) : await fn(...args);
     } catch (err) {
-      console.error(err);
-      return fail(aiErrorMessage(err), 500);
+      const status = errorStatus(err);
+      if (status >= 500) console.error(err);
+      return fail(aiErrorMessage(err), status);
     }
   };
 }

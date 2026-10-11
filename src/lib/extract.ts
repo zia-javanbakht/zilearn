@@ -72,8 +72,9 @@ async function extractPdf(buf: Buffer): Promise<Extracted> {
 
   // Little or no embedded text: probably a scan. Claude can read the PDF directly.
   if (aiEnabled() && buf.length < 30 * 1024 * 1024) {
-    const md = await generateText({
+    const { text: md, truncated } = await generateText({
       effort: "low",
+      maxTokens: 32000,
       prompt: [
         { type: "document", source: { type: "base64", media_type: "application/pdf", data: buf.toString("base64") } },
         {
@@ -82,7 +83,9 @@ async function extractPdf(buf: Buffer): Promise<Extracted> {
         },
       ],
     });
-    return { text: md, status: "ready", note: "Scanned PDF transcribed by Claude." };
+    return truncated
+      ? { text: md, status: "partial", note: "Scanned PDF transcribed by Claude, but it was too long to finish. Split the PDF for the rest." }
+      : { text: md, status: "ready", note: "Scanned PDF transcribed by Claude." };
   }
   return { text: joined, status: "partial", note: "This PDF has little selectable text (likely scanned). Add an Anthropic API key to transcribe it, or paste notes." };
 }
@@ -127,8 +130,9 @@ async function extractImage(buf: Buffer, mime: string): Promise<Extracted> {
     | "image/jpeg"
     | "image/gif"
     | "image/webp";
-  const md = await generateText({
+  const { text: md } = await generateText({
     effort: "low",
+    maxTokens: 8000,
     prompt: [
       { type: "image", source: { type: "base64", media_type: media, data: buf.toString("base64") } },
       { type: "text", text: "Transcribe all text in this image (e.g. handwritten notes, a whiteboard, a slide) into Markdown. Describe any diagram briefly in [brackets]. Output only the transcription." },

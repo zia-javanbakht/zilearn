@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Markdown } from "../Markdown";
+import { Busy } from "../Busy";
 import { DEPTH_LEVELS } from "@/lib/types";
 
 export function LessonModal({
@@ -47,24 +48,55 @@ export function LessonModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [topicId, depth]);
 
+  // Dialog keyboard behaviour: Escape closes, Tab stays inside, focus returns to where it was.
+  const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", esc);
-    return () => window.removeEventListener("keydown", esc);
+    const before = document.activeElement as HTMLElement | null;
+    dialogRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") return onClose();
+      if (e.key !== "Tab" || !dialogRef.current) return;
+      const items = dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], input, textarea, select, summary, [tabindex="0"]');
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      before?.focus?.();
+    };
   }, [onClose]);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="modal"
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="lesson-title"
+        tabIndex={-1}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="spread">
-          <h2 style={{ margin: 0 }}>{title}</h2>
-          <button className="ghost" onClick={onClose}>
+          <h2 id="lesson-title" style={{ margin: 0 }}>
+            {title}
+          </h2>
+          <button className="ghost" onClick={onClose} aria-label="Close">
             ✕
           </button>
         </div>
         <div className="row" style={{ margin: "12px 0" }}>
           {DEPTH_LEVELS.map((l) => (
-            <button key={l.level} className={`sm ${depth === l.level ? "primary" : ""}`} onClick={() => setDepth(l.level)}>
+            <button key={l.level} className={`sm ${depth === l.level ? "primary" : ""}`} aria-pressed={depth === l.level} onClick={() => setDepth(l.level)}>
               {l.level} · {l.name}
             </button>
           ))}
@@ -99,7 +131,7 @@ export function LessonModal({
         )}
         {content === null && !error ? (
           <p className="muted">
-            <span className="spinner" /> Preparing the lesson…
+            <Busy label="Preparing the lesson…" hint="usually under a minute" />
           </p>
         ) : (
           content && <Markdown>{content}</Markdown>

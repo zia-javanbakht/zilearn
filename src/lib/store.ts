@@ -1,3 +1,4 @@
+import { inheritMastery } from "./tree";
 import { db, newId } from "./db";
 import { chunkText } from "./text";
 import type {
@@ -183,14 +184,7 @@ export function buildTree(topics: Topic[]): TopicNode[] {
     ns.forEach((n) => sort(n.children));
   };
   sort(roots);
-  const inherit = (ns: TopicNode[], parent: Mastery | null) => {
-    for (const n of ns) {
-      n.effective_mastery = n.mastery ?? parent;
-      inherit(n.children, n.effective_mastery);
-    }
-  };
-  inherit(roots, null);
-  return roots;
+  return inheritMastery(roots);
 }
 
 export function flattenTree(roots: TopicNode[]): TopicNode[] {

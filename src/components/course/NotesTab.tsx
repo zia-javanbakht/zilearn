@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { Markdown } from "../Markdown";
+import { Busy } from "../Busy";
 import { ScopePicker, type ScopeValue } from "./ScopePicker";
 import type { ReviewNote } from "@/lib/types";
 import type { CourseData } from "./CourseWorkspace";
@@ -66,7 +67,7 @@ export function NotesTab({ data }: { data: CourseData }) {
             </select>
           </label>
           <button className="primary" style={{ alignSelf: "flex-end" }} onClick={create} disabled={busy || !data.tree.length}>
-            {busy && <span className="spinner" />} {busy ? "Writing notes…" : "Generate notes"}
+            {busy ? <Busy label="Writing notes…" /> : "Generate notes"}
           </button>
         </div>
         {!data.tree.length && <div className="alert">Build the brainmap first.</div>}
@@ -74,10 +75,10 @@ export function NotesTab({ data }: { data: CourseData }) {
       </div>
 
       {notes && notes.length > 0 && (
-        <div className="split" style={{ gridTemplateColumns: "260px minmax(0, 1fr)" }}>
+        <div className="split side-list">
           <div className="card list">
             {notes.map((n) => (
-              <div key={n.id} className="list-item" style={{ cursor: "pointer", background: open?.id === n.id ? "var(--accent-soft)" : undefined, borderRadius: 8, padding: 8 }} onClick={() => setOpen(n)}>
+              <div key={n.id} className={`list-item pick${open?.id === n.id ? " selected" : ""}`} aria-current={open?.id === n.id} onClick={() => setOpen(n)} role="button" tabIndex={0} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setOpen(n))}>
                 <div>
                   <strong className="small">{n.title}</strong>
                   <div className="small muted">{n.created_at.slice(0, 16)}</div>

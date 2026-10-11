@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { aiEnabled, generateStructured, generateText } from "./ai";
+import { aiEnabled, CUT_OFF_NOTE, generateStructured, generateText, UserError } from "./ai";
 import { excerptsFor } from "./kb";
 import { buildTree, flattenTree, getCourse, getLesson, getTopic, listMaterials, listTopics } from "./store";
 import { truncate } from "./text";
@@ -12,7 +12,7 @@ import {
   type PodcastSegment,
   type TopicNode,
 } from "./types";
-import { newId } from "./db";
+import { db, newId } from "./db";
 
 /* ---------------- Scope ---------------- */
 
@@ -43,9 +43,12 @@ export interface ScopeContext {
 
 const WEIGHT = { dont_know: 3, familiar: 2, know: 1 } as const;
 
-export function resolveScope(courseId: string, scope: Scope, sourceBudget = 120_000): ScopeContext {
+/** One shared budget, so every feature sends identical course sources and can reuse the prompt cache. */
+export const SOURCE_BUDGET = 120_000;
+
+export function resolveScope(courseId: string, scope: Scope, sourceBudget = SOURCE_BUDGET): ScopeContext {
   const course = getCourse(courseId);
-  if (!course) throw new Error("Course not found");
+  if (!course) throw new UserError("Course not found");
   const roots = buildTree(listTopics(courseId));
   let nodes = flattenTree(roots);
   let label = "Whole course";
@@ -53,7 +56,7 @@ export function resolveScope(courseId: string, scope: Scope, sourceBudget = 120_
 
   if (scope.kind === "topic") {
     const root = nodes.find((n) => n.id === scope.topicId);
-    if (!root) throw new Error("Topic not found");
+    if (!root) throw new UserError("Topic not found");
     nodes = flattenTree([root]);
     outlineRoots = [root];
     label = root.title;
@@ -77,23 +80,31 @@ export function resolveScope(courseId: string, scope: Scope, sourceBudget = 120_
       .map((m) => `<material title="${m.title.replace(/"/g, "'")}" kind="${m.kind}">\n${m.text}\n</material>`)
       .join("\n\n");
   } else {
-    const per = Math.max(1500, Math.floor(sourceBudget / Math.max(1, nodes.length)));
+    // Split the budget evenly so topics late in the outline still get source text.
+    const per = Math.max(400, Math.floor(sourceBudget / Math.max(1, nodes.length)));
     const seen = new Set<string>();
     const parts: string[] = [];
+    let used = 0;
     for (const n of nodes) {
       for (const ex of excerptsFor(courseId, `${n.title} ${n.keywords.join(" ")}`, per, n.material_ids)) {
-        if (seen.has(ex)) continue;
+        if (seen.has(ex) || used + ex.length > sourceBudget) continue;
         seen.add(ex);
         parts.push(ex);
+        used += ex.length + 7;
       }
     }
-    sources = truncate(parts.join("\n\n---\n\n"), sourceBudget);
+    sources = parts.join("\n\n---\n\n");
   }
   return { course, label, nodes, outline, sources };
 }
 
 function fullTextFits(courseId: string, budget: number) {
-  return listMaterials(courseId, true).reduce((s, m) => s + (m.text?.length ?? 0), 0) <= budget;
+  const row = db().prepare("SELECT COALESCE(SUM(length(text)), 0) AS n FROM materials WHERE course_id = ?").get(courseId) as { n: number };
+  return row.n <= budget;
+}
+
+function sourcesBlock(ctx: ScopeContext) {
+  return `<course_sources course="${ctx.course.name.replace(/"/g, "'")}">\n${ctx.sources || "(no source text)"}\n</course_sources>`;
 }
 
 function renderOutline(roots: TopicNode[], include: Set<string>, depth = 0): string {
@@ -111,9 +122,12 @@ function renderOutline(roots: TopicNode[], include: Set<string>, depth = 0): str
 
 /* ---------------- Lessons (one topic at one depth) ---------------- */
 
-export async function generateLesson(topicId: string, depth: number): Promise<{ content: string; by: "claude" | "heuristic" }> {
+export async function generateLesson(
+  topicId: string,
+  depth: number,
+): Promise<{ content: string; by: "claude" | "heuristic"; truncated?: boolean }> {
   const topic = getTopic(topicId);
-  if (!topic) throw new Error("Topic not found");
+  if (!topic) throw new UserError("Topic not found");
   const course = getCourse(topic.course_id)!;
   const level = DEPTH_LEVELS[Math.min(4, Math.max(1, depth)) - 1];
   const excerpts = excerptsFor(topic.course_id, `${topic.title} ${topic.keywords.join(" ")}`, 20000, topic.material_ids);
@@ -142,7 +156,8 @@ export async function generateLesson(topicId: string, depth: number): Promise<{ 
     return { content: body.filter(Boolean).join("\n\n"), by: "heuristic" };
   }
 
-  const content = await generateText({
+  const { text, truncated } = await generateText({
+    maxTokens: 12000,
     prompt: `Course: ${course.name}
 Topic: ${topic.title}
 Where it sits in the course: ${[...ancestors, topic.title].join(" > ")}
@@ -165,7 +180,7 @@ Write the lesson for this pass in Markdown:
 - Point to which of the student's materials to look at (by title) when useful.
 - End with "Check yourself": 3-5 questions appropriate to this level, with brief answers in a collapsed <details> block.`,
   });
-  return { content, by: "claude" };
+  return { content: truncated ? text + CUT_OFF_NOTE : text, by: "claude", truncated };
 }
 
 /* ---------------- Mock exams ---------------- */
@@ -194,10 +209,10 @@ export interface ExamOptions {
 }
 
 export async function generateExam(courseId: string, opts: ExamOptions) {
-  const ctx = resolveScope(courseId, opts.scope, 100_000);
+  const ctx = resolveScope(courseId, opts.scope);
   const leaves = ctx.nodes.filter((n) => !n.children.length);
   const pool = leaves.length ? leaves : ctx.nodes;
-  if (!pool.length) throw new Error("Build the brainmap first so there are topics to examine.");
+  if (!pool.length) throw new UserError("Build the brainmap first so there are topics to examine.");
   const count = Math.min(40, Math.max(1, opts.questionCount));
   const totalW = opts.mix.mcq + opts.mix.short + opts.mix.long || 1;
   const nMcq = Math.round((count * opts.mix.mcq) / totalW);
@@ -205,20 +220,22 @@ export async function generateExam(courseId: string, opts: ExamOptions) {
   const nShort = Math.max(0, count - nMcq - nLong);
 
   const sampleExams = listMaterials(courseId, true).filter((m) => m.kind === "sample_exam" && m.text);
+  const perSample = Math.floor(40_000 / Math.max(1, sampleExams.length));
   const byTitle = new Map(pool.map((n) => [n.title.toLowerCase(), n]));
 
   if (aiEnabled()) {
     const out = await generateStructured({
       schema: ExamSchema,
       effort: "medium",
+      maxTokens: 24000,
+      context: sourcesBlock(ctx),
       prompt: `Write a mock exam for the course "${ctx.course.name}" (scope: ${ctx.label}).
 
 Topic outline (with the student's self-assessment):
 ${ctx.outline}
 
-${sampleExams.length ? `Sample exams from this course - match their style, difficulty and question formats:\n${sampleExams.map((m) => `<sample_exam title="${m.title}">\n${truncate(m.text!, 30000)}\n</sample_exam>`).join("\n")}\n` : ""}
-Source material:
-${ctx.sources}
+${sampleExams.length ? `Sample exams from this course - match their style, difficulty and question formats:\n${sampleExams.map((m) => `<sample_exam title="${m.title}">\n${truncate(m.text!, perSample)}\n</sample_exam>`).join("\n")}\n` : ""}
+The course source material is given above in <course_sources>.
 
 Requirements:
 - Exactly ${nMcq} multiple-choice (4 options, one correct), ${nShort} short-answer and ${nLong} long-answer questions.
@@ -359,11 +376,12 @@ export async function gradeExam(
     const out = await generateStructured({
       schema: GradeSchema,
       effort: "low",
+      maxTokens: 8000,
       prompt: `Mark these exam answers strictly but fairly against the marking guide. Award partial credit. Feedback: 1-3 sentences saying what was missing or wrong and how to improve.
 
 ${written
   .map(
-    (q) => `<question id="${q.id}" marks="${q.marks}">
+    (q, i) => `<question id="Q${i + 1}" marks="${q.marks}">
 <prompt>${q.prompt}</prompt>
 <marking_guide>${q.model_answer}</marking_guide>
 <student_answer>${answers[q.id]}</student_answer>
@@ -372,7 +390,8 @@ ${written
   .join("\n")}`,
     });
     for (const g of out.grades) {
-      const q = written.find((w) => w.id === g.question_id);
+      const m = /^Q?(\d+)$/i.exec(g.question_id.trim());
+      const q = m ? written[Number(m[1]) - 1] : written.find((w) => w.id === g.question_id);
       if (q) grades.set(q.id, { question_id: q.id, score: clamp(g.score, 0, q.marks), max: q.marks, feedback: g.feedback });
     }
   }
@@ -390,7 +409,7 @@ function clamp(n: number, lo: number, hi: number) {
 
 export async function generateNotes(courseId: string, scope: Scope, style: "concise" | "detailed" | "cheatsheet") {
   const ctx = resolveScope(courseId, scope);
-  if (!ctx.nodes.length) throw new Error("Build the brainmap first.");
+  if (!ctx.nodes.length) throw new UserError("Build the brainmap first.");
   if (!aiEnabled()) {
     const lines = [`# Review notes: ${ctx.course.name} - ${ctx.label}`, ""];
     const roots = buildTree(listTopics(courseId));
@@ -416,7 +435,9 @@ export async function generateNotes(courseId: string, scope: Scope, style: "conc
     detailed: "Detailed study notes: full explanations, worked examples, common mistakes, and links between topics.",
     cheatsheet: "A dense one-to-two page cheat sheet: formulas, definitions, key facts, decision rules, in compact tables and bullet lists.",
   }[style];
-  const content = await generateText({
+  const { text, truncated } = await generateText({
+    maxTokens: style === "detailed" ? 32000 : 16000,
+    context: sourcesBlock(ctx),
     prompt: `Write review notes for "${ctx.course.name}" (scope: ${ctx.label}).
 
 Style: ${styleGuide}
@@ -424,12 +445,11 @@ Style: ${styleGuide}
 Topic outline with the student's self-assessment:
 ${ctx.outline}
 
-Source material:
-${ctx.sources}
+The course source material is given above in <course_sources>.
 
 Format as Markdown with headings that follow the outline. Use LaTeX ($...$) for maths, tables where they help, and at most two small Mermaid diagrams (\`\`\`mermaid) for structure or processes. Spend more space on topics the student doesn't know yet. Finish with a "Most likely exam questions" section.`,
   });
-  return { title: `${ctx.label} - ${style}`, scope: ctx.label, content, by: "claude" as const };
+  return { title: `${ctx.label} - ${style}`, scope: ctx.label, content: truncated ? text + CUT_OFF_NOTE : text, by: "claude" as const };
 }
 
 /* ---------------- Podcasts ---------------- */
@@ -441,14 +461,15 @@ const PodcastSchema = z.object({
 
 export async function generatePodcast(courseId: string, scope: Scope, minutes: number) {
   const ctx = resolveScope(courseId, scope);
-  if (!ctx.nodes.length) throw new Error("Build the brainmap first.");
+  if (!ctx.nodes.length) throw new UserError("Build the brainmap first.");
   const hosts = { A: "Alex", B: "Sam" };
   const words = Math.round(Math.min(40, Math.max(3, minutes)) * 150);
   if (aiEnabled()) {
     const out = await generateStructured({
       schema: PodcastSchema,
       effort: "medium",
-      maxTokens: 32000,
+      maxTokens: 24000,
+      context: sourcesBlock(ctx),
       prompt: `Write a study podcast episode for a student taking "${ctx.course.name}" (scope: ${ctx.label}).
 
 Two hosts: ${hosts.A} (A, the explainer) and ${hosts.B} (B, a curious fellow student who asks the questions the listener would ask and checks understanding).
@@ -457,8 +478,7 @@ Length: about ${words} words in total (~${minutes} minutes).
 Topic outline with the student's self-assessment:
 ${ctx.outline}
 
-Source material:
-${ctx.sources}
+The course source material is given above in <course_sources>.
 
 Make it engaging and accurate: concrete examples and analogies, recap key points, call out common exam traps, and end with a quick-fire recap quiz. It will be read aloud by text-to-speech, so write maths in words, avoid symbols, Markdown, and stage directions. Keep each turn to 1-4 sentences.`,
     });

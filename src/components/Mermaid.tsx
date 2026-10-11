@@ -42,6 +42,15 @@ export function Mermaid({ code, onNodeClick, fit = false, zoom = false }: { code
             const m = g.id.match(/flowchart-([A-Za-z0-9_]+)-\d+$/);
             if (!m) return;
             g.addEventListener("click", () => clickRef.current?.(m[1]));
+            // Keyboard access: Tab to a node, Enter or Space to select it.
+            g.setAttribute("tabindex", "0");
+            g.setAttribute("role", "button");
+            g.addEventListener("keydown", (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                clickRef.current?.(m[1]);
+              }
+            });
           });
         }
       } catch (e) {
@@ -55,16 +64,16 @@ export function Mermaid({ code, onNodeClick, fit = false, zoom = false }: { code
 
   return (
     <div>
-      {error && <div className="alert error small">Diagram could not be rendered: {error}</div>}
+      {error && <div className="alert error small" role="alert">Diagram could not be rendered: {error}</div>}
       {zoom && (
         <div className="row" style={{ justifyContent: "flex-end", marginBottom: 6, gap: 4 }}>
-          <button className="sm" onClick={() => setScale((s) => Math.max(0.3, s / 1.25))} title="Zoom out">
+          <button className="sm" onClick={() => setScale((s) => Math.max(0.3, s / 1.25))} title="Zoom out" aria-label="Zoom out">
             −
           </button>
           <button className="sm" onClick={() => setScale(1)} title="Actual size">
             {scale === 0 ? "Fit" : `${Math.round(scale * 100)}%`}
           </button>
-          <button className="sm" onClick={() => setScale((s) => Math.min(4, s * 1.25))} title="Zoom in">
+          <button className="sm" onClick={() => setScale((s) => Math.min(4, s * 1.25))} title="Zoom in" aria-label="Zoom in">
             +
           </button>
           <button className="sm" onClick={() => setScale(0)} title="Fit to width">

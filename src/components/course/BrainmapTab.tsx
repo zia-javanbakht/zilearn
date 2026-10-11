@@ -1,17 +1,17 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
+import { Busy } from "../Busy";
 import { Mermaid } from "../Mermaid";
 import { LessonModal } from "./LessonModal";
-import { toFlowchart } from "@/lib/mermaid";
+import { toFlowchart, toMindmap } from "@/lib/mermaid";
+import { applyMark } from "@/lib/tree";
 import { MASTERY_LABELS, MATERIAL_KIND_LABELS, type Mastery, type TopicNode } from "@/lib/types";
 import type { CourseData } from "./CourseWorkspace";
 
 interface BrainmapView {
   tree: TopicNode[];
-  mindmap: string;
-  flowchart: { code: string; nodeIds: Record<string, string> };
   by?: string;
 }
 
@@ -51,6 +51,7 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
     return out;
   }, [view]);
 
+  const mindmap = useMemo(() => (view && mode === "mindmap" ? toMindmap(data.course.name, view.tree) : ""), [view, mode, data.course.name]);
   const flow = useMemo(() => (view ? toFlowchart(data.course.name, view.tree, { focusId: focus }) : null), [view, focus, data.course.name]);
 
   const leavesInOrder = useMemo(() => [...flat.values()].filter((n) => !n.children.length), [flat]);
@@ -105,23 +106,27 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
     }
   }
 
-  async function mark(topicId: string, mastery: Mastery | null, branch = true): Promise<void> {
-    try {
-      await api(`/api/topics/${topicId}`, { method: "PATCH", json: { mastery, applyToBranch: branch } });
-    } catch (e) {
+  // Marks show at once; the requests run one after another so the server ends in the same state.
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  function persist(req: () => Promise<unknown>) {
+    const p = queue.current.then(req).catch((e) => {
       setError((e as Error).message);
-    }
-    await load();
+      return load();
+    });
+    queue.current = p;
+    return p;
+  }
+
+  async function mark(topicId: string, mastery: Mastery | null, branch = true): Promise<void> {
+    setError(null);
+    setView((v) => (v ? { ...v, tree: applyMark(v.tree, topicId, mastery, branch) } : v));
+    await persist(() => api(`/api/topics/${topicId}`, { method: "PATCH", json: { mastery, applyToBranch: branch } }));
   }
 
   async function markAll(mastery: Mastery | null) {
-    if (!view) return;
-    try {
-      await Promise.all(view.tree.map((r) => api(`/api/topics/${r.id}`, { method: "PATCH", json: { mastery, applyToBranch: true } })));
-    } catch (e) {
-      setError((e as Error).message);
-    }
-    await load();
+    setError(null);
+    setView((v) => (v ? { ...v, tree: applyMark(v.tree, null, mastery) } : v));
+    await persist(() => api(`/api/courses/${id}/brainmap`, { method: "PATCH", json: { mastery } }));
   }
 
   if (!view) return error ? <div className="alert error">{error}</div> : <p className="muted">Loading…</p>;
@@ -137,7 +142,7 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
         </p>
         {error && <div className="alert error">{error}</div>}
         <button className="primary" disabled={busy || !data.materials.length} onClick={build}>
-          {busy && <span className="spinner" />} {busy ? "Structuring your materials…" : "Build brainmap"}
+          {busy ? <Busy label="Structuring your materials…" /> : "Build brainmap"}
         </button>
       </div>
     );
@@ -153,7 +158,7 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
         <div className="row">
           <div className="markseg">
             {(["map", "mindmap", "outline"] as const).map((m) => (
-              <button key={m} className={mode === m ? "on familiar" : ""} onClick={() => setMode(m)}>
+              <button key={m} className={mode === m ? "on familiar" : ""} aria-pressed={mode === m} onClick={() => setMode(m)}>
                 {m === "map" ? "Coloured map" : m === "mindmap" ? "Mindmap" : "Outline"}
               </button>
             ))}
@@ -177,7 +182,7 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
             Next unmarked
           </button>
           <button onClick={build} disabled={busy}>
-            {busy && <span className="spinner" />} {busy ? "Rebuilding…" : "Rebuild"}
+            {busy ? <Busy label="Rebuilding…" /> : "Rebuild"}
           </button>
           <button className="primary" onClick={onPlan}>
             Create study plan →
@@ -216,7 +221,7 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
           {mode === "mindmap" && (
             <>
               <p className="small muted">Overview of the whole course. ✅ Know · 🟡 Familiar · 🔴 Don&apos;t know. Use the coloured map or outline to mark topics.</p>
-              <Mermaid code={view.mindmap} zoom />
+              <Mermaid code={mindmap} zoom />
             </>
           )}
           {mode === "outline" && (
@@ -256,6 +261,7 @@ function MarkButtons({ node, onMark, branch = true }: { node: TopicNode; onMark:
         <button
           key={m}
           className={`${m} ${node.effective_mastery === m ? "on" : ""}`}
+          aria-pressed={node.effective_mastery === m}
           title={node.mastery === null && node.effective_mastery === m ? "Inherited from parent" : MASTERY_LABELS[m]}
           onClick={(e) => {
             e.stopPropagation();
@@ -294,7 +300,14 @@ function Outline({
               {collapsed.has(n.id) ? "▸" : "▾"}
             </button>
             <span className={`dot ${n.effective_mastery ?? ""}`} />
-            <span className="tree-title" onClick={() => onSelect(n.id)}>
+            <span
+              className="tree-title"
+              role="button"
+              tabIndex={0}
+              aria-current={selected === n.id}
+              onClick={() => onSelect(n.id)}
+              onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), onSelect(n.id))}
+            >
               {n.title}
               {n.importance === 3 && <span title="Core topic"> ★</span>}
             </span>

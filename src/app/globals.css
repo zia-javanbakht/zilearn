@@ -136,7 +136,11 @@ label.field > input, label.field > select { color: var(--text); }
 .markseg button.on.dont_know { background: var(--dont-soft); color: var(--dont); }
 
 .split { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; align-items: start; }
-@media (max-width: 960px) { .split { grid-template-columns: 1fr; } }
+.split.side-list { grid-template-columns: 260px minmax(0, 1fr); }
+@media (max-width: 960px) { .split, .split.side-list { grid-template-columns: 1fr; } }
+.pick { cursor: pointer; border-radius: 8px; padding: 8px; }
+.pick.selected { background: var(--accent-soft); }
+.pick:focus-visible, [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .mermaid-box { overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; min-height: 200px; }
 .mermaid-box svg { max-width: none; height: auto; }

@@ -170,7 +170,7 @@ export function PlanTab({ data, reload, go }: { data: CourseData; reload: () => 
             <input type="number" min={0.25} step={0.25} value={form.hours_per_day} onChange={(e) => setForm({ ...form, hours_per_day: Number(e.target.value) })} style={{ width: 100 }} />
           </label>
           <button className="primary" style={{ alignSelf: "flex-end" }} onClick={() => build()} disabled={!!busy || !data.tree.length}>
-            {busy === "plan" && <span className="spinner" />} {plan ? "Rebuild from today" : "Create plan"}
+            {busy === "plan" && <span className="spinner" role="status" aria-label="Working" />} {plan ? "Rebuild from today" : "Create plan"}
           </button>
         </div>
         {!data.tree.length && <div className="alert">Build the brainmap and mark your topics first.</div>}
@@ -248,10 +248,10 @@ export function PlanTab({ data, reload, go }: { data: CourseData; reload: () => 
                       {items.some((i) => i.topic_id) && !past && (
                         <>
                           <button className="sm ghost" disabled={!!busy} onClick={() => forDay(items, "notes", date)} title="Review notes for this day's topics">
-                            {busy === `notes:${date}` ? <span className="spinner" /> : "📝"} Notes
+                            {busy === `notes:${date}` ? <span className="spinner" role="status" aria-label="Working" /> : "📝"} Notes
                           </button>
                           <button className="sm ghost" disabled={!!busy} onClick={() => forDay(items, "podcasts", date)} title="A short podcast on this day's topics">
-                            {busy === `podcasts:${date}` ? <span className="spinner" /> : "🎧"} Podcast
+                            {busy === `podcasts:${date}` ? <span className="spinner" role="status" aria-label="Working" /> : "🎧"} Podcast
                           </button>
                         </>
                       )}
@@ -284,12 +284,12 @@ export function PlanTab({ data, reload, go }: { data: CourseData; reload: () => 
                             )}
                             {(it.kind === "checkpoint" || (it.kind === "final" && it.topic_title === "Final mock exam")) && (
                               <button className="sm primary" disabled={!!busy} onClick={() => quiz(it)}>
-                                {busy === `quiz:${it.id}` && <span className="spinner" />} {it.kind === "final" ? "Start mock exam" : "Start checkpoint quiz"}
+                                {busy === `quiz:${it.id}` && <span className="spinner" role="status" aria-label="Working" />} {it.kind === "final" ? "Start mock exam" : "Start checkpoint quiz"}
                               </button>
                             )}
                             {it.kind === "final" && it.topic_title === "Review weak topics" && (
                               <button className="sm" disabled={!!busy} onClick={weakNotes}>
-                                {busy === "weak" && <span className="spinner" />} Make cheat sheet
+                                {busy === "weak" && <span className="spinner" role="status" aria-label="Working" />} Make cheat sheet
                               </button>
                             )}
                           </div>

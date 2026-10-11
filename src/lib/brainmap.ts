@@ -24,7 +24,8 @@ const TopicSchema = z.object({
     .describe("Flat list of topics; nesting via parent_ref."),
 });
 
-const MAX_CHARS = 600_000;
+// About 75k input tokens: enough for a semester of notes without making every rebuild expensive.
+const MAX_CHARS = 300_000;
 
 export async function structureCourse(course: Course, materials: Material[]): Promise<{ topics: NewTopic[]; summary: string; by: "claude" | "heuristic" }> {
   const usable = materials.filter((m) => (m.text ?? "").trim().length > 0 || m.title);
@@ -37,12 +38,14 @@ export async function structureCourse(course: Course, materials: Material[]): Pr
 
 async function structureWithClaude(course: Course, materials: Material[]) {
   const total = materials.reduce((s, m) => s + (m.text?.length ?? 0), 0);
-  const ratio = total > MAX_CHARS ? MAX_CHARS / total : 1;
+  // Small materials keep a floor of text; the rest share what is left of the budget.
+  const floor = Math.min(2000, Math.floor(MAX_CHARS / Math.max(1, materials.length)));
+  const ratio = total > MAX_CHARS ? Math.max(0, MAX_CHARS - floor * materials.length) / total : 1;
   const refs = new Map<string, string>();
   const blocks = materials.map((m, i) => {
     const ref = `M${i + 1}`;
     refs.set(ref, m.id);
-    const body = m.text ? truncate(m.text, Math.max(2000, Math.floor(m.text.length * ratio))) : "(no text available)";
+    const body = m.text ? truncate(m.text, Math.max(floor, Math.floor(m.text.length * ratio))) : "(no text available)";
     return `<material id="${ref}" kind="${MATERIAL_KIND_LABELS[m.kind]}" title="${m.title.replace(/"/g, "'")}">\n${body}\n</material>`;
   });
   const prompt = `Course: ${course.name}${course.code ? ` (${course.code})` : ""}
@@ -59,7 +62,7 @@ Build a brainmap of the course content:
 - Cite source material ids for each topic.
 - Do not create topics for administrative content (assessment dates, course logistics).`;
 
-  const out = await generateStructured({ schema: TopicSchema, prompt, effort: "medium" });
+  const out = await generateStructured({ schema: TopicSchema, prompt, effort: "medium", maxTokens: 32000 });
   const seen = new Set<string>();
   const topics: NewTopic[] = [];
   for (const t of out.topics) {

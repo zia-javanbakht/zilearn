@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { Busy } from "../Busy";
 import { ScopePicker, type ScopeValue } from "./ScopePicker";
 import type { Podcast } from "@/lib/types";
 import type { CourseData } from "./CourseWorkspace";
@@ -55,7 +56,7 @@ export function PodcastsTab({ data }: { data: CourseData }) {
             <input type="number" min={3} max={40} value={minutes} onChange={(e) => setMinutes(Number(e.target.value))} style={{ width: 90 }} />
           </label>
           <button className="primary" style={{ alignSelf: "flex-end" }} onClick={create} disabled={busy || !data.tree.length}>
-            {busy && <span className="spinner" />} {busy ? "Writing episode…" : "Create episode"}
+            {busy ? <Busy label="Writing episode…" /> : "Create episode"}
           </button>
         </div>
         {!data.tree.length && <div className="alert">Build the brainmap first.</div>}
@@ -63,10 +64,10 @@ export function PodcastsTab({ data }: { data: CourseData }) {
       </div>
 
       {podcasts && podcasts.length > 0 && (
-        <div className="split" style={{ gridTemplateColumns: "260px minmax(0, 1fr)" }}>
+        <div className="split side-list">
           <div className="card list">
             {podcasts.map((p) => (
-              <div key={p.id} className="list-item" style={{ cursor: "pointer", background: open?.id === p.id ? "var(--accent-soft)" : undefined, borderRadius: 8, padding: 8 }} onClick={() => setOpen(p)}>
+              <div key={p.id} className={`list-item pick${open?.id === p.id ? " selected" : ""}`} aria-current={open?.id === p.id} onClick={() => setOpen(p)} role="button" tabIndex={0} onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), setOpen(p))}>
                 <div>
                   <strong className="small">{p.title}</strong>
                   <div className="small muted">
@@ -215,7 +216,12 @@ function Player({ podcast, onDelete }: { podcast: Podcast; onDelete: () => void 
       )}
       <div style={{ maxHeight: 520, overflow: "auto" }}>
         {podcast.segments.map((s, i) => (
-          <div key={i} id={`seg-${i}`} className={`segment ${s.speaker}${current === i ? " playing" : ""}`} onClick={() => playFrom(i)} title="Play from here">
+          <div key={i} id={`seg-${i}`} className={`segment ${s.speaker}${current === i ? " playing" : ""}`} onClick={() => playFrom(i)}
+            title="Play from here"
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), playFrom(i))}
+          >
             <div className="small muted">{podcast.hosts[s.speaker]}</div>
             {s.text}
           </div>

@@ -71,7 +71,7 @@ export default function Home() {
             <input type="number" min={0.25} step={0.25} value={form.hours_per_day} onChange={(e) => setForm({ ...form, hours_per_day: Number(e.target.value) })} style={{ width: 90 }} />
           </label>
           <button className="primary" disabled={busy} style={{ alignSelf: "flex-end" }}>
-            {busy ? <span className="spinner" /> : null} Create
+            {busy ? <span className="spinner" role="status" aria-label="Working" /> : null} Create
           </button>
         </div>
       </form>

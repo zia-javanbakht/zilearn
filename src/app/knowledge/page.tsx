@@ -119,7 +119,7 @@ export default function KnowledgePage() {
         <div className="spread">
           <h2 style={{ margin: 0 }}>Connections</h2>
           <button className="primary" onClick={rebuild} disabled={busy}>
-            {busy && <span className="spinner" />} {busy ? "Linking topics…" : graph?.links.length ? "Rebuild links" : "Build links"}
+            {busy && <span className="spinner" role="status" aria-label="Working" />} {busy ? "Linking topics…" : graph?.links.length ? "Rebuild links" : "Build links"}
           </button>
         </div>
         <p className="small muted" style={{ margin: 0 }}>
