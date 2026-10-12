@@ -1,6 +1,7 @@
 import { diagramTikz, plotTikz, type Figure } from "./figure";
 import { conceptLayout, homes } from "./lessonTerms";
 import { markProvenance, normalizeDoc, type LessonBlock, type LessonDoc, type QA } from "./lesson";
+import type { Digest, DigestTopic } from "./types";
 
 /**
  * LaTeX for printing lessons with Zia's Z class (XeLaTeX): Z's theorem-style environments for
@@ -132,7 +133,8 @@ export function blockTex(md: string): string {
     if (t.startsWith(">")) {
       const body: string[] = [];
       for (; i < lines.length && lines[i].trim().startsWith(">"); i++) body.push(lines[i].trim().replace(/^>\s?/, ""));
-      out.push("\\begin{quote}", blockTex(body.join("\n")), "\\end{quote}");
+      // A plain indented list, not quote: Z makes \quote a command (an attributed quotation).
+      out.push("\\begin{list}{}{\\setlength{\\leftmargin}{1.5em}\\setlength{\\rightmargin}{1.5em}}\\color{black!75}\\item[]", blockTex(body.join("\n")), "\\end{list}");
       continue;
     }
     if (listRe.test(line)) {
@@ -379,41 +381,118 @@ type Head = Pick<LessonDoc, "title" | "depth" | "level" | "goal"> & { map: Pick<
 
 /** The preamble, a compact title in the style of Z's cover page, the goal box, and the body. */
 function zDocument(doc: Head, body: string): string {
-  const where = [doc.map.course, ...doc.map.path].map(tex).join(" \\textperiodcentered{} ");
+  return texDocument({ title: doc.title, where: [doc.map.course, ...doc.map.path], line: `Level ${doc.depth}: ${tex(doc.level)}`, kind: "Lesson" }, body);
+}
+
+interface DocHead {
+  title: string;
+  /** Course, then the path down to this page. */
+  where: string[];
+  /** A LaTeX line under it (already escaped), before the date. */
+  line?: string;
+  /** What the document is, for the comment at the top. */
+  kind: string;
+  /** Set in two columns (cheat sheets). */
+  columns?: boolean;
+}
+
+/** A Z document: the preamble, a compact title in the style of Z's cover page, and the body. */
+function texDocument(h: DocHead, body: string): string {
+  const where = h.where.filter(Boolean).map(tex).join(" \\textperiodcentered{} ");
   return `% ══════════════════════════════════════════════════════════════════════════════════════════════════
 % !TeX TS-program = xelatex
 % !TeX spellcheck = en_GB
-% Lesson exported from ziLearn. Needs the Z class; compile with XeLaTeX. (The minimal option leaves out
+% ${h.kind} exported from ziLearn. Needs the Z class; compile with XeLaTeX. (The minimal option leaves out
 % minted, so -shell-escape isn't needed.)
 % ══════════════════════════════════════════════════════════════════════════════════════════════════
 \\documentclass[10pt,stix,minimal]{Z}
 \\usetikzlibrary{arrows.meta,fit}
 \\usepackage{pgfplots}
 \\usepackage{cancel}
-\\usepackage{needspace}
+\\usepackage{needspace}${h.columns ? "\n\\usepackage{multicol}" : ""}
 \\raggedbottom
 \\clubpenalty=10000
 \\widowpenalty=10000
 \\setlength{\\emergencystretch}{2em}
 \\pgfplotsset{compat=1.18}
 
-\\title{${tex(doc.title)}}
+\\title{${tex(h.title)}}
 \\author{ziLearn}
-\\hypersetup{pdftitle={${tex(doc.title)}}, pdfsubject={${tex(doc.map.course)}}}
+\\hypersetup{pdftitle={${tex(h.title)}}, pdfsubject={${tex(h.where[0] ?? "")}}}
 
 \\begin{document}
-% Z's \\maketitle is a full cover page, too much for one lesson.
+% Z's \\maketitle is a full cover page, too much for one ${h.kind.toLowerCase()}.
 \\begin{center}
 \\rule{\\linewidth}{1.5pt}\\par\\smallskip
-{\\LARGE\\bfseries ${tex(doc.title)}\\par}\\smallskip
-{\\large\\bfseries ${where}\\par}
-{\\normalsize Level ${doc.depth}: ${tex(doc.level)} \\quad\\textbullet\\quad \\today\\par}\\smallskip
+{\\LARGE\\bfseries ${tex(h.title)}\\par}\\smallskip
+${where ? `{\\large\\bfseries ${where}\\par}\n` : ""}{\\normalsize ${h.line ? `${h.line} \\quad\\textbullet\\quad ` : ""}\\today\\par}\\smallskip
 \\rule{\\linewidth}{1.5pt}
 \\end{center}
 
-${body}
+${h.columns ? `\\begin{multicols}{2}\n\\small\n${body}\n\\end{multicols}` : body}
 \\end{document}
 `;
+}
+
+/**
+ * Markdown with its headings as sections: the top heading level becomes \section*, the next
+ * \subsection*, then \subsubsection*, and anything deeper a \paragraph. A lone H1 at the very top
+ * repeats the document's title, so it is dropped. Headings inside code blocks and maths are left alone.
+ */
+export function sectionedTex(md: string): string {
+  const lines = md.replace(/\r/g, "").replace(/<\/?(div|details)[^>]*>/gi, "").split("\n");
+  const heads: { at: number; level: number; text: string }[] = [];
+  let fence = false;
+  let display = false;
+  lines.forEach((l, at) => {
+    const t = l.trim();
+    if (t.startsWith("```")) fence = !fence;
+    else if (!fence && t.startsWith("$$") && !(t.length > 4 && t.endsWith("$$"))) display = !display;
+    else if (!fence && !display) {
+      const m = t.match(/^(#{1,6})\s+(.+?)\s*#*$/);
+      if (m) heads.push({ at, level: m[1].length, text: m[2] });
+    }
+  });
+  const h1 = heads.filter((h) => h.level === 1);
+  const before = lines.slice(0, heads[0]?.at ?? lines.length).join("\n").trim();
+  const drop = h1.length === 1 && heads[0] === h1[0] && !before ? heads.shift()!.at : -1;
+  const top = Math.min(...heads.map((h) => h.level));
+  const out: string[] = [];
+  const chunk = (from: number, to: number) => {
+    const b = blockTex(lines.slice(from, to).join("\n"));
+    if (b) out.push(b);
+  };
+  chunk(drop >= 0 ? drop + 1 : 0, heads[0]?.at ?? lines.length);
+  heads.forEach((h, k) => {
+    const cmd = ["section", "subsection", "subsubsection"][h.level - top];
+    const title = heading(h.text);
+    out.push(cmd ? `\\Needspace{6\\baselineskip}\n\\${cmd}*{${title}}\\addcontentsline{toc}{${cmd}}{${title}}` : `\\paragraph{${inline(h.text)}}`);
+    chunk(h.at + 1, heads[k + 1]?.at ?? lines.length);
+  });
+  return out.join("\n\n");
+}
+
+/** A review note (Markdown) as a Z document; cheat sheets are set in two columns. */
+export function notesToTex(note: { title: string; content: string }, course: string): string {
+  const cheat = /cheat ?sheet/i.test(note.title);
+  return texDocument({ title: note.title, where: [course], line: cheat ? "Cheat sheet" : "Review notes", kind: "Review note", columns: cheat }, sectionedTex(note.content));
+}
+
+/** A material's summary (its digest): the summary, key terms, and the topics with their subtopics. */
+export function digestToTex(title: string, course: string, kind: string, d: Digest): string {
+  const stamp = (t: DigestTopic) => (t.start ? `{\\normalfont\\footnotesize\\sffamily\\color{gray} [${tex(t.start)}]}\\enspace ` : "");
+  const s: string[] = [];
+  if (d.summary.trim()) s.push(`\\begin{blbox}[Summary]\n${blockTex(d.summary)}\n\\end{blbox}`);
+  if (d.keywords.length) s.push(`{\\small\\sffamily\\color{SteelBlue4}\\textbf{Key terms:} ${d.keywords.map(inline).join(" \\textperiodcentered{} ")}\\par}`);
+  d.topics.forEach((t, i) => {
+    s.push(`\\Needspace{6\\baselineskip}\n\\section*{${stamp(t)}${i + 1}.\\enspace ${heading(t.title)}}\\addcontentsline{toc}{section}{${heading(t.title)}}`);
+    if (t.summary.trim()) s.push(blockTex(t.summary));
+    for (const u of t.subtopics ?? []) {
+      s.push(`\\subsection*{${stamp(u)}${heading(u.title)}}`);
+      if (u.summary.trim()) s.push(blockTex(u.summary));
+    }
+  });
+  return texDocument({ title, where: [course], line: `Summary of the ${tex(kind.toLowerCase())}${d.by === "offline" ? " (extracted without AI)" : ""}`, kind: "Summary" }, s.join("\n\n"));
 }
 
 /** A lesson saved before lessons were structured: its Markdown, converted as it is. */

@@ -139,6 +139,7 @@ export async function importFile(
     note: ex.note,
     sha256,
     rel_path: f.relPath || null,
+    scan: "scan" in ex ? (ex.scan ?? null) : null,
   });
   result.materials.push({ ...m, sha256 });
 }

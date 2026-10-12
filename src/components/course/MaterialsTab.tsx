@@ -380,7 +380,46 @@ function MaterialRow({
   const yt = m.url?.match(/(?:v=|youtu\.be\/|shorts\/|embed\/|live\/)([\w-]{6,})/)?.[1];
   const [refetch, setRefetch] = useState<{ busy?: boolean; error?: string } | null>(null);
   const [preview, setPreview] = useState(false);
+  const [layer, setLayer] = useState<{ label: string; error?: boolean } | null>(null);
   const media = useRef<HTMLMediaElement | null>(null);
+  const canLayer = !!m.path && !!m.scan?.pages.length && !m.scan.layer;
+  // Pages the AI should transcribe (scans, poor OCR, equations) that it hasn't read yet.
+  const unread = m.scan ? [...new Set([...m.scan.pages, ...(m.scan.poor ?? []), ...(m.scan.maths ?? [])])].filter((n) => !m.scan?.ai_pages?.includes(n)) : [];
+  const canReread = ai && !!m.path && unread.length > 0;
+  const [reread, setReread] = useState<{ busy?: boolean; error?: string } | null>(null);
+
+  async function readAgain() {
+    setReread({ busy: true });
+    try {
+      const f = await api<Material>(`/api/materials/${m.id}`, { method: "PATCH", json: { reread: true } });
+      setReread(null);
+      if (full) {
+        setFull(f);
+        setText(f.text ?? "");
+      }
+      reload();
+    } catch (e) {
+      setReread({ error: (e as Error).message });
+    }
+  }
+
+  /** OCR the scanned pages on the server, a batch per request, until the text layer is written. */
+  async function addLayer() {
+    const n = m.scan?.pages.length ?? 0;
+    setLayer({ label: `Reading ${n} scanned page${n === 1 ? "" : "s"} with OCR…` });
+    try {
+      for (;;) {
+        const r = await api<{ done: boolean; read: number; total: number }>(`/api/materials/${m.id}/ocr`, { method: "POST" });
+        if (r.done) break;
+        setLayer({ label: `Read ${r.read} of ${r.total} scanned pages with OCR…` });
+      }
+      setLayer(null);
+      setFull(null);
+      reload();
+    } catch (e) {
+      setLayer({ label: (e as Error).message, error: true });
+    }
+  }
   const [ytStart, setYtStart] = useState(0);
 
   /** Jump the recording (or the YouTube player) to a topic's timestamp. */
@@ -452,6 +491,26 @@ function MaterialRow({
               {refetch?.busy ? "Fetching…" : "Try again"}
             </button>
           )}
+          {canLayer && (
+            <button
+              className={`sm${m.status === "ready" ? "" : " primary"}`}
+              disabled={!!layer && !layer.error}
+              onClick={addLayer}
+              title="Read the pages that are pictures with OCR on this computer, and write the text into the PDF so it can be searched and selected"
+            >
+              Add text layer
+            </button>
+          )}
+          {canReread && (
+            <button
+              className="sm"
+              disabled={reread?.busy}
+              onClick={readAgain}
+              title={`Have the AI transcribe page${unread.length === 1 ? "" : "s"} ${unread.join(", ")} from the PDF itself: scans, poor OCR and equations come back as clean text and LaTeX`}
+            >
+              {reread?.busy ? "Reading…" : "Read again"}
+            </button>
+          )}
           {isAudio && m.path && (
             <button className={`sm${m.status === "ready" ? "" : " primary"}`} disabled={!!running} onClick={onTranscribe}>
               {m.status === "ready" ? "Re-transcribe" : "Transcribe"}
@@ -488,14 +547,19 @@ function MaterialRow({
           </button>
         </div>
       </div>
-      {job ? (
-        <div className={`small ${job.error ? "" : "muted"}`} role="status" style={job.error ? { color: "var(--dont)" } : undefined}>
-          {!job.error && <span className="spinner" aria-hidden />} {job.label}
+      {job || layer ? (
+        <div className={`small ${(job ?? layer)!.error ? "" : "muted"}`} role="status" style={(job ?? layer)!.error ? { color: "var(--dont)" } : undefined}>
+          {!(job ?? layer)!.error && <span className="spinner" aria-hidden />} {(job ?? layer)!.label}
         </div>
       ) : (
         m.note && <div className="small muted">{m.note}</div>
       )}
       <DigestKeywords d={m.digest} />
+      {reread?.error && (
+        <div className="small" role="alert" style={{ color: "var(--dont)" }}>
+          {reread.error}
+        </div>
+      )}
       {refetch?.error && (
         <div className="small" role="status" style={{ color: "var(--dont)" }}>
           {refetch.error}

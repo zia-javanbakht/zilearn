@@ -195,6 +195,7 @@ const COLUMNS: [table: string, column: string, type: string][] = [
   ["courses", "removed_topics", "TEXT"], // JSON: normalised titles the student deleted, left out of rebuilds
   ["materials", "digest", "TEXT"], // JSON Digest: summary, key terms and topics of the material
   ["lessons", "doc", "TEXT"], // JSON LessonDoc: the structured lesson the Markdown and LaTeX are made from
+  ["materials", "scan", "TEXT"], // JSON ScanInfo: PDF pages that are pictures without text
 ];
 
 function migrate(db: Database.Database) {

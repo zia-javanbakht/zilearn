@@ -60,6 +60,7 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
   const [note, setNote] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [textEdit, setTextEdit] = useState(false);
+  const [batchEdit, setBatchEdit] = useState(false);
   const anchor = useRef<string | null>(null);
 
   const load = () => api<BrainmapView>(`/api/courses/${id}/brainmap`).then(setView).catch((e) => setError(e.message));
@@ -86,8 +87,11 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
     setClip((c) => (c && c.ids.some((x) => !flat.has(x)) ? (c.ids.some((x) => flat.has(x)) ? { ...c, ids: c.ids.filter((x) => flat.has(x)) } : null) : c));
   }, [flat]);
 
-  const mindmap = useMemo(() => (view && mode === "mindmap" ? toMindmap(data.course.name, view.tree) : ""), [view, mode, data.course.name]);
-  const flow = useMemo(() => (view ? toFlowchart(data.course.name, view.tree, { focusId: focus, open, closed }) : null), [view, focus, open, closed, data.course.name]);
+  // The coloured map and the mindmap are two drawings of the same tree, edited the same way.
+  const flow = useMemo(
+    () => (view ? (mode === "mindmap" ? toMindmap : toFlowchart)(data.course.name, view.tree, { focusId: focus, open, closed }) : null),
+    [view, mode, focus, open, closed, data.course.name],
+  );
   const nidOf = useMemo(() => new Map(Object.entries(flow?.nodeIds ?? {}).map(([nid, tid]) => [tid, nid])), [flow]);
 
   const targets = useMemo(() => (picked.size ? [...flat.keys()].filter((k) => picked.has(k)) : selected && flat.has(selected) ? [selected] : []), [picked, selected, flat]);
@@ -171,7 +175,7 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
     setFocus(parent);
   }
 
-  // Keyboard: 1 know, 2 familiar, 3 don't know, 0 clear, n next unmarked; Ctrl/Cmd+X, C, V and Z;
+  // Keyboard: 1 know, 2 familiar, 3 don't know, 0 clear, n next unmarked, e edit; Ctrl/Cmd+X, C, V and Z;
   // Delete removes the selection, Escape clears it.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -197,6 +201,9 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
         mark(selected, map[e.key], true).then(() => {
           if (node && !node.children.length) nextUnmarked();
         });
+      } else if (e.key === "e" && targets.length) {
+        e.preventDefault();
+        setBatchEdit(true);
       } else if (e.key === "n") {
         e.preventDefault();
         nextUnmarked();
@@ -453,6 +460,9 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
           <button className="sm" onClick={copy} title="Copy, then paste to duplicate with subtopics (Ctrl+C)">
             ⧉ Copy
           </button>
+          <button className="sm" onClick={() => setBatchEdit(true)} title="Rename these topics, find and replace in their names, or set how important they are (E)">
+            ✎ Edit
+          </button>
         </>
       )}
       {clip && (
@@ -608,8 +618,9 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
         <div className="split">
           <div>
             {selbar}
-            {mode === "map" && (
+            {(mode === "map" || mode === "mindmap") && (
               <>
+                {mode === "mindmap" && <p className="small muted" style={{ margin: "0 0 4px" }}>✅ Know · 🟡 Familiar · 🔴 Don&apos;t know</p>}
                 <div className="spread small muted">
                   <span>
                     Click a topic to select it; <kbd>Ctrl</kbd>/<kbd>⌘</kbd> or <kbd>Shift</kbd>-click picks several. <strong>+</strong> and <strong>−</strong> open and close a
@@ -642,6 +653,7 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
                 </div>
                 {flow && (
                   <Mermaid
+                    key={mode}
                     code={flow.code}
                     zoom
                     toggles={flow.toggles}
@@ -687,12 +699,6 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
                 )}
               </>
             )}
-            {mode === "mindmap" && (
-              <>
-                <p className="small muted">Overview of the whole course. ✅ Know · 🟡 Familiar · 🔴 Don&apos;t know. Use the coloured map or outline to mark and rearrange topics.</p>
-                <Mermaid code={mindmap} zoom />
-              </>
-            )}
             {mode === "outline" && (
               <div className="card">
                 <p className="small muted" style={{ marginTop: 0 }}>
@@ -713,7 +719,19 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
             )}
           </div>
           <div className="card" style={{ position: "sticky", top: 70 }}>
-            {picked.size > 1 ? (
+            {batchEdit && targets.length ? (
+              <BatchEditor
+                key={targets.join(",")}
+                nodes={targets.map((t) => flat.get(t)!).filter(Boolean)}
+                onCancel={() => setBatchEdit(false)}
+                onSave={async (edits, importance) => {
+                  const r = await batch({ action: "edit", ids: targets, edits, importance });
+                  if (!r) return;
+                  setBatchEdit(false);
+                  flash(`Edited ${plural(targets.length, "topic")}.`);
+                }}
+              />
+            ) : picked.size > 1 ? (
               <PickedPanel nodes={targets.map((t) => flat.get(t)!).filter(Boolean)} onSelect={(t) => pick(t, { extend: false, shift: false })} />
             ) : sel ? (
               <TopicPanel
@@ -782,6 +800,81 @@ function PickedPanel({ nodes, onSelect }: { nodes: TopicNode[]; onSelect: (id: s
         {nodes.length > 30 && <div className="muted">and {nodes.length - 30} more</div>}
       </div>
     </div>
+  );
+}
+
+/** Rename several topics at once (with find and replace) and set their importance together. */
+function BatchEditor({
+  nodes,
+  onSave,
+  onCancel,
+}: {
+  nodes: TopicNode[];
+  onSave: (edits: { id: string; title: string }[], importance: number | null) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [titles, setTitles] = useState<Record<string, string>>(() => Object.fromEntries(nodes.map((n) => [n.id, n.title])));
+  const [find, setFind] = useState("");
+  const [repl, setRepl] = useState("");
+  const [importance, setImportance] = useState("");
+  const [saving, setSaving] = useState(false);
+  const matches = find ? nodes.filter((n) => titles[n.id].toLowerCase().includes(find.toLowerCase())).length : 0;
+  const replaceAll = () => {
+    if (!find) return;
+    const re = new RegExp(find.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi");
+    setTitles((t) => Object.fromEntries(Object.entries(t).map(([k, v]) => [k, v.replace(re, repl)])));
+  };
+  const edits = nodes.filter((n) => titles[n.id].trim() !== n.title).map((n) => ({ id: n.id, title: titles[n.id].trim() }));
+  const empty = nodes.some((n) => !titles[n.id].trim());
+  return (
+    <form
+      className="stack"
+      style={{ gap: 8 }}
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setSaving(true);
+        await onSave(edits, importance ? Number(importance) : null);
+        setSaving(false);
+      }}
+    >
+      <h3 style={{ margin: 0 }}>Edit {plural(nodes.length, "topic")}</h3>
+      <div className="row" style={{ gap: 4 }}>
+        <input value={find} onChange={(e) => setFind(e.target.value)} placeholder="Find" aria-label="Find in names" style={{ flex: 1, minWidth: 80 }} />
+        <input value={repl} onChange={(e) => setRepl(e.target.value)} placeholder="Replace with" aria-label="Replace with" style={{ flex: 1, minWidth: 80 }} />
+        <button type="button" className="sm" disabled={!matches} onClick={replaceAll} title="Replace in every name below (not saved until you press Save)">
+          Replace{matches ? ` in ${matches}` : ""}
+        </button>
+      </div>
+      <div className="stack" style={{ gap: 4, maxHeight: 360, overflow: "auto" }}>
+        {nodes.map((n) => (
+          <input
+            key={n.id}
+            value={titles[n.id]}
+            aria-label={`Name of ${n.title}`}
+            onChange={(e) => setTitles((t) => ({ ...t, [n.id]: e.target.value }))}
+            className={titles[n.id].trim() !== n.title ? "changed" : ""}
+          />
+        ))}
+      </div>
+      <label className="small">
+        Importance{" "}
+        <select value={importance} onChange={(e) => setImportance(e.target.value)}>
+          <option value="">Keep as it is</option>
+          <option value="3">Core (heavily examined)</option>
+          <option value="2">Normal</option>
+          <option value="1">Minor</option>
+        </select>
+      </label>
+      <div className="row">
+        <button className="primary sm" type="submit" disabled={saving || empty || (!edits.length && !importance)}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+        <button className="sm" type="button" onClick={onCancel}>
+          Cancel
+        </button>
+        {empty && <span className="small" style={{ color: "var(--dont)" }}>Every topic needs a name.</span>}
+      </div>
+    </form>
   );
 }
 

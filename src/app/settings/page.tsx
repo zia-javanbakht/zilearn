@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/components/api";
 import { SETTINGS_CHANGED } from "@/components/AiBadge";
+import { TexSettings } from "./TexSettings";
 
 type Choice = "builtin" | "auto" | "anthropic" | "gemini" | "openai";
 type Keyed = "anthropic" | "gemini" | "openai";
@@ -285,84 +286,87 @@ export default function SettingsPage() {
   }
 
   return (
-    <form
-      className="settings stack"
-      onSubmit={(e) => {
-        e.preventDefault();
-        save();
-      }}
-    >
-      <div>
-        <h1>Settings</h1>
-        <p className="muted">
-          Choose which AI ziLearn uses to build brainmaps, lessons, mock exams, notes, flashcards and podcasts. Without one, ziLearn still works with
-          its built-in helpers.
-        </p>
-        <p className="small">
-          <span className="muted">Now using: </span>
-          {summary.active ? (
-            <strong>
-              {summary.active.name} ({summary.active.model})
-            </strong>
-          ) : (
-            <strong>Built-in offline helpers</strong>
-          )}
-        </p>
-      </div>
-
-      <fieldset className="choice-list">
-        <legend>AI provider</legend>
-        {CHOICES.map((c) => {
-          const keyed = c.id === "anthropic" || c.id === "gemini" || c.id === "openai";
-          const status = keyed ? keyStatus(views[c.id as Keyed]) : null;
-          const on = choice === c.id;
-          return (
-            <div key={c.id} className={`choice${on ? " on" : ""}`}>
-              <label className="choice-head">
-                <input
-                  type="radio"
-                  name="provider"
-                  value={c.id}
-                  checked={on}
-                  onChange={() => {
-                    setChoice(c.id);
-                    setNotice(null);
-                  }}
-                />
-                <span className="grow">
-                  <span className="choice-title">
-                    {c.title}
-                    {c.id === summary.provider && <span className="badge accent">Current</span>}
-                    {status && <span className={`badge ${status.cls}`}>{status.label}</span>}
-                  </span>
-                  <span className="choice-blurb small muted">{c.blurb}</span>
-                </span>
-              </label>
-              {on && keyed && details(c.id as Keyed)}
-              {on && c.id === "auto" && autoDetails()}
-            </div>
-          );
-        })}
-      </fieldset>
-
-      {notice && (
-        <div className={`alert ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>
-          {notice.text}
+    <>
+      <form
+        className="settings stack"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save();
+        }}
+      >
+        <div>
+          <h1>Settings</h1>
+          <p className="muted">
+            Choose which AI ziLearn uses to build brainmaps, lessons, mock exams, notes, flashcards and podcasts. Without one, ziLearn still works with
+            its built-in helpers.
+          </p>
+          <p className="small">
+            <span className="muted">Now using: </span>
+            {summary.active ? (
+              <strong>
+                {summary.active.name} ({summary.active.model})
+              </strong>
+            ) : (
+              <strong>Built-in offline helpers</strong>
+            )}
+          </p>
         </div>
-      )}
 
-      <div className="row settings-actions">
-        <button type="submit" className="primary" disabled={busy !== null}>
-          {busy === "save" && <span className="spinner" role="status" aria-label="Saving" />} Save
-        </button>
-        <button type="button" onClick={test} disabled={busy !== null || choice === "builtin"}>
-          {busy === "test" && <span className="spinner" role="status" aria-label="Testing" />} Test connection
-        </button>
-      </div>
-      <p className="small muted">
-        Keys are stored only in the ziLearn database on the computer that runs ziLearn, and are never shown in full again. Keys saved here are used
-        instead of the ones in the environment.
-      </p>
-    </form>
+        <fieldset className="choice-list">
+          <legend>AI provider</legend>
+          {CHOICES.map((c) => {
+            const keyed = c.id === "anthropic" || c.id === "gemini" || c.id === "openai";
+            const status = keyed ? keyStatus(views[c.id as Keyed]) : null;
+            const on = choice === c.id;
+            return (
+              <div key={c.id} className={`choice${on ? " on" : ""}`}>
+                <label className="choice-head">
+                  <input
+                    type="radio"
+                    name="provider"
+                    value={c.id}
+                    checked={on}
+                    onChange={() => {
+                      setChoice(c.id);
+                      setNotice(null);
+                    }}
+                  />
+                  <span className="grow">
+                    <span className="choice-title">
+                      {c.title}
+                      {c.id === summary.provider && <span className="badge accent">Current</span>}
+                      {status && <span className={`badge ${status.cls}`}>{status.label}</span>}
+                    </span>
+                    <span className="choice-blurb small muted">{c.blurb}</span>
+                  </span>
+                </label>
+                {on && keyed && details(c.id as Keyed)}
+                {on && c.id === "auto" && autoDetails()}
+              </div>
+            );
+          })}
+        </fieldset>
+
+        {notice && (
+          <div className={`alert ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>
+            {notice.text}
+          </div>
+        )}
+
+        <div className="row settings-actions">
+          <button type="submit" className="primary" disabled={busy !== null}>
+            {busy === "save" && <span className="spinner" role="status" aria-label="Saving" />} Save
+          </button>
+          <button type="button" onClick={test} disabled={busy !== null || choice === "builtin"}>
+            {busy === "test" && <span className="spinner" role="status" aria-label="Testing" />} Test connection
+          </button>
+        </div>
+        <p className="small muted">
+          Keys are stored only in the ziLearn database on the computer that runs ziLearn, and are never shown in full again. Keys saved here are used
+          instead of the ones in the environment.
+        </p>
+      </form>
+      <TexSettings />
+    </>
   );
 }

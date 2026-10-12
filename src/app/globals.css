@@ -300,6 +300,9 @@ button.link:hover { text-decoration: underline; }
 .menu > summary::-webkit-details-marker { display: none; }
 .menu-list { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; display: flex; flex-direction: column; gap: 4px; padding: 6px; min-width: 180px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18); }
 .menu-list button { text-align: left; border-color: transparent; }
+.export-menu { position: relative; }
+.export-msg { position: absolute; right: 0; top: calc(100% + 4px); z-index: 6; width: min(380px, 80vw); padding: 8px 10px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18); }
+.export-msg.error { border-color: var(--dont); }
 @media (max-width: 820px) {
   .reader-body { grid-template-columns: minmax(0, 1fr); padding: 16px; }
   .reader-toc { display: none; }
@@ -347,3 +350,5 @@ a.ai-badge:hover { text-decoration: none; filter: brightness(1.05); }
 .deepen-menu { width: min(320px, 86vw); }
 .deepen-menu textarea { width: 100%; font-size: 0.88rem; }
 .deepen-menu button.primary { text-align: center; border-color: var(--accent); }
+.mermaid-box g.node.moving { cursor: grabbing; opacity: 0.85; }
+input.changed { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }

@@ -75,7 +75,13 @@ describe("brainmap", () => {
     const focused = toFlowchart("Big", big, { focusId: "t5" });
     expect(Object.values(focused.nodeIds)).toContain("t20"); // a child of t5
     const mind = toMindmap("ML (intro)", tree);
-    expect(mind).toMatch(/^mindmap/);
-    expect(mind).not.toMatch(/\(x\)/);
+    expect(mind.code).toMatch(/^mindmap/);
+    expect(mind.code).not.toMatch(/\(x\)/);
+    expect(Object.values(mind.nodeIds)).toEqual(["a", "b"]);
+    // The mindmap folds like the flowchart and names topics the same way.
+    const bigMind = toMindmap("Big", big, { closed: new Set(["t0"]) });
+    expect(bigMind.toggles[Object.entries(bigMind.nodeIds).find(([, t]) => t === "t0")![0]]).toBe("closed");
+    expect(Object.values(bigMind.nodeIds)).not.toContain("t3");
+    expect(bigMind.code).toMatch(/T0 \+\d+\]/);
   });
 });

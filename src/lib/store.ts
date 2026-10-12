@@ -16,6 +16,7 @@ import type {
   PlanItem,
   Podcast,
   ReviewNote,
+  ScanInfo,
   Topic,
   TopicNode,
 } from "./types";
@@ -95,17 +96,21 @@ export function deleteCourse(id: string) {
 /* ---------------- Materials ---------------- */
 
 function mapMaterial(r: Row): Material {
-  return { ...(r as unknown as Material), digest: json<Material["digest"]>(r.digest, null) };
+  return { ...(r as unknown as Material), digest: json<Material["digest"]>(r.digest, null), scan: json<Material["scan"]>(r.scan, null) };
 }
 
 export function listMaterials(courseId: string, withText = false): Material[] {
-  const cols = withText ? "*" : "id, course_id, kind, title, source_type, filename, mime, path, url, substr(text, 1, 400) AS text, status, note, rel_path, digest, created_at";
+  const cols = withText ? "*" : "id, course_id, kind, title, source_type, filename, mime, path, url, substr(text, 1, 400) AS text, status, note, rel_path, digest, scan, created_at";
   return (db().prepare(`SELECT ${cols} FROM materials WHERE course_id = ? ORDER BY created_at, rowid`).all(courseId) as Row[]).map(mapMaterial);
 }
 
 export function getMaterial(id: string): Material | null {
   const r = db().prepare("SELECT * FROM materials WHERE id = ?").get(id) as Row | undefined;
   return r ? mapMaterial(r) : null;
+}
+
+export function setScan(id: string, scan: ScanInfo | null) {
+  db().prepare("UPDATE materials SET scan = ? WHERE id = ?").run(scan ? JSON.stringify(scan) : null, id);
 }
 
 export function setDigest(id: string, digest: Digest | null) {
@@ -117,9 +122,9 @@ export function insertMaterial(m: Omit<Material, "id" | "created_at">): Material
   const d = db();
   d.transaction(() => {
     d.prepare(
-      `INSERT INTO materials (id, course_id, kind, title, source_type, filename, mime, path, url, text, status, note, sha256, rel_path)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, m.course_id, m.kind, m.title, m.source_type, m.filename, m.mime, m.path, m.url, m.text, m.status, m.note, m.sha256 ?? null, m.rel_path ?? null);
+      `INSERT INTO materials (id, course_id, kind, title, source_type, filename, mime, path, url, text, status, note, sha256, rel_path, scan)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, m.course_id, m.kind, m.title, m.source_type, m.filename, m.mime, m.path, m.url, m.text, m.status, m.note, m.sha256 ?? null, m.rel_path ?? null, m.scan ? JSON.stringify(m.scan) : null);
     indexMaterialText(id, m.course_id, `${m.title}\n${m.text ?? ""}`);
   })();
   return getMaterial(id)!;
@@ -393,7 +398,7 @@ export function addTopic(
  * Rename, re-describe or move a topic. Edited topics are kept on rebuilds; a renamed topic's old name
  * is remembered as removed, so a rebuild doesn't bring it back next to the new one.
  */
-export function editTopic(id: string, patch: { title?: string; summary?: string; parent_id?: string | null }): Topic | null {
+export function editTopic(id: string, patch: { title?: string; summary?: string; parent_id?: string | null; importance?: number }): Topic | null {
   const t = getTopic(id);
   if (!t) return null;
   const d = db();
@@ -408,6 +413,7 @@ export function editTopic(id: string, patch: { title?: string; summary?: string;
   const summary = patch.summary ?? t.summary;
   d.transaction(() => {
     d.prepare("UPDATE topics SET title = ?, summary = ?, parent_id = ?, manual = 1 WHERE id = ?").run(title, summary, parent, id);
+    if (patch.importance === 1 || patch.importance === 2 || patch.importance === 3) d.prepare("UPDATE topics SET importance = ? WHERE id = ?").run(patch.importance, id);
     d.prepare("UPDATE topics_fts SET title = ?, summary = ? WHERE topic_id = ?").run(title, summary, id);
     if (normTitle(title) !== normTitle(t.title)) {
       const removed = removedTitles(t.course_id);
@@ -583,6 +589,10 @@ export function saveNote(n: Omit<ReviewNote, "id" | "created_at">): ReviewNote {
     .prepare("INSERT INTO notes (id, course_id, title, scope, content, generated_by) VALUES (?, ?, ?, ?, ?, ?)")
     .run(id, n.course_id, n.title, n.scope, n.content, n.generated_by);
   return db().prepare("SELECT * FROM notes WHERE id = ?").get(id) as ReviewNote;
+}
+
+export function getNote(id: string): ReviewNote | null {
+  return (db().prepare("SELECT * FROM notes WHERE id = ?").get(id) as ReviewNote | undefined) ?? null;
 }
 
 export function listNotes(courseId: string): ReviewNote[] {

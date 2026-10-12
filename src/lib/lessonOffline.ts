@@ -2,7 +2,7 @@ import type { Source } from "./kb";
 import type { LessonBlock, LessonDoc, LessonMap, QA } from "./lesson";
 import { mentions, type ConceptLink } from "./lessonTerms";
 import { topPhrases } from "./digest";
-import { stem, tokenize } from "./text";
+import { BACK_MATTER, isAuthorLine, stem, tokenize } from "./text";
 
 /**
  * A lesson built without an AI, by pulling the teaching moves out of the student's own materials:
@@ -41,8 +41,12 @@ function units(sources: Source[]): Unit[] {
     }
     if (cur.lines.some((l) => l.trim())) out.push(cur);
   }
-  return out;
+  // References, funding and declarations teach nothing; nor does an author list.
+  return out.filter((u) => !u.section || !(BACK_MATTER.test(u.section.replace(/^[\dIVX]+(\.\d+)*\.?\s+/, "")) || isAuthorLine(u.section)));
 }
+
+/** Publishing boilerplate that can sit in a paper's text: funding and conflict statements, licences, ORCID. */
+const BOILERPLATE = /^(funding|declaration of conflicting interests|the author\(s\) (received|declared|disclosed)|the authors? (declare|received|disclosed)|orcid|this article is distributed under|open access|data availability|conflicts? of interest)/i;
 
 /** Sentences of a unit's prose (not lists, tables or display maths), each with where it came from. */
 function sentences(u: Unit): Sentence[] {
@@ -71,7 +75,7 @@ function sentences(u: Unit): Sentence[] {
         let text = raw.replace(/\s+/g, " ").trim().replace(/^(where|and so|and|so|which)\s+(?=\$)/i, "");
         if (!text) continue;
         text = text[0].toUpperCase() + text.slice(1);
-        if ((text.length < 18 && !text.endsWith("?")) || text.length > 400) continue;
+        if ((text.length < 18 && !text.endsWith("?")) || text.length > 400 || BOILERPLATE.test(text)) continue;
         out.push({ text, source: stamp ? `${u.title} [${stamp}]` : u.section ? `${u.title}, ${u.section}` : u.title, stamp, lead: /[:,]$/.test(text) });
       }
     }
