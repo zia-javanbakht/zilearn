@@ -213,7 +213,12 @@ function figureTex(f: Figure): string {
 
 function blockToTex(b: LessonBlock): string {
   const fig = b.figure ? figureTex(b.figure) : "";
-  const sol = `${b.try_steps ? `\n\n\\textbf{Your turn.} ${blockTex(b.try_steps)}` : ""}${b.solution ? `\n\n\\textbf{Solution.}\n\n${blockTex(b.solution)}` : ""}`;
+  // A faded example prints its given steps and the student's turn; the rest of the working goes to the Answers.
+  const sol = b.try_steps
+    ? `${b.solution ? `\n\n\\textbf{Worked so far.}\n\n${blockTex(b.solution)}` : ""}\n\n\\textbf{Your turn.}\n\n${blockTex(b.try_steps)}${b.try_answer ? `\n\n{\\footnotesize\\itshape The working is in the Answers.}` : ""}`
+    : b.solution
+      ? `\n\n\\textbf{Solution.}\n\n${blockTex(b.solution)}`
+      : "";
   const env = THEOREM_ENV[b.kind];
   if (env) {
     const src = b.source ? `\n\n{\\hfill\\footnotesize\\itshape Source: ${inline(b.source)}\\par}` : "";
@@ -282,6 +287,7 @@ export function lessonToTex(raw: LessonDoc): string {
   const ask = (q: QA) => `${q.kind ? `\\textit{${KIND[q.kind]}.} ` : ""}${blockTex(q.question)}${q.hint ? ` \\hfill{\\footnotesize\\itshape Hint: ${inline(q.hint)}}` : ""}`;
   const answers = [
     ...(doc.recall.length ? [`\\subsection*{Warm-up}\n\\begin{enumerate}\n${doc.recall.map((r) => `\\item ${blockTex(r.answer)}`).join("\n")}\n\\end{enumerate}`] : []),
+    ...doc.sections.flatMap((x) => x.blocks.filter((b) => b.try_steps && b.try_answer).map((b) => `\\subsection*{Your turn: ${inline(b.title)}}\n${blockTex(b.try_answer!)}`)),
     ...(doc.check_yourself.length ? [`\\subsection*{Check yourself}\n\\begin{enumerate}\n${doc.check_yourself.map((r) => `\\item ${blockTex(r.answer)}`).join("\n")}\n\\end{enumerate}`] : []),
   ];
 

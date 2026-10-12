@@ -25,7 +25,8 @@ export interface LessonBlock {
   title: string;
   body: string; // Markdown with $LaTeX$
   solution?: string | null; // worked solution, for examples
-  try_steps?: string | null; // a faded example's last steps, left for the student
+  try_steps?: string | null; // a faded example's last steps, left for the student (solution then holds the given steps)
+  try_answer?: string | null; // the working and result for try_steps, shown on request
   source?: string | null; // where in the student's materials, e.g. "Lecture 3 recording [12:30]"
   figure?: Figure | null;
 }
@@ -123,7 +124,8 @@ const BlockSchema = z.object({
   title: z.string().describe("Short title naming the idea (not the kind): e.g. 'Why the envelope is exponential'"),
   body: z.string().describe("Markdown; maths in KaTeX-compatible LaTeX ($...$ inline, $$...$$ display)"),
   solution: z.string().nullable().describe("For examples: the full worked solution as numbered steps, ending with the boxed or bold result and a sanity check. Otherwise null"),
-  try_steps: z.string().nullable().describe("For a faded example only: the last 1-2 steps, phrased as prompts for the student to do themselves (the full working stays in solution). Otherwise null"),
+  try_steps: z.string().nullable().describe("For a faded example only: the last 1-2 steps as numbered prompts for the student, continuing the numbering of solution (which then holds only the given first steps, shown openly). Otherwise null"),
+  try_answer: z.string().nullable().describe("For a faded example only: the working and bold result for try_steps, hidden until the student checks. Otherwise null"),
   source: z.string().nullable().describe("Where this comes from in the sources: the source title plus a timestamp, section or question number, e.g. 'Lecture 3 recording [12:30]'. Null if it isn't from them"),
   figure: FigureSchema,
 });
@@ -138,28 +140,29 @@ export const LessonSchema = z.object({
   glossary: z.array(z.object({ term: z.string(), meaning: z.string().describe("One line; the symbol and units if it has them") })).describe("The key terms and symbols used, 3-8"),
   common_mistakes: z.array(z.object({ mistake: z.string(), correction: z.string().describe("What is right instead, and how to avoid the slip") })).describe("Typical misconceptions or errors (may be empty at level 1)"),
   connections: z.array(z.object({ topic: z.string().describe("Exact topic name from the brainmap"), relation: z.string() })).describe("How this topic relates to the named neighbouring, sub- and cross-course topics"),
-  check_yourself: z.array(QASchema).describe("3-5 questions at this level, with answers"),
+  check_yourself: z.array(QASchema).describe("Questions at this level, with answers: 2-3 at level 1, 3-4 at level 2, 3-5 at level 3, 3-4 at level 4"),
   takeaways: z.array(z.string()).describe("3-5 critical takeaways: the ideas to keep if everything else is forgotten, not a repeat of the glossary"),
   read: z.array(z.object({ title: z.string().describe("Exact source title"), focus: z.string().describe("What to look at there and why: a section, timestamp or question") })).describe("The student's materials worth going back to"),
 });
 
 /** What each level teaches, in terms of the block kinds. */
 const LEVEL_BLOCKS: Record<number, string> = {
-  1: `Big picture only, about 600-900 words. Start from the phenomenon or problem the topic solves, then the idea in plain words (intuition blocks with an analogy or a picture in words), 1-2 definition blocks stating the key terms simply, and one short example that needs no derivation. No derivations, no exam-style problems, no formula blocks; a glossary of 3-5 terms; at most one figure.`,
-  2: `How and why it works, about 1000-1500 words. Precise definitions; intuition for each step of the mechanism; a formula block for each key result, saying what every symbol means and when it applies; the reasoning or derivation in short steps; 1 fully worked example then 1 faded example (try_steps set); pitfall blocks for the misconceptions; and a comparison block with a neighbouring or related topic.`,
-  3: `Problem solving, about 1200-2000 words. A procedure block with the solution method as numbered steps; the formula blocks needed (with units); exam-style examples of increasing difficulty styled on the tutorial and exam questions in the sources: one fully worked, then one faded (try_steps set) so the student finishes it; pitfall blocks for the errors students make in exams. check_yourself holds 3-4 practice problems (kind "apply") with worked answers.`,
+  1: `Big picture only, about 600-900 words. Start from the phenomenon or problem the topic solves, then the idea in plain words (intuition blocks with an analogy or a picture in words), 1-2 definition blocks stating the key terms simply, and one short example that needs no derivation. No derivations, no exam-style problems, no formula blocks; a glossary of 3-4 terms; at most one figure.`,
+  2: `How and why it works, about 1000-1500 words. Precise definitions; intuition for each step of the mechanism; a formula block for each key result, saying what every symbol means and when it applies; the reasoning or derivation in short steps; 1 fully worked example then 1 faded example; pitfall blocks for the misconceptions; and a comparison block with a neighbouring or related topic.`,
+  3: `Problem solving, about 1200-2000 words. A procedure block with the solution method as numbered steps; the formula blocks needed (with units); exam-style examples of increasing difficulty styled on the tutorial and exam questions in the sources: one fully worked, then one faded so the student finishes it; pitfall blocks for the errors students make in exams. check_yourself holds 3-4 practice problems (kind "apply") with worked answers.`,
   4: `Mastery, about 1000-1800 words. Assumptions, limitations and edge cases (when the model breaks down), comparison blocks with related topics in this and other courses, one hard multi-step or 'explain why' exam question worked fully, and a teach-back note asking the student to explain it from memory. check_yourself mixes "explain" and "transfer" questions.`,
 };
 
 const RULES = `How to write it:
 - Teach, don't summarise. Concrete before abstract: motivate with the situation or phenomenon, then give the idea, then the formal statement.
 - Use the student's sources as the backbone: their notation, their symbols, their examples and their lecturer's advice. Where a block comes from a source, set source to its title plus a timestamp, section or question number. You may add standard textbook knowledge to fill gaps, but never contradict the sources.
-- The numbered questions in the student's tutorial, workshop and exam sources are theirs to attempt: never solve them or give their answers anywhere (examples, solutions, check_yourself). Write your own on the same pattern with different numbers and a different setting, and point to the originals in read ("then try Q2").
+- The numbered questions in the student's tutorial, workshop and exam sources are theirs to attempt: never solve them or give their answers anywhere (examples, solutions, check_yourself), and don't settle them by stating the general rule or result that answers them directly. Write your own on the same pattern with different numbers and a different setting, and point to the originals in read ("then try Q2").
 - A source must point to text that states that block's claim. Material from beyond the sources (standard textbook knowledge) has source null; the app marks it "Beyond your notes" so the student knows what their course said.
-- Figure captions say what the figure shows; they never state a quantity an example or question asks the student to find.
+- Figure captions say what the figure shows; they never state a quantity an example or question asks the student to find. A plot of an example's own numbers goes on a block after that example, never before it.
 - Each block teaches one idea. Titles name the idea. Don't repeat the same point across blocks, glossary and takeaways.
 - Worked solutions: numbered steps, each saying what is done and why; carry units; finish with the result in bold and a quick sanity check (order of magnitude, limiting case or units). In one step, ask "Why?" and answer it in a line, so the student explains the step to themselves.
-- Assessment matches the objectives: every objective is tested by at least one check_yourself question (set objective to its number). Use "predict" questions (sketch or predict the behaviour before any calculation) where the topic has a behaviour to picture.
+- Faded examples: solution holds only the given first steps (one with a "Why?"), try_steps the remaining steps as numbered prompts continuing that numbering, and try_answer their working and result.
+- Assessment matches the objectives: every part of every objective is tested by at least one check_yourself question (set objective to its number), and questions only test what the lesson teaches (not ideas that appear only in the glossary or connections). Use "predict" questions (sketch or predict the behaviour before any calculation) where the topic has a behaviour to picture.
 - Stay within the level's word budget. A figure must show something no table or text in the lesson already shows.
 - Maths: KaTeX-compatible LaTeX only. $...$ inline and $$...$$ display on their own lines; for multi-line working use $$\\begin{aligned} ... \\end{aligned}$$. No \\( \\), no \\[ \\], no equation/align environments, no \\label or \\eqref, no custom macros.
 - Markdown only: bold, italics, lists and pipe tables. No HTML, no headings inside blocks, no Mermaid or ASCII diagrams: draw with figure instead.
@@ -251,7 +254,7 @@ Topic summary: ${topic.summary}
 Key terms: ${topic.keywords.join(", ") || "(none listed)"}
 Student's self-assessment: ${map.mastery ? MASTERY_LABELS[map.mastery] : "not marked"}${record.goal ? `\n${record.goal}` : ""}
 </brainmap>
-${record.text ? `\n<student_record>\n${record.text}\n</student_record>\nUse this record: put each mock exam slip and forgotten flashcard into common_mistakes (or a pitfall block) with the correction, and make at least one check_yourself question retest it in a new form. Don't name or shame; just fix the misunderstanding.\n` : ""}${previous ? `\nThe student has done the earlier levels. What they used:\n<earlier_levels>\n${previous}\n</earlier_levels>\nBuild on them and add new material: never reuse their examples, numbers, questions, figures, comparisons or pitfalls. Only recall may come back to their ideas, asking in a new form.\n` : ""}
+${record.text ? `\n<student_record>\n${record.text}\n</student_record>\nUse this record: put each mock exam slip and forgotten flashcard into common_mistakes (or a pitfall block) with the correction, unless an earlier level already corrected it (see "Mistakes covered" below), and make at least one check_yourself question retest it in a new form. Don't name or shame; just fix the misunderstanding.\n` : ""}${previous ? `\nThe student has done the earlier levels. What they used:\n<earlier_levels>\n${previous}\n</earlier_levels>\nBuild on them and add new material: never reuse their examples, numbers, questions, figures, comparisons or pitfalls. Only recall may come back to their ideas, asking in a new form.\n` : ""}
 Write the lesson on "${topic.title}" for pass ${d} of 4, the "${level.name}" level: ${level.goal}
 Earlier passes covered shallower levels and later ones go deeper, so teach exactly this depth.
 
@@ -282,15 +285,16 @@ export function fromAi(head: Pick<LessonDoc, "title" | "depth" | "level" | "goal
     ...out,
     recall: out.recall.slice(0, 4),
     // Caps that keep the entry level light and every level within reach, whatever the model wrote.
-    glossary: out.glossary.slice(0, head.depth === 1 ? 5 : 8),
-    check_yourself: out.check_yourself.slice(0, 5),
+    glossary: out.glossary.slice(0, head.depth === 1 ? 4 : 8),
+    check_yourself: out.check_yourself.slice(0, [0, 3, 4, 5, 4][head.depth]),
+    connections: head.depth === 2 || head.depth === 3 ? out.connections.slice(0, 3) : out.connections,
     sections: out.sections
       .filter((x) => x.blocks.length)
       .map((x) => ({
         ...x,
         blocks: x.blocks.map((b) => {
           const figure = b.figure && !figureProblems(b.figure).length && figures++ < (head.depth === 1 ? 1 : 3) ? b.figure : null;
-          return { ...b, solution: b.solution || null, try_steps: b.try_steps || null, source: b.source || null, figure };
+          return { ...b, solution: b.solution || null, try_steps: b.try_steps || null, try_answer: b.try_steps ? b.try_answer || null : null, source: b.source || null, figure };
         }),
       })),
   };
@@ -305,13 +309,13 @@ export function lessonOutline(doc: LessonDoc): string {
         `${x.heading}: ${x.blocks
           .map((b) => {
             // Examples and figures by their content, since those are what tends to come back.
-            const detail = b.kind === "example" ? `: ${clip(b.body, 160)}` : b.figure ? ` [figure: ${clip(b.figure.caption, 100)}]` : "";
+            const detail = b.kind === "example" ? `: ${clip(b.body, 320)}` : b.figure ? ` [figure: ${clip(b.figure.caption, 160)}]` : "";
             return `${b.kind} "${b.title}"${detail}`;
           })
           .join("; ")}`,
     ),
     doc.common_mistakes.length ? `Mistakes covered: ${doc.common_mistakes.map((m) => clip(m.mistake, 80)).join("; ")}` : "",
-    doc.check_yourself.length ? `Questions asked: ${[...doc.recall, ...doc.check_yourself].map((q) => clip(q.question, 120)).join(" | ")}` : "",
+    doc.check_yourself.length ? `Questions asked: ${[...doc.recall, ...doc.check_yourself].map((q) => clip(q.question, 300)).join(" | ")}` : "",
     doc.takeaways.length ? `Takeaways: ${doc.takeaways.join(" ")}` : "",
   ]
     .filter(Boolean)
@@ -384,7 +388,12 @@ export function lessonToMarkdown(raw: LessonDoc): string {
   for (const sec of doc.sections) {
     out.push(`### ${sec.heading}`);
     for (const b of sec.blocks) {
-      const sol = `${b.try_steps ? `\n\n**✍️ Your turn:** ${b.try_steps}` : ""}${b.solution ? `\n\n${details(b.try_steps ? "Full solution" : "Worked solution", b.solution)}` : ""}`;
+      // A faded example shows its first steps openly, then the student's turn, with the rest on request.
+      const sol = b.try_steps
+        ? `${b.solution ? `\n\n**Worked so far**\n\n${b.solution}` : ""}\n\n**✍️ Your turn**\n\n${b.try_steps}${b.try_answer ? `\n\n${details("Check your working", b.try_answer)}` : ""}`
+        : b.solution
+          ? `\n\n${details("Worked solution", b.solution)}`
+          : "";
       const src = b.source ? `\n\n<p class="lb-source">${b.source === BEYOND_NOTES ? "📚" : "📎"} ${b.source}</p>` : "";
       const fig = b.figure ? `\n\n${figureMarkdown(b.figure)}` : "";
       // A coloured box per kind (styled in globals.css), like the Z class's boxes in print.

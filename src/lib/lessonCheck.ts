@@ -71,6 +71,7 @@ export function* texts(doc: LessonDoc): Generator<[string, string]> {
       yield [`sections.${i}.blocks.${j}.body`, b.body];
       if (b.solution) yield [`sections.${i}.blocks.${j}.solution`, b.solution];
       if (b.try_steps) yield [`sections.${i}.blocks.${j}.try_steps`, b.try_steps];
+      if (b.try_answer) yield [`sections.${i}.blocks.${j}.try_answer`, b.try_answer];
     }
   }
   for (const [i, g] of doc.glossary.entries()) {
@@ -154,7 +155,8 @@ export function spoilers(doc: LessonDoc, questions: { text: string; source: stri
   const units: { paths: string[]; text: string }[] = [];
   for (const [i, x] of doc.sections.entries())
     for (const [j, b] of x.blocks.entries())
-      if (b.kind === "example" || b.solution) units.push({ paths: [`sections.${i}.blocks.${j}.body`, ...(b.solution ? [`sections.${i}.blocks.${j}.solution`] : [])], text: b.body });
+      if (b.kind === "example" || b.solution)
+        units.push({ paths: [`sections.${i}.blocks.${j}.body`, ...(["solution", "try_steps", "try_answer"] as const).filter((k) => b[k]).map((k) => `sections.${i}.blocks.${j}.${k}`)], text: b.body });
   for (const [k, list] of [["recall", doc.recall], ["check_yourself", doc.check_yourself]] as const)
     for (const [i, q] of list.entries()) units.push({ paths: [`${k}.${i}.question`, `${k}.${i}.answer`], text: q.question });
   const out: Spoiler[] = [];

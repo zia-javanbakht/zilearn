@@ -227,7 +227,7 @@ export function plotTikz(p: PlotSpec, tex: (s: string) => string): string {
   return [
     "\\begin{center}",
     "\\begin{tikzpicture}",
-    `\\begin{axis}[width=0.8\\linewidth, height=5.2cm, trig format plots=rad, grid=major, grid style={gray!25}, axis lines=left, xlabel={${tex(p.x_label)}}, ylabel={${tex(p.y_label)}}, legend style={at={(0.5,-0.28)}, anchor=north, legend columns=-1, font=\\scriptsize, draw=none, /tikz/every even column/.append style={column sep=8pt}}, tick label style={font=\\footnotesize}, label style={font=\\footnotesize}, unbounded coords=jump, restrict y to domain=-1e4:1e4${ylim ? `, ${ylim}` : ""}]`,
+    `\\begin{axis}[width=0.8\\linewidth, height=5.2cm, trig format plots=rad, grid=major, grid style={gray!25}, axis lines=left, xlabel={${tex(p.x_label)}}, ylabel={${tex(p.y_label)}}, legend style={at={(0.5,-0.28)}, anchor=north, legend columns=-1, font=\\scriptsize, draw=none, /tikz/every even column/.append style={column sep=8pt}}, tick label style={font=\\footnotesize, /pgf/number format/fixed}, scaled ticks=false, label style={font=\\footnotesize}, unbounded coords=jump, restrict y to domain=-1e4:1e4${ylim ? `, ${ylim}` : ""}]`,
     ...curves,
     "\\end{axis}",
     "\\end{tikzpicture}",

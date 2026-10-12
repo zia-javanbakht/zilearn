@@ -110,3 +110,22 @@ describe("LaTeX export", () => {
     expect(md).toContain("- **Newton's method**: uses curvature as well as slope");
   });
 });
+
+describe("faded examples", () => {
+  it("show the given steps, then the student's turn, with the rest of the working on request or in the Answers", async () => {
+    const { lessonToMarkdown } = await import("@/lib/lesson");
+    const { lessonToTex } = await import("@/lib/latex");
+    const doc = {
+      version: 2, title: "T", depth: 2, level: "Understand", goal: "", by: "claude",
+      map: { course: "C", path: [], before: [], after: [], children: [], related: [] },
+      objectives: [], where_it_fits: "w", recall: [], glossary: [], common_mistakes: [], connections: [], check_yourself: [], takeaways: [], read: [],
+      sections: [{ heading: "Practice", blocks: [{ kind: "example", title: "Timber floor", body: "Find the cycles to 10%.", solution: "1. $\\delta = 2\\pi\\zeta = 0.377$.", try_steps: "2. Use $\\delta$ to count the cycles.", try_answer: "2. $j = \\ln 10 / 0.377 \\approx$ **6.1 cycles**.", source: null, figure: null }] }],
+    } as never;
+    const md = lessonToMarkdown(doc);
+    expect(md.indexOf("**Worked so far**")).toBeLessThan(md.indexOf("**✍️ Your turn**"));
+    expect(md).toContain("<details><summary>Check your working</summary>");
+    const tex = lessonToTex(doc);
+    expect(tex).toContain("\\textbf{Your turn.}");
+    expect(tex).toContain("\\subsection*{Your turn: Timber floor}");
+  });
+});
