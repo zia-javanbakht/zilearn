@@ -290,8 +290,10 @@ export function conceptTikz(doc: LessonDoc): string {
   m.links.forEach((l, i) => {
     const a = col.get(l.from)!;
     const b = col.get(l.to)!;
-    // Letters sit off-centre, alternating, so two arrows meeting at a box don't stack theirs.
-    const tag = `node[zletter, pos=${[0.5, 0.32, 0.68][i % 3]}] {${letter(i)}}`;
+    // Letters keep away from boxes many arrows meet, and otherwise alternate, so they don't stack.
+    const degree = (id: string) => m.links.filter((x) => x.from === id || x.to === id).length;
+    const pos = degree(l.to) >= 3 && degree(l.to) > degree(l.from) ? 0.3 : degree(l.from) >= 3 && degree(l.from) > degree(l.to) ? 0.7 : [0.5, 0.36, 0.64][i % 3];
+    const tag = `node[zletter, pos=${pos}] {${letter(i)}}`;
     let draw: string;
     // Within a section the arrow loops out to the left, clear of the boxes between.
     if (a === b) draw = `(${l.from}.west) to[out=180, in=180, looseness=1.4] ${tag} (${l.to}.west)`;
@@ -350,7 +352,8 @@ export function lessonToTex(raw: LessonDoc): string {
   for (const [i, x] of doc.sections.entries()) {
     const mine = [...home].filter(([, at]) => at === i).map(([t]) => `\\textbf{${inline(t)}}`);
     const terms = mine.length ? `{\\small\\sffamily\\color{SteelBlue4}Key terms: ${mine.join(" \\textperiodcentered{} ")}\\par}\\medskip\n\n` : "";
-    sec(x.heading, `\\label{sec:lesson-${i}}\n${terms}${x.blocks.map(blockToTex).join("\n\n")}`, true);
+    // Each box starts on a page with room for its first lines, so a title or lead-in isn't left behind.
+    sec(x.heading, `\\label{sec:lesson-${i}}\n${terms}${x.blocks.map((b) => `\\Needspace{${b.figure ? 12 : 6}\\baselineskip}\n${blockToTex(b)}`).join("\n\n")}`, true);
   }
   // A two-column table rather than Z's dsbox, whose description list breaks on \\item[...] labels.
   if (doc.glossary.length)
@@ -407,10 +410,6 @@ function zDocument(doc: Head, body: string): string {
 {\\normalsize Level ${doc.depth}: ${tex(doc.level)} \\quad\\textbullet\\quad \\today\\par}\\smallskip
 \\rule{\\linewidth}{1.5pt}
 \\end{center}
-
-\\begin{blbox}[Goal of this lesson]
-${inline(doc.goal)}
-\\end{blbox}
 
 ${body}
 \\end{document}

@@ -95,7 +95,7 @@ export function homes(doc: LessonDoc): Map<string, number> {
 }
 
 // Links tidyTerms took off the map, so a fix pass can be told why.
-const DROPPED = new WeakMap<LessonDoc, ConceptLink[]>();
+const DROPPED = new WeakMap<LessonDoc, (ConceptLink & { why: "negative" | "unstated" })[]>();
 
 // "A does not change B" is not a link: the map shows what acts on what.
 const NEGATIVE = /\b(not|no|never|cannot|without|doesn't|don't|isn't|aren't|can't|won't)\b/i;
@@ -115,9 +115,18 @@ export function echoesList(b: LessonDoc["sections"][number]["blocks"][number]): 
   const d = b.figure?.diagram;
   if (!d || d.nodes.length < 3) return false;
   const items = b.body.split("\n").filter((l) => /^\s*([-*+]|\d+[.)])\s/.test(l));
-  if (items.length < 2) return false;
+  if (items.length < 2) return fanOfCases(b);
   const listed = d.nodes.filter((n) => items.some((l) => mentions(l, n.label))).length;
-  return listed >= 0.7 * d.nodes.length;
+  return listed >= 0.7 * d.nodes.length || fanOfCases(b);
+}
+
+/** Whether a diagram is only a fan of cases (one box pointing at all the others) that the block already names. */
+export function fanOfCases(b: LessonDoc["sections"][number]["blocks"][number]): boolean {
+  const d = b.figure?.diagram;
+  if (!d || d.nodes.length < 3 || !d.edges.length) return false;
+  const root = d.edges[0].from;
+  if (!d.edges.every((e) => e.from === root) || d.edges.length !== d.nodes.length - 1) return false;
+  return d.nodes.filter((n) => n.id !== root).every((n) => mentions(b.body, n.label));
 }
 
 /** The topic's main key terms as the lesson spells them (glossary entries), in the topic's order. */
@@ -139,8 +148,8 @@ export function mapGroups(doc: LessonDoc): string[][] {
 /**
  * Brings a lesson's key terms in line with its text, in place: section terms use the glossary's
  * spelling and only name terms the section uses; every glossary term the lesson uses gets a home
- * section; and the concept map keeps only links between known terms that one block of the lesson
- * states together. A lesson without links gets them from sentences that join two key terms.
+ * section; and the concept map keeps only links between known terms that one section of the lesson
+ * discusses together. A lesson without links gets them from sentences that join two key terms.
  */
 export function tidyTerms(doc: LessonDoc): LessonDoc {
   const offered = doc.concept_links ?? [];
@@ -149,17 +158,24 @@ export function tidyTerms(doc: LessonDoc): LessonDoc {
     s.terms = [...home].filter(([, at]) => at === i).map(([t]) => t);
   });
   const seen = new Set<string>();
-  const together = (a: string, b: string) => doc.sections.some((_, i) => blockTexts(doc, i).some((t) => mentions(t, a) && mentions(t, b)));
-  let links = (doc.concept_links ?? [])
-    .map((l) => ({ from: findTerm(doc, l.from), to: findTerm(doc, l.to), label: cleanLabel(l.label) }))
-    .filter((l): l is ConceptLink => !!l.from && !!l.to && l.from !== l.to && !!l.label && !NEGATIVE.test(l.label))
-    .filter((l) => home.has(l.from) && home.has(l.to) && together(l.from, l.to))
-    .filter((l) => {
-      const k = [l.from, l.to].sort().join("|");
-      return seen.has(k) ? false : (seen.add(k), true);
-    });
-  const kept = new Set(links.map((l) => `${key(l.from)}|${key(l.to)}`));
-  const lost = offered.filter((l) => !kept.has(`${key(findTerm(doc, l.from) ?? l.from)}|${key(findTerm(doc, l.to) ?? l.to)}`));
+  // The text explains a link where one section discusses both terms (the map is its summary).
+  const together = (a: string, b: string) => doc.sections.some((_, i) => mentions(sectionText(doc, i), a) && mentions(sectionText(doc, i), b));
+  const lost: (ConceptLink & { why: "negative" | "unstated" })[] = [];
+  const out: ConceptLink[] = [];
+  for (const raw of offered) {
+    const l = { from: findTerm(doc, raw.from), to: findTerm(doc, raw.to), label: cleanLabel(raw.label) };
+    if (!l.from || !l.to || l.from === l.to || !l.label || !home.has(l.from) || !home.has(l.to)) continue;
+    const link = l as ConceptLink;
+    const k = [link.from, link.to].sort().join("|");
+    if (seen.has(k)) continue;
+    if (NEGATIVE.test(link.label)) lost.push({ ...link, why: "negative" });
+    else if (!together(link.from, link.to)) lost.push({ ...link, why: "unstated" });
+    else {
+      seen.add(k);
+      out.push(link);
+    }
+  }
+  let links = out;
   if (lost.length) DROPPED.set(doc, [...(DROPPED.get(doc) ?? []), ...lost].slice(-6));
   if (!links.length) links = linksFromText(doc, [...home.keys()]);
   doc.concept_links = links.slice(0, 12);
@@ -218,12 +234,16 @@ export function framingProblems(doc: LessonDoc, o: FramingOptions = {}): string[
   for (const l of DROPPED.get(doc) ?? []) {
     const [a, b] = [findTerm(doc, l.from), findTerm(doc, l.to)];
     if (!a || !b || doc.concept_links?.some((x) => (x.from === a && x.to === b) || (x.from === b && x.to === a))) continue;
+    const said = `The link "${plainLabel(l.from)} ${l.label} ${plainLabel(l.to)}" is off the map because`;
     out.push(
-      NEGATIVE.test(l.label)
-        ? `The link "${plainLabel(l.from)} ${l.label} ${plainLabel(l.to)}" is off the map because it states a negative: say how one acts on the other instead.`
-        : `The link "${plainLabel(l.from)} ${l.label} ${plainLabel(l.to)}" is off the map because no single block names both terms: state that relation in one block using both names (or their symbols).`,
+      l.why === "negative"
+        ? `${said} it states a negative: say how one acts on the other instead.`
+        : `${said} no section discusses both terms: link terms the text already relates.`,
     );
   }
+  for (const l of doc.concept_links ?? [])
+    if (/^(above|below|if|when|while|in|at|by|through|for|with|from|into|on)\b/i.test(l.label))
+      out.push(`The link label "${plainLabel(l.from)} | ${l.label} | ${plainLabel(l.to)}" starts with "${l.label.split(" ")[0]}", so it doesn't read as a sentence: start it with a verb.`);
   doc.sections.forEach((s, i) => {
     if (doc.glossary.length && !(s.terms ?? []).length && s.blocks.length)
       out.push(`Section ${i + 1} ("${s.heading}") teaches none of the key terms: say which key term it develops and use it.`);
@@ -251,6 +271,13 @@ export function framingProblems(doc: LessonDoc, o: FramingOptions = {}): string[
     if (k >= 0) out.push(`check_yourself ${i + 1} is answered by common mistake ${k + 1}, printed just above it: test the idea in a new situation instead.`);
   });
   const pitfalls = doc.sections.flatMap((s) => s.blocks.filter((b) => b.kind === "pitfall").map((b) => ({ title: b.title, words: content(b.body) })));
+  // Nor should a question be answered by a pitfall, or its answer be a sentence copied from a block.
+  const runs = new Set(doc.sections.flatMap((s) => s.blocks.flatMap((b) => [...ngrams(`${b.body} ${b.solution ?? ""}`, 8)])));
+  doc.check_yourself.forEach((q, i) => {
+    const p = pitfalls.find((x) => overlap(content(`${q.question} ${q.answer}`), x.words) >= 0.6);
+    if (p) out.push(`check_yourself ${i + 1} is answered by the pitfall "${p.title}": test the idea in a new situation instead.`);
+    else if ([...ngrams(q.answer, 8)].some((g) => runs.has(g))) out.push(`check_yourself ${i + 1}'s answer copies a sentence of the lesson: ask it so the student has to apply the idea (a changed quantity or setting), not find the sentence.`);
+  });
   mistakes.forEach((m, k) => {
     const p = pitfalls.find((x) => overlap(m, x.words) >= 0.6);
     if (p) out.push(`common mistake ${k + 1} repeats the pitfall "${p.title}": replace it with a different slip, or merge the two.`);
@@ -286,6 +313,12 @@ const content = (s: string) =>
       .filter((w) => w.length > 2 && !STOP.has(w) && !COMMON.has(w)),
   );
 const COMMON = new Set(["this", "that", "which", "when", "then", "than", "from", "into", "each", "every", "here", "there", "they", "them", "their", "these", "those", "have", "has", "was", "were", "will", "would", "can", "not", "but", "you", "your", "are", "also", "only", "just", "more", "less", "about"]);
+/** Runs of n words (maths dropped), to spot copied sentences. */
+const ngrams = (s: string, n: number) => {
+  const w = s.toLowerCase().replace(/\$\$[\s\S]*?\$\$|\$[^$]*\$/g, " ").match(/[\p{L}\p{N}]+/gu) ?? [];
+  return new Set(w.slice(n - 1).map((_, i) => w.slice(i, i + n).join(" ")));
+};
+
 /** How much of the smaller word set the other shares (0 when either is too short to judge). */
 const overlap = (a: Set<string>, b: Set<string>) => (Math.min(a.size, b.size) < 5 ? 0 : [...a].filter((w) => b.has(w)).length / Math.min(a.size, b.size));
 const sentences = (s: string) => s.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);

@@ -280,7 +280,7 @@ function refereeFields(doc: LessonDoc): [string, string][] {
 }
 
 /** The referee's instructions and the fields it may correct. */
-export function refereePrompt(doc: LessonDoc, framing: string[] = []): string {
+export function refereePrompt(doc: LessonDoc, framing: string[] = [], practice: { text: string; source: string }[] = []): string {
   const fields = refereeFields(doc);
   const tested = new Set([...doc.check_yourself].map((q) => q.objective).filter((n): n is number => typeof n === "number"));
   const untested = doc.objectives.map((_, i) => i + 1).filter((n) => !tested.has(n));
@@ -289,7 +289,7 @@ export function refereePrompt(doc: LessonDoc, framing: string[] = []): string {
 - Statements that contradict another part of the lesson or the student's sources (including values quoted from them).
 - Questions whose data don't agree with their answers or with each other; recompute every number you can.
 - Sources that don't state the block's main claim: check it against the cited passage, then set the right title plus timestamp, section or question number, or an empty string if the claim (or most of the block) isn't in the sources.
-- Section headings that promise something their section doesn't teach.
+- Section headings that promise something their section doesn't teach.${practice.length ? `\n- The student's own questions below must stay theirs to solve: if any block, answer or "read" focus lets one be answered in a single step (it states the rule or result that decides it, or names the method to use), rewrite that field so it teaches the idea without settling the question.\n  ${practice.slice(0, 8).map((q) => `${q.source}: ${q.text.replace(/\s+/g, " ").slice(0, 300)}`).join("\n  ")}` : ""}
 - Figure captions that state a quantity an example or question asks the student to find.${doc.concept_links?.length ? `\n- Concept-map links that don't read as a true sentence "from label to" (backwards, wrong or clumsy); correct the label field:\n  ${doc.concept_links.map((l, i) => `concept_links.${i}: ${l.from} | ${l.label} | ${l.to}`).join("\n  ")}` : ""}${framing.length ? `\n- How the lesson uses its key terms, diagrams and words (fix by editing the fields named, e.g. a block body or a diagram box label):\n  - ${framing.slice(0, 8).join("\n  - ")}` : ""}${untested.length && doc.check_yourself.length ? `\n- Objectives ${untested.join(", ")} have no check_yourself question. Rewrite the least useful check_yourself questions (question and answer) so each of these objectives is tested.` : ""}
 Leave style alone, keep the student's notation, and keep maths KaTeX-compatible ($...$ and $$...$$). Return an empty list if nothing is wrong.
 
@@ -324,10 +324,10 @@ export { RefereeSchema };
  * citations that don't support their block, and captions that give an answer away. Fixes what it finds
  * in place and returns the problems, for the log. Skipped without an AI.
  */
-export async function refereeLesson(doc: LessonDoc, context: string, framing: string[] = []): Promise<string[]> {
+export async function refereeLesson(doc: LessonDoc, context: string, framing: string[] = [], practice: { text: string; source: string }[] = []): Promise<string[]> {
   if (!aiEnabled()) return [];
   try {
-    const { corrections } = await generateStructured({ schema: RefereeSchema, effort: "medium", maxTokens: 10000, context, prompt: refereePrompt(doc, framing) });
+    const { corrections } = await generateStructured({ schema: RefereeSchema, effort: "medium", maxTokens: 10000, context, prompt: refereePrompt(doc, framing, practice) });
     const done = applyReferee(doc, corrections);
     if (done.length) console.info(`Lesson refereed: ${done.length} correction(s)\n${done.join("\n")}`);
     return done;

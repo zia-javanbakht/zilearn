@@ -91,8 +91,9 @@ describe("key terms", () => {
     expect(d.concept_links?.some((l) => l.label === "does not change")).toBe(false);
     const p = framingProblems(d).join("\n");
     expect(p).toMatch(/"damping ratio ζ does not change critical damping" is off the map because it states a negative/);
-    expect(p).toMatch(/"critical damping removes the peaks of logarithmic decrement δ" is off the map because no single block names both terms/);
+    expect(p).toMatch(/"critical damping removes the peaks of logarithmic decrement δ" is off the map because no section discusses both terms/);
   });
+
 
   it("finds the main key terms and flags a missing one and a map in pieces", () => {
     const d = tidyTerms(doc({ keywords: ["damping ratio", "critical damping", "damped natural frequency"], concept_links: [] }));
