@@ -86,9 +86,12 @@ describe("key terms", () => {
     expect(framingProblems(d).some((p) => p.includes("Accelerometer"))).toBe(true);
   });
 
-  it("drops links that say what doesn't happen", () => {
-    const d = doc({ concept_links: [{ from: "damping ratio $\\zeta$", to: "critical damping", label: "does not change" }] });
-    expect(tidyTerms(d).concept_links?.some((l) => l.label === "does not change")).toBe(false);
+  it("drops links that say what doesn't happen, or that no block states, and says why", () => {
+    const d = tidyTerms(doc({ concept_links: [{ from: "damping ratio $\\zeta$", to: "critical damping", label: "does not change" }, { from: "critical damping", to: "logarithmic decrement $\\delta$", label: "removes the peaks of" }] }));
+    expect(d.concept_links?.some((l) => l.label === "does not change")).toBe(false);
+    const p = framingProblems(d).join("\n");
+    expect(p).toMatch(/"damping ratio ζ does not change critical damping" is off the map because it states a negative/);
+    expect(p).toMatch(/"critical damping removes the peaks of logarithmic decrement δ" is off the map because no single block names both terms/);
   });
 
   it("finds the main key terms and flags a missing one and a map in pieces", () => {

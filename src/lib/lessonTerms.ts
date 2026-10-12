@@ -94,6 +94,9 @@ export function homes(doc: LessonDoc): Map<string, number> {
   return out;
 }
 
+// Links tidyTerms took off the map, so a fix pass can be told why.
+const DROPPED = new WeakMap<LessonDoc, ConceptLink[]>();
+
 // "A does not change B" is not a link: the map shows what acts on what.
 const NEGATIVE = /\b(not|no|never|cannot|without|doesn't|don't|isn't|aren't|can't|won't)\b/i;
 
@@ -120,6 +123,7 @@ export function mapGroups(doc: LessonDoc): string[][] {
  * states together. A lesson without links gets them from sentences that join two key terms.
  */
 export function tidyTerms(doc: LessonDoc): LessonDoc {
+  const offered = doc.concept_links ?? [];
   const home = homes(doc);
   doc.sections.forEach((s, i) => {
     s.terms = [...home].filter(([, at]) => at === i).map(([t]) => t);
@@ -134,6 +138,9 @@ export function tidyTerms(doc: LessonDoc): LessonDoc {
       const k = [l.from, l.to].sort().join("|");
       return seen.has(k) ? false : (seen.add(k), true);
     });
+  const kept = new Set(links.map((l) => `${key(l.from)}|${key(l.to)}`));
+  const lost = offered.filter((l) => !kept.has(`${key(findTerm(doc, l.from) ?? l.from)}|${key(findTerm(doc, l.to) ?? l.to)}`));
+  if (lost.length) DROPPED.set(doc, [...(DROPPED.get(doc) ?? []), ...lost].slice(-6));
   if (!links.length) links = linksFromText(doc, [...home.keys()]);
   doc.concept_links = links.slice(0, 12);
   return doc;
@@ -188,6 +195,15 @@ export function framingProblems(doc: LessonDoc, o: FramingOptions = {}): string[
     out.push(
       `The concept map falls apart into ${groups.length} unconnected groups (${groups.map((g) => g.map((t) => plainLabel(t)).join(", ")).join(" | ")}): explain in a block how ${plainLabel(groups[1][0])} relates to ${plainLabel(groups[0][0])} and add that link, so the map reads as one idea.`,
     );
+  for (const l of DROPPED.get(doc) ?? []) {
+    const [a, b] = [findTerm(doc, l.from), findTerm(doc, l.to)];
+    if (!a || !b || doc.concept_links?.some((x) => (x.from === a && x.to === b) || (x.from === b && x.to === a))) continue;
+    out.push(
+      NEGATIVE.test(l.label)
+        ? `The link "${plainLabel(l.from)} ${l.label} ${plainLabel(l.to)}" is off the map because it states a negative: say how one acts on the other instead.`
+        : `The link "${plainLabel(l.from)} ${l.label} ${plainLabel(l.to)}" is off the map because no single block names both terms: state that relation in one block using both names (or their symbols).`,
+    );
+  }
   doc.sections.forEach((s, i) => {
     if (doc.glossary.length && !(s.terms ?? []).length && s.blocks.length)
       out.push(`Section ${i + 1} ("${s.heading}") teaches none of the key terms: say which key term it develops and use it.`);
@@ -233,7 +249,7 @@ const content = (s: string) =>
   new Set(
     s
       .toLowerCase()
-      .replace(/\$[^$]*\$/g, " ")
+      .replace(/\$\$[\s\S]*?\$\$|\$[^$]*\$/g, " ")
       .split(/[^\p{L}\p{N}%.]+/u)
       .map((w) => w.replace(/\.$/, ""))
       .filter((w) => w.length > 2 && !STOP.has(w) && !COMMON.has(w)),
@@ -255,12 +271,17 @@ export function repeats(doc: LessonDoc, earlier: LessonDoc[]): string[] {
   const out: string[] = [];
   doc.sections.forEach((s, i) =>
     s.blocks.forEach((b, j) => {
-      if (out.length >= 5) return;
+      // A teach-back note recaps on purpose.
+      if (out.length >= 5 || b.kind === "note") return;
       const where = `Section ${i + 1}, block ${j + 1} ("${b.title}")`;
       for (const x of [b.body, b.solution ?? ""].flatMap(sentences)) {
         const w = content(x);
         if (w.size < 7) continue;
-        const hit = old.find((o) => o.words.size >= 5 && [...w].filter((t) => o.words.has(t)).length >= 0.7 * Math.min(w.size, o.words.size));
+        // Most of the same words in both: the same statement, not just the same topic.
+        const hit = old.find((o) => {
+          const both = [...w].filter((t) => o.words.has(t)).length;
+          return o.words.size >= 5 && both >= 0.6 * (w.size + o.words.size - both);
+        });
         if (hit) {
           out.push(`${where} repeats what level ${hit.level} already said ("${hit.text.slice(0, 120)}"): refer back to it in a clause and spend the words on what this level adds.`);
           return;
