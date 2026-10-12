@@ -105,7 +105,7 @@ const GREEK: Record<string, string> = {
   omega: "ω", Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ", Pi: "Π", Sigma: "Σ", Phi: "Φ", Psi: "Ψ", Omega: "Ω",
   infty: "∞", cdot: "·", times: "×", le: "≤", leq: "≤", ge: "≥", geq: "≥", approx: "≈", ne: "≠", neq: "≠", pm: "±",
 };
-const ACCENT: Record<string, string> = { dot: "\u0307", ddot: "\u0308", hat: "\u0302", bar: "\u0304", tilde: "\u0303", vec: "\u20d7" };
+const ACCENT: Record<string, string> = { dot: "\u0307", ddot: "\u0308", hat: "\u0302", bar: "\u0304", tilde: "\u0303", vec: "\u20d7", check: "\u030c", breve: "\u0306" };
 const SUB: Record<string, string> = { "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉", n: "ₙ", i: "ᵢ", j: "ⱼ", k: "ₖ", x: "ₓ", a: "ₐ", e: "ₑ", o: "ₒ", r: "ᵣ", t: "ₜ", "+": "₊", "-": "₋", "=": "₌" };
 const SUP: Record<string, string> = { "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "-": "⁻", "+": "⁺", n: "ⁿ" };
 
@@ -121,22 +121,63 @@ export function htmlScripts(s: string): string {
 }
 
 /** A label with simple $...$ maths as Unicode text, for SVG and Mermaid (ζ = 0.05, ω_n → ωₙ). */
-const OPS: Record<string, string> = { pm: "±", mp: "∓", cdot: "·", times: "×", approx: "≈", leq: "≤", le: "≤", geq: "≥", ge: "≥", neq: "≠", ne: "≠", to: "→", infty: "∞", partial: "∂", circ: "°" };
+const OPS: Record<string, string> = {
+  pm: "±", mp: "∓", cdot: "·", times: "×", approx: "≈", leq: "≤", le: "≤", geq: "≥", ge: "≥", neq: "≠", ne: "≠", to: "→", infty: "∞",
+  partial: "∂", nabla: "∇", circ: "°", int: "∫", oint: "∮", sum: "∑", prod: "∏", in: "∈", notin: "∉", subset: "⊂", subseteq: "⊆", cup: "∪",
+  cap: "∩", otimes: "⊗", oplus: "⊕", sim: "∼", simeq: "≃", propto: "∝", equiv: "≡", rightarrow: "→", Rightarrow: "⇒", leftarrow: "←",
+  Leftarrow: "⇐", leftrightarrow: "↔", Leftrightarrow: "⇔", mapsto: "↦", forall: "∀", exists: "∃", ell: "ℓ", hbar: "ℏ", prime: "′",
+  cdots: "⋯", ldots: "…", dots: "…", emptyset: "∅", varnothing: "∅", perp: "⊥", parallel: "∥", ll: "≪", gg: "≫", star: "⋆", ast: "∗",
+};
+/** Operator names set upright in LaTeX, kept as words. */
+const FUNCTIONS = /\\(sin|cos|tan|sinh|cosh|tanh|exp|log|ln|det|tr|max|min|lim|sup|inf|dim|ker|arg|sgn|Div|div|Grad|grad|curl|Re|Im)(?![A-Za-z])/g;
+
+/** A letter in a Unicode maths alphabet; the letters that already had a symbol keep their old code points. */
+function alphabet(c: string, upper: number, lower: number | null, digits: number | null, holes: Record<string, string>): string {
+  if (holes[c]) return holes[c];
+  const code = c.charCodeAt(0);
+  if (c >= "A" && c <= "Z") return String.fromCodePoint(upper + code - 65);
+  if (lower !== null && c >= "a" && c <= "z") return String.fromCodePoint(lower + code - 97);
+  if (digits !== null && c >= "0" && c <= "9") return String.fromCodePoint(digits + code - 48);
+  return c;
+}
+const SCRIPT_HOLES: Record<string, string> = { B: "ℬ", E: "ℰ", F: "ℱ", H: "ℋ", I: "ℐ", L: "ℒ", M: "ℳ", R: "ℛ", e: "ℯ", g: "ℊ", o: "ℴ" };
+const DOUBLE_HOLES: Record<string, string> = { C: "ℂ", H: "ℍ", N: "ℕ", P: "ℙ", Q: "ℚ", R: "ℝ", Z: "ℤ" };
+const FONT: Record<string, (c: string) => string> = {
+  mathcal: (c) => alphabet(c, 0x1d49c, 0x1d4b6, null, SCRIPT_HOLES),
+  mathscr: (c) => alphabet(c, 0x1d49c, 0x1d4b6, null, SCRIPT_HOLES),
+  mathbb: (c) => alphabet(c, 0x1d538, 0x1d552, 0x1d7d8, DOUBLE_HOLES),
+  mathfrak: (c) => alphabet(c, 0x1d504, 0x1d51e, null, { C: "ℭ", H: "ℌ", I: "ℑ", R: "ℜ", Z: "ℨ" }),
+};
 
 export function plainLabel(s: string, html = false): string {
   return s.replace(/\$([^$]+)\$/g, (_, m: string) =>
     m
+      // Sizing commands and escaped braces: "\left\{" is a brace, "\left(" a parenthesis.
+      .replace(/\\(left|right|bigl|bigr|Bigl|Bigr|big|Big|bigg|Bigg)(?![A-Za-z])\s*\.?/g, "")
+      .replace(/\\\{/g, "\u0005")
+      .replace(/\\\}/g, "\u0006")
+      .replace(/\\(alpha|beta|gamma|delta|epsilon|varepsilon|zeta|eta|theta|kappa|lambda|mu|nu|xi|pi|rho|sigma|tau|phi|varphi|chi|psi|omega|Gamma|Delta|Theta|Lambda|Pi|Sigma|Phi|Psi|Omega)(?![A-Za-z])/g, (_, g: string) => GREEK[g])
+      // Letter styles: script and blackboard letters have Unicode forms; bold and roman are just the letters.
+      .replace(/\\(mathcal|mathscr|mathbb|mathfrak|mathbf|boldsymbol|bm|mathrm|mathit|mathsf|mathtt|text|textrm|textit|textbf|operatorname)\s*(?:\{([^{}]*)\}|([^\s\\{}]))/g, (_, f: string, a: string | undefined, b: string | undefined) =>
+        FONT[f] ? [...(a ?? b!)].map(FONT[f]).join("") : (a ?? b!),
+      )
       // Roots, fractions and common operators first, while their braces still mark what they apply to.
       .replace(/\\sqrt\{([^{}]*)\}/g, (_, x: string) => (/^\\?\w+$/.test(x) ? `√${x}` : `√(${x})`))
-      .replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, (_, a: string, b: string) => `${/^\w+$/.test(a) ? a : `(${a})`}/${/^([A-Za-z]|\d+(\.\d+)?)$/.test(b) ? b : `(${b})`}`)
-      .replace(/\\(pm|mp|cdot|times|approx|leq|le|geq|ge|neq|ne|to|infty|partial|circ)(?![A-Za-z])/g, (_, op: string) => OPS[op])
+      .replace(/\\[dt]?frac\{([^{}]*)\}\{([^{}]*)\}/g, (_, a: string, b: string) => `${/^\w+$/.test(a) ? a : `(${a})`}/${/^([A-Za-z]|\d+(\.\d+)?)$/.test(b) ? b : `(${b})`}`)
+      .replace(/\^\s*(?:\{\s*\\top\s*\}|\\top(?![A-Za-z])|\{\s*T\s*\}|T(?![A-Za-z]))/g, "ᵀ")
+      .replace(/\\([A-Za-z]+)(?![A-Za-z])/g, (w, op: string) => OPS[op] ?? w)
+      .replace(FUNCTIONS, "$1")
       // Accents as combining marks: \\dot u → u̇, \\hat x → x̂.
-      .replace(/\\(ddot|dot|hat|bar|tilde|vec)\s*(?:\{\s*([^{}]+?)\s*\}|([A-Za-z]))/g, (_, acc: string, a: string | undefined, b: string | undefined) => `${a ?? b}${ACCENT[acc]}`)
-      .replace(/\\([A-Za-z]+)/g, (w, name) => GREEK[name] ?? (["mathrm", "text", "mathit", "mathbf", "operatorname"].includes(name) ? "" : w))
+      .replace(/\\(ddot|dot|hat|widehat|bar|overline|tilde|widetilde|vec|check|breve)\s*(?:\{\s*([^{}]+?)\s*\}|([^\s\\{}]))/g, (_, acc: string, a: string | undefined, b: string | undefined) => `${a ?? b}${ACCENT[acc.replace(/^(wide|over)/, "").replace(/^line$/, "bar")]}`)
+      // Anything else is dropped, keeping its argument.
+      .replace(/\\([A-Za-z]+)\s*/g, (_, name: string) => GREEK[name] ?? "")
       .replace(/_\{([^{}]*)\}|_([0-9a-z])/gi, (w, a: string | undefined, b: string | undefined) => script(a ?? b!, SUB, "_", html))
       .replace(/\^\{([^{}]*)\}|\^([0-9n])/g, (w, a: string | undefined, b: string | undefined) => script(a ?? b!, SUP, "^", html))
       .replace(/[{}]/g, "")
-      .replace(/\\,|\\;|\\ /g, " "),
+      .replace(/\\[,;:! ]|\\quad|~/g, " ")
+      .replace(/\\\\/g, " ")
+      .replace(/\u0005/g, "{")
+      .replace(/\u0006/g, "}"),
   );
 }
 
@@ -148,7 +189,7 @@ export const mq = (s: string, max = 60) =>
       .replace(/[#;`[\]{}|$\\]/g, " ")
       .replace(/\s+/g, " ")
       .trim()
-      .slice(0, max)
+      .replace(new RegExp(`^((?:[\\s\\S]){${max}})[\\s\\S]+$`, "u"), "$1")
       .replace(/"/g, "#quot;")
       .replace(/</g, "#lt;")
       .replace(/>/g, "#gt;"),

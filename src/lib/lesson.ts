@@ -195,6 +195,10 @@ const RULES = `How to write it:
 - Teach, don't summarise. Concrete before abstract: motivate with the situation or phenomenon, then give the idea, then the formal statement.
 - Use the student's sources as the backbone: their notation, their symbols, their examples and their lecturer's advice. Where a block comes from a source, set source to its title plus a timestamp, section or question number. You may add standard textbook knowledge to fill gaps, but never contradict the sources.
 - The numbered questions in the student's tutorial, workshop and exam sources are theirs to attempt: never solve them or give their answers anywhere (examples, solutions, check_yourself), and don't settle them by stating the general rule or result that answers them directly. Write your own at the same standard but change what is given and asked, the setting and the wording; your lessons use the same combination of given and asked quantities as one of their questions at most once in total across all the levels (see the earlier levels' questions); the skill behind it can be practised in other forms. Point to an original in read ("then try Q2") only once this lesson or an earlier one teaches everything it needs, and never name the method or rule it needs there.
+- Prefer the sources' own worked examples, figures and tables (in lecture notes, papers and textbooks, not the student's tutorial or exam questions): teach from them and cite them, and write your own only where the sources have none for the idea.
+- Every equation you take from a source is written out as display maths ($$...$$ with the source's number as \\tag{n}), and its block's source names it ("Section 3, eq. (12)"). Source text can be damaged by PDF extraction (letters run together, symbols missing, fractions flattened onto separate lines): where an equation or value you need can't be read with certainty, say in the block that the source's form isn't legible here and point to where it is, instead of reconstructing it; a standard form you give instead has source null.
+- Where the sources disagree with each other (a value, a sign, a definition or a symbol that differs between two places), say so in the block: give both, cite both, and say which one the lesson follows and why.
+- When an example or question simplifies the sources' model (one dimension, small strain, linear material, no damping, a single element), say in it what the simplification leaves out and where the full model is in the sources.
 - A source must point to text that states that block's claim. Material from beyond the sources (standard textbook knowledge) has source null; the app marks it "Beyond your notes" so the student knows what their course said.
 - Figure captions say what the figure shows; they never state a quantity an example or question asks the student to find. A plot of an example's own numbers goes on a block after that example, never before it.
 - Each block teaches one idea. Titles name the idea. Don't repeat the same point across blocks, glossary, common_mistakes and takeaways: common_mistakes adds slips no pitfall block covers, and no check_yourself question is answered by a common mistake or pitfall in the lesson.
@@ -367,10 +371,21 @@ export function lessonOutline(doc: LessonDoc): string {
       (x) =>
         `${x.heading}${x.terms?.length ? ` [${x.terms.join(", ")}]` : ""}: ${x.blocks
           .map((b) => {
-            // Examples and figures by their content, since those are what tends to come back,
-            // and formulas by the result, so the next level quotes it instead of deriving it again.
+            // Examples and figures by their content, since those are what tends to come back, formulas
+            // by the result, so the next level quotes it instead of deriving it again, and other blocks by
+            // their key sentence, so the next level doesn't say it again in other words.
             const result = b.kind === "formula" ? [...b.body.matchAll(/\$\$([\s\S]+?)\$\$/g)].map((m) => m[1].trim()).slice(0, 2).join("; ") : "";
-            const detail = b.kind === "example" ? `: ${clip(b.body, 320)}` : result ? `: $$${clip(result, 200)}$$` : b.figure ? ` [figure: ${clip(b.figure.caption, 160)}]` : "";
+            const key = b.body.replace(/\$\$[\s\S]*?\$\$/g, " ").split(/(?<=[.!?])\s+/)[0] ?? "";
+            const detail =
+              b.kind === "example"
+                ? `: ${clip(b.body, 320)}`
+                : result
+                  ? `: $$${clip(result, 200)}$$`
+                  : b.figure
+                    ? ` [figure: ${clip(b.figure.caption, 160)}]`
+                    : key.trim()
+                      ? `: ${clip(key, 140)}`
+                      : "";
             return `${b.kind} "${b.title}"${detail}`;
           })
           .join("; ")}`,

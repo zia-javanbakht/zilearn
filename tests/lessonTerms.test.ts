@@ -126,6 +126,24 @@ describe("key terms", () => {
     expect(repeats(now, [early])[0]).toMatch(/redoes 2 equations from level 1/);
   });
 
+  it("asks for a check when a block covers the same ground as an earlier level's block in other words", () => {
+    const early = doc({ depth: 1 });
+    early.sections[0].blocks[0] = {
+      kind: "definition",
+      title: "Stiff plies and strong plies",
+      body: "The middle ply uses pitch-based carbon fibres: very stiff, with a low failure strain, so it breaks first. The outer plies use PAN-based carbon fibres, less stiff but stronger and more extensible.",
+    };
+    const now = doc();
+    now.sections[0].blocks[0] = {
+      kind: "keypoint",
+      title: "Why the stiff ply breaks first",
+      body: "Bonded plies share one strain, so the stiff pitch-based carbon middle ply carries the most stress, and its low failure strain means it breaks first while the extensible PAN-based outer plies keep carrying load.",
+    };
+    expect(repeats(now, [early])[0]).toMatch(/covers much the same ground as level 1's "Stiff plies and strong plies"/);
+    now.sections[0].blocks[0].body = "The fragments keep shortening until each is too short to build up enough stress to break again; the plateau ends there.";
+    expect(repeats(now, [early]).join("\n")).not.toMatch(/same ground/);
+  });
+
   it("shortens a long heading at a word for the map", () => {
     expect(shortHeading("Measuring damping from a free-vibration record in the lab")).toBe("Measuring damping from a…");
     expect(shortHeading("Short one")).toBe("Short one");
