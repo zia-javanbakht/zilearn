@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Markdown } from "../Markdown";
 import { Busy } from "../Busy";
+import { ExportMenu } from "../ExportMenu";
 import { ScopePicker, type ScopeValue } from "./ScopePicker";
 import type { ReviewNote } from "@/lib/types";
 import type { CourseData } from "./CourseWorkspace";
@@ -16,6 +17,7 @@ export function NotesTab({ data }: { data: CourseData }) {
   const [style, setStyle] = useState("concise");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const shown = useRef<HTMLDivElement>(null);
 
   const load = () =>
     api<ReviewNote[]>(`/api/courses/${id}/notes`)
@@ -41,15 +43,6 @@ export function NotesTab({ data }: { data: CourseData }) {
     } finally {
       setBusy(false);
     }
-  }
-
-  function download(n: ReviewNote) {
-    const blob = new Blob([n.content], { type: "text/markdown" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `${data.course.name} - ${n.title}.md`.replace(/[\\/:*?"<>|]+/g, "_");
-    a.click();
-    URL.revokeObjectURL(a.href);
   }
 
   return (
@@ -94,12 +87,7 @@ export function NotesTab({ data }: { data: CourseData }) {
                   {open.generated_by === "heuristic" && " · offline summary"}
                 </span>
                 <div className="row">
-                  <button className="sm" onClick={() => download(open)}>
-                    Download .md
-                  </button>
-                  <button className="sm" onClick={() => window.print()}>
-                    Print / PDF
-                  </button>
+                  <ExportMenu url={`/api/notes/${open.id}/print`} title={`${data.course.name} - ${open.title}`} markdown={open.content} printTarget={() => shown.current} />
                   <button
                     className="sm danger"
                     onClick={async () => {
@@ -112,7 +100,9 @@ export function NotesTab({ data }: { data: CourseData }) {
                   </button>
                 </div>
               </div>
-              <Markdown>{open.content}</Markdown>
+              <div ref={shown}>
+                <Markdown>{open.content}</Markdown>
+              </div>
             </div>
           )}
         </div>

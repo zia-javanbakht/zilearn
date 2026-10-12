@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { Markdown } from "../Markdown";
 import { Busy } from "../Busy";
+import { downloadExport, printElement, saveBlob } from "../texExport";
 import { DEPTH_LEVELS } from "@/lib/types";
 
 interface TocEntry {
@@ -69,17 +70,9 @@ export function LessonModal({
     }
   }
 
-  function flash(text: string) {
+  function flash(text: string, ms = 2500) {
     setNote(text);
-    setTimeout(() => setNote((n) => (n === text ? null : n)), 2500);
-  }
-
-  function save(blob: Blob, name: string) {
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+    setTimeout(() => setNote((n) => (n === text ? null : n)), ms);
   }
 
   /** Download the printable version made with the Z class: the LaTeX source, or a PDF compiled here. */
@@ -88,9 +81,8 @@ export function LessonModal({
     setPrinting(format);
     setError(null);
     try {
-      const r = await fetch(`/api/topics/${topicId}/lesson/print?depth=${depth}&format=${format}`);
-      if (!r.ok) throw new Error(((await r.json().catch(() => null)) as { error?: string } | null)?.error ?? `Couldn't make the ${format.toUpperCase()}.`);
-      save(await r.blob(), r.headers.get("content-disposition")?.match(/filename="([^"]+)"/)?.[1] ?? `lesson.${format}`);
+      const note = await downloadExport(`/api/topics/${topicId}/lesson/print?depth=${depth}`, format);
+      if (note) flash(note, 9000);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -109,7 +101,7 @@ export function LessonModal({
       await navigator.clipboard.writeText(content);
       flash("Copied the lesson as Markdown");
     } catch {
-      save(new Blob([content], { type: "text/markdown" }), `${slug()}.md`);
+      saveBlob(new Blob([content], { type: "text/markdown" }), `${slug()}.md`);
     }
   }
 
@@ -307,7 +299,7 @@ export function LessonModal({
                 {printing === "pdf" ? "Making the PDF…" : printing === "tex" ? "Making the LaTeX…" : "Export ▾"}
               </summary>
               <div className="menu-list">
-                <button className="sm" disabled={!content || !!printing || busy} onClick={() => download("pdf")} title="Compile a printable PDF with your Z LaTeX class (needs XeLaTeX on this computer)">
+                <button className="sm" disabled={!content || !!printing || busy} onClick={() => download("pdf")} title="Compile a printable PDF with LaTeX on this computer, using your Z class when ziLearn finds it">
                   Print (PDF)
                 </button>
                 <button className="sm" disabled={!content || !!printing || busy} onClick={() => download("tex")} title="The lesson as a LaTeX file that uses the Z class">
@@ -315,6 +307,17 @@ export function LessonModal({
                 </button>
                 <button className="sm" disabled={!content} onClick={copyMarkdown} title="The lesson as Markdown, for your own notes">
                   Copy as Markdown
+                </button>
+                <button
+                  className="sm"
+                  disabled={!content}
+                  title="Print the lesson as it looks here; choose Save as PDF in the print dialog (no TeX needed)"
+                  onClick={() => {
+                    exportRef.current?.removeAttribute("open");
+                    if (articleRef.current) printElement(articleRef.current, `${title} (level ${depth})`);
+                  }}
+                >
+                  Print from browser
                 </button>
               </div>
             </details>

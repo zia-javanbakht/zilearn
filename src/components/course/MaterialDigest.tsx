@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { Markdown } from "../Markdown";
 import { Mermaid } from "../Mermaid";
+import { ExportMenu } from "../ExportMenu";
 import { digestMindmap } from "@/lib/mermaid";
 import { digestPaths, digestTitle, insideAny, moveDigestItems, removeDigestItems, renameDigestItem } from "@/lib/digestEdit";
 import type { Digest, DigestTopic, Material } from "@/lib/types";
@@ -32,6 +33,7 @@ export function MaterialDigest({
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ text: string; error?: boolean } | null>(null);
   const d = m.digest;
+  const shown = useRef<HTMLDivElement>(null);
   const mindmap = useMemo(() => (d && view === "mindmap" ? digestMindmap(m.title, d) : ""), [d, view, m.title]);
 
   async function act(label: string, fn: () => Promise<unknown>, done?: string) {
@@ -85,6 +87,7 @@ export function MaterialDigest({
               </button>
             ))}
           </div>
+          <ExportMenu url={`/api/materials/${m.id}/digest/print`} title={`${m.title} - summary`} printTarget={() => shown.current} disabled={!!busy} />
           <button className="sm" disabled={!!busy || !d.topics.length} onClick={toBrainmap} title="Add this item's topics to the course brainmap as a new branch">
             {busy === "Adding…" ? busy : "Add to brainmap"}
           </button>
@@ -98,42 +101,44 @@ export function MaterialDigest({
           {msg.text}
         </div>
       )}
-      <Markdown>{d.summary}</Markdown>
-      {d.keywords.length > 0 && (
-        <div className="row small" style={{ gap: 4, flexWrap: "wrap" }}>
-          {d.keywords.map((k) => (
-            <span key={k} className="badge">
-              {k}
-            </span>
-          ))}
-        </div>
-      )}
-      {view === "topics" ? (
-        <ol className="digest-topics">
-          {d.topics.map((t, i) => (
-            <li key={i}>
-              {stamp(t)} <strong>{t.title}</strong>
-              {t.summary && <Markdown>{t.summary}</Markdown>}
-              {!!t.subtopics?.length && (
-                <ul>
-                  {t.subtopics.map((s, j) => (
-                    <li key={j}>
-                      {stamp(s)} {s.title}
-                      {s.summary && (
-                        <div className="muted">
-                          <Markdown>{s.summary}</Markdown>
-                        </div>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          ))}
-        </ol>
-      ) : (
-        mindmap && <DigestMap m={m} d={d} code={mindmap} onSaved={onChanged} />
-      )}
+      <div ref={shown} className="stack" style={{ gap: 8 }}>
+        <Markdown>{d.summary}</Markdown>
+        {d.keywords.length > 0 && (
+          <div className="row small" style={{ gap: 4, flexWrap: "wrap" }}>
+            {d.keywords.map((k) => (
+              <span key={k} className="badge">
+                {k}
+              </span>
+            ))}
+          </div>
+        )}
+        {view === "topics" ? (
+          <ol className="digest-topics">
+            {d.topics.map((t, i) => (
+              <li key={i}>
+                {stamp(t)} <strong>{t.title}</strong>
+                {t.summary && <Markdown>{t.summary}</Markdown>}
+                {!!t.subtopics?.length && (
+                  <ul>
+                    {t.subtopics.map((s, j) => (
+                      <li key={j}>
+                        {stamp(s)} {s.title}
+                        {s.summary && (
+                          <div className="muted">
+                            <Markdown>{s.summary}</Markdown>
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            ))}
+          </ol>
+        ) : (
+          mindmap && <DigestMap m={m} d={d} code={mindmap} onSaved={onChanged} />
+        )}
+      </div>
     </div>
   );
 }

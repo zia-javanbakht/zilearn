@@ -591,6 +591,10 @@ export function saveNote(n: Omit<ReviewNote, "id" | "created_at">): ReviewNote {
   return db().prepare("SELECT * FROM notes WHERE id = ?").get(id) as ReviewNote;
 }
 
+export function getNote(id: string): ReviewNote | null {
+  return (db().prepare("SELECT * FROM notes WHERE id = ?").get(id) as ReviewNote | undefined) ?? null;
+}
+
 export function listNotes(courseId: string): ReviewNote[] {
   return db().prepare("SELECT * FROM notes WHERE course_id = ? ORDER BY created_at DESC").all(courseId) as ReviewNote[];
 }
