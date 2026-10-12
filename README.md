@@ -47,12 +47,25 @@ npm run dev                  # http://localhost:3000
 
 Data (SQLite database and uploaded files) lives in `./data` unless `ZILEARN_DATA_DIR` is set.
 
-Without an API key everything still works with built-in heuristics (heading-based brainmaps, template lessons, summary-based exams, notes and podcasts); the header shows "Offline mode". With a key, the AI does the structuring, lessons, exams, marking, notes, flashcards and podcast scripts. Two providers are supported:
+Without an API key everything still works with built-in heuristics (heading-based brainmaps, template lessons, summary-based exams, notes and podcasts); the header shows "Offline mode". With a key, the AI does the structuring, lessons, exams, marking, notes, flashcards and podcast scripts.
+
+Pick the AI on the **Settings** page (link in the header, or click the provider badge). Keys, models and the choice are saved in the database and apply at once:
+
+- **Built-in**: offline, free and private. AI is off even if keys are set.
+- **Automatic** (the default): keys from the environment decide, as below. Keys saved in Settings count too.
+- **Anthropic Claude**: uses `claude-opus-5-5` unless you name another model.
+- **Google Gemini**: uses `gemini-flash-latest` unless you name another model. Also transcribes YouTube videos that have no captions.
+- **OpenAI-compatible**: OpenAI, OpenRouter, Ollama, LM Studio or any server with the OpenAI chat completions API. Set the base URL (for example `http://localhost:11434/v1` for Ollama); local servers need no key.
+
+"Test connection" makes one tiny call with what is in the form, before you save. A key saved in Settings is used instead of the environment's key for that provider; keys are never sent back to the browser in full.
+
+The environment still works when nothing is saved:
 
 - **Claude**: set `ANTHROPIC_API_KEY`. Uses `claude-opus-5-5` by default; override with `ZILEARN_MODEL`.
 - **Gemini**: set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`). Uses `gemini-flash-latest` by default; override with `GEMINI_MODEL` (for example a Pro model).
+- **OpenAI-compatible**: set `OPENAI_API_KEY` (and optionally `OPENAI_BASE_URL`, `OPENAI_MODEL`) together with `ZILEARN_PROVIDER=openai`.
 
-If both keys are set, Claude is used unless `ZILEARN_PROVIDER=gemini`. The header shows which provider is connected.
+If several keys are set, Automatic uses Claude unless `ZILEARN_PROVIDER` is `gemini` or `openai`. The header shows which provider is connected.
 
 ## Development
 
