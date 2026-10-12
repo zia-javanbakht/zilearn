@@ -350,7 +350,7 @@ export function activitiesFor(depth: number, kinds: Set<MaterialKind>, mastery: 
     case 1:
       a.push("Read the level 1 lesson and skim the source material");
       if (kinds.has("slides")) a.push("Flip through the slides, noting headings and diagrams");
-      if (kinds.has("youtube") || kinds.has("audio_memo")) a.push("Watch or listen to the recording at 1.5x for orientation");
+      if (kinds.has("youtube") || kinds.has("video") || kinds.has("audio_memo")) a.push("Watch or listen to the recording at 1.5x for orientation");
       a.push("Write down 3-5 key terms and a one-line definition of each");
       break;
     case 2:

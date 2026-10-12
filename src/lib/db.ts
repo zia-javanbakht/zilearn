@@ -14,6 +14,12 @@ export function newId(): string {
 }
 
 const SCHEMA = `
+-- App settings (AI provider, keys, models), one row per setting. See src/lib/settings.ts.
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS courses (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -162,7 +168,16 @@ CREATE VIRTUAL TABLE IF NOT EXISTS topics_fts USING fts5(
   tokenize = 'porter unicode61'
 );
 
+CREATE TABLE IF NOT EXISTS topic_undo (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  label TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  data TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_materials_course ON materials(course_id);
+
 CREATE INDEX IF NOT EXISTS idx_topics_course ON topics(course_id);
 CREATE INDEX IF NOT EXISTS idx_plan_items_plan ON plan_items(plan_id);
 CREATE INDEX IF NOT EXISTS idx_links_from ON links(from_topic);
@@ -174,6 +189,13 @@ CREATE INDEX IF NOT EXISTS idx_cards_course_due ON cards(course_id, due);
 const COLUMNS: [table: string, column: string, type: string][] = [
   ["podcasts", "audio", "TEXT"], // path of the recorded MP3, relative to the data dir
   ["podcasts", "audio_marks", "TEXT"], // JSON: start time in seconds of each segment in the MP3
+  ["materials", "sha256", "TEXT"], // content hash, so re-importing a folder skips files already added
+  ["materials", "rel_path", "TEXT"], // where the file sat in an imported folder or zip
+  ["topics", "manual", "INTEGER NOT NULL DEFAULT 0"], // added or edited by the student: kept when the brainmap is rebuilt
+  ["courses", "removed_topics", "TEXT"], // JSON: normalised titles the student deleted, left out of rebuilds
+  ["materials", "digest", "TEXT"], // JSON Digest: summary, key terms and topics of the material
+  ["lessons", "doc", "TEXT"], // JSON LessonDoc: the structured lesson the Markdown and LaTeX are made from
+  ["materials", "scan", "TEXT"], // JSON ScanInfo: PDF pages that are pictures without text
 ];
 
 function migrate(db: Database.Database) {
@@ -181,6 +203,7 @@ function migrate(db: Database.Database) {
     const have = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).some((c) => c.name === column);
     if (!have) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
+  db.exec("CREATE INDEX IF NOT EXISTS idx_materials_sha ON materials(course_id, sha256)");
 }
 
 let instance: Database.Database | null = null;

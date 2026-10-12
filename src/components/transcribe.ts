@@ -15,9 +15,10 @@ export interface TranscribeSettings {
   language: string; // "" = detect automatically
   tidy: boolean; // ask Claude to turn the raw transcript into notes
   auto: boolean; // transcribe new recordings as soon as they are added
+  stamps: boolean; // keep [mm:ss] markers; off removes them from new transcripts
 }
 
-export const DEFAULT_SETTINGS: TranscribeSettings = { model: "Xenova/whisper-base", language: "", tidy: true, auto: true };
+export const DEFAULT_SETTINGS: TranscribeSettings = { model: "Xenova/whisper-base", language: "", tidy: true, auto: true, stamps: true };
 const KEY = "zilearn:transcribe";
 
 export function loadSettings(): TranscribeSettings {
@@ -100,7 +101,7 @@ export async function transcribeMaterial(m: Pick<Material, "id" | "title">, s: T
   const text = formatTranscript(chunks);
   if (!text) throw new Error("No speech was found in this recording.");
   onProgress({ phase: "saving" });
-  return api<Material>(`/api/materials/${m.id}`, { method: "PATCH", json: { text, transcript: true, tidy: s.tidy } });
+  return api<Material>(`/api/materials/${m.id}`, { method: "PATCH", json: { text, transcript: true, tidy: s.tidy, clean: !s.stamps } });
 }
 
 export function isRecording(m: Pick<Material, "mime" | "filename">): boolean {

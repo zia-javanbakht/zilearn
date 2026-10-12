@@ -13,12 +13,15 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.133.0",
     "@google/genai": "2.24.0",
+    "@napi-rs/canvas": "^1.0.11",
+    "@tesseract.js-data/eng": "^1.0.0",
     "better-sqlite3": "^13.0.3",
     "jszip": "^3.10.2",
     "katex": "^0.19.0",
     "mammoth": "^1.13.0",
     "mermaid": "^12.1.0",
     "next": "^16.4.0",
+    "pdf-lib": "^1.17.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
@@ -27,6 +30,7 @@
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "tesseract.js": "^7.0.0",
     "unpdf": "^1.8.1",
     "zod": "^4.6.5"
   },

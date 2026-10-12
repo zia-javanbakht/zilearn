@@ -4,6 +4,7 @@ export const MATERIAL_KINDS = [
   "pdf",
   "youtube",
   "audio_memo",
+  "video",
   "sample_exam",
   "workshop",
   "tutorial",
@@ -18,6 +19,7 @@ export const MATERIAL_KIND_LABELS: Record<MaterialKind, string> = {
   pdf: "PDF",
   youtube: "YouTube",
   audio_memo: "Audio memo",
+  video: "Video",
   sample_exam: "Sample exam",
   workshop: "Workshop",
   tutorial: "Tutorial",
@@ -37,7 +39,7 @@ export const DEPTH_LEVELS = [
   {
     level: 1,
     name: "Survey",
-    goal: "Get the big picture: what it is, why it matters, the 3-5 key terms, and one intuitive example.",
+    goal: "Get the big picture: what it is, why it matters, its key terms, and one intuitive example.",
     lesson: "A short orientation (no derivations): a plain-language explanation, the key terms with one-line definitions, one intuitive example or analogy, and why it matters for the course.",
   },
   {
@@ -49,7 +51,7 @@ export const DEPTH_LEVELS = [
   {
     level: 3,
     name: "Apply",
-    goal: "Solve exam-style problems with it: two worked examples, then problems on your own.",
+    goal: "Solve exam-style problems with it, from a worked example to problems on your own.",
     lesson: "Open with 2 recall questions on the level 2 ideas. Then give 2 fully worked exam-style examples with reasoning shown, a checklist of steps/pitfalls, and 2-3 unsolved practice problems (answers in a <details> block).",
   },
   {
@@ -85,7 +87,41 @@ export interface Material {
   text: string | null;
   status: "ready" | "error" | "partial";
   note: string | null;
+  sha256?: string | null; // content hash of an uploaded file
+  rel_path?: string | null; // e.g. "Week 3/Lecture notes.pdf" when imported from a folder or zip
+  digest?: Digest | null; // summary, key terms and topics of this material
+  scan?: ScanInfo | null; // PDF pages that are pictures without text, and what was done about them
   created_at: string;
+}
+
+/** Pages of a PDF that are only pictures (a scan without OCR). */
+export interface ScanInfo {
+  pages: number[]; // 1-based
+  total: number;
+  /** OCR text was written into the PDF itself, so the file is searchable. */
+  layer?: boolean;
+  /** Who read the pictured pages for the material's text, if anyone. */
+  text_by?: "ai" | "ocr" | null;
+  /** Pages whose own text layer is too damaged to trust (a poor OCR layer from a scanner). */
+  poor?: number[];
+  /** Pages with display maths the text layer flattens. */
+  maths?: number[];
+  /** Pages the AI read again from the PDF itself (the scanned, poor and maths pages). */
+  ai_pages?: number[];
+}
+
+export interface DigestTopic {
+  title: string;
+  start: string | null; // "mm:ss" in a recording
+  summary: string;
+  subtopics?: DigestTopic[];
+}
+
+export interface Digest {
+  summary: string;
+  keywords: string[];
+  topics: DigestTopic[];
+  by: "ai" | "offline";
 }
 
 export interface Topic {
@@ -100,6 +136,7 @@ export interface Topic {
   position: number;
   mastery: Mastery | null;
   achieved_depth: number;
+  manual?: number; // 1 when the student added or edited it
 }
 
 export interface TopicNode extends Topic {

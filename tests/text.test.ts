@@ -47,6 +47,31 @@ describe("brainmap", () => {
     id, course_id: "c", kind: "lecture_notes", title, source_type: "text", filename: null, mime: null, path: null, url: null, text, status: "ready", note: null, created_at: "",
   });
 
+  it("nests a paper's subsections under their sections and names the branch by the paper's title", () => {
+    const text = "# Mixed assumed strain methods\n## 1 Introduction\nWhy.\n## 2 Model problem\nSetup.\n### 2.1 Mixed approximations\nSpaces.\n### 2.2 Stability\nInf-sup.\n#### 2.2.1 A detail\nMore.\n## References\n1. A.";
+    const topics = heuristicTopics([m("m1", "simo1990", text)]);
+    const by = new Map(topics.map((t) => [t.ref, t.title]));
+    expect(topics.map((t) => `${t.parent_ref ? by.get(t.parent_ref) : "-"} > ${t.title}`)).toEqual([
+      "- > Mixed assumed strain methods",
+      "Mixed assumed strain methods > Model problem",
+      "Model problem > Mixed approximations",
+      "Model problem > Stability",
+      "Stability > A detail",
+    ]);
+  });
+
+  it("leaves the introduction and conclusions out of a paper's topics and mends OCR slips in its headings", () => {
+    const text = "# Mixed Jinite element methods\n## 1 Introduction\nWhy.\n## 2 Axis ymmetric problems\nThe axisymmetric case is axisymmetric. Finite elements are finite.\n## 3 Model Problem 11\nModel Problem I and Model Problem II.\n## 4 Conclusions\nDone.";
+    const titles = heuristicTopics([m("m1", "simo1990", text)]).map((t) => t.title);
+    expect(titles).toEqual(["Mixed finite element methods", "Axisymmetric problems", "Model Problem II"]);
+  });
+
+  it("keeps captions and table rows out of a section's summary", () => {
+    const text = "# A paper\n## Validation\nTwo composites were modelled, one with the conventional method and another\nTable 5. Properties of cohesive zone between plies.\nGIc (N/mm) K (MPa/mm)\n0.199 0.5 67 105\n\n--- Page 18 ---\nusing the thin-ply method. Both agree with the tests well.";
+    const v = heuristicTopics([m("m1", "paper", text)]).find((t) => t.title === "Validation")!;
+    expect(v.summary).toBe("Two composites were modelled, one with the conventional method and another using the thin-ply method. Both agree with the tests well.");
+  });
+
   it("builds an offline topic tree from headings", () => {
     const topics = heuristicTopics([m("m1", "Week 1", "# Supervised learning\nLabels are given.\n# Unsupervised learning\nNo labels.")]);
     expect(topics.map((t) => t.title)).toEqual(["Week 1", "Supervised learning", "Unsupervised learning"]);
@@ -75,7 +100,13 @@ describe("brainmap", () => {
     const focused = toFlowchart("Big", big, { focusId: "t5" });
     expect(Object.values(focused.nodeIds)).toContain("t20"); // a child of t5
     const mind = toMindmap("ML (intro)", tree);
-    expect(mind).toMatch(/^mindmap/);
-    expect(mind).not.toMatch(/\(x\)/);
+    expect(mind.code).toMatch(/^mindmap/);
+    expect(mind.code).not.toMatch(/\(x\)/);
+    expect(Object.values(mind.nodeIds)).toEqual(["a", "b"]);
+    // The mindmap folds like the flowchart and names topics the same way.
+    const bigMind = toMindmap("Big", big, { closed: new Set(["t0"]) });
+    expect(bigMind.toggles[Object.entries(bigMind.nodeIds).find(([, t]) => t === "t0")![0]]).toBe("closed");
+    expect(Object.values(bigMind.nodeIds)).not.toContain("t3");
+    expect(bigMind.code).toMatch(/T0 \+\d+\]/);
   });
 });

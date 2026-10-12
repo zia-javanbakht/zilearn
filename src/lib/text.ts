@@ -24,9 +24,13 @@ export function stem(w: string): string {
   return w;
 }
 
+// Words about the paper or the recording rather than the subject; fine in search, useless as key terms.
+const BOILERPLATE = new Set("question questions marks mark total answer answers points minutes hour hours instructions candidates attempt tutorial workshop exam exams received recording".split(" "));
+
 export function topKeywords(text: string, n = 8): string[] {
   const counts = new Map<string, { n: number; word: string }>();
   for (const w of tokenize(text)) {
+    if (BOILERPLATE.has(w)) continue;
     const s = stem(w);
     const c = counts.get(s);
     if (c) c.n++;
@@ -128,6 +132,19 @@ export function sharedTerms(a: Vector, b: Vector, n = 4): string[] {
 export interface Section {
   heading: string;
   body: string;
+  /** How deep the heading sits: 0 for a document title ("# …"), 1 for a section, 2 for a subsection, … */
+  level?: number;
+}
+
+/** The depth of a heading line, from its Markdown hashes or its numbering ("2.1" is 2). */
+function headingLevel(line: string): number {
+  const md = line.match(/^(#{1,4})\s+(.*)$/);
+  if (md) {
+    const num = md[2].match(/^(\d+(?:\.\d+){0,3})\.?\s/);
+    return num ? num[1].split(".").length : md[1].length - 1;
+  }
+  const num = line.match(/^(\d+(?:\.\d+){0,3})[.)]?\s/);
+  return num ? num[1].split(".").length : 1;
 }
 
 export function splitSections(text: string): Section[] {
@@ -137,9 +154,12 @@ export function splitSections(text: string): Section[] {
   for (const raw of lines) {
     const line = raw.trim();
     const h = headingOf(line);
-    if (h) {
+    // A title set over two lines ("A CLASS OF … METHODS AND" / "THE METHOD OF …") is one heading.
+    if (h && cur && cur.heading && !cur.body && TRAILING_FUNCTION_WORD.test(cur.heading)) {
+      cur.heading += ` ${h}`;
+    } else if (h) {
       if (cur) sections.push(cur);
-      cur = { heading: h, body: "" };
+      cur = { heading: h, body: "", level: headingLevel(line) };
     } else if (line) {
       if (!cur) cur = { heading: "", body: "" };
       cur.body += line + "\n";
@@ -150,22 +170,135 @@ export function splitSections(text: string): Section[] {
 }
 
 function headingOf(line: string): string | null {
-  if (!line || line.length > 90) return null;
-  let m = line.match(/^#{1,4}\s+(.+)$/);
+  if (!line) return null;
+  // Marked headings may be long (a paper's title); guessed ones may not.
+  let m = line.length <= 200 ? line.match(/^#{1,4}\s+(.+)$/) : null;
   if (m) return m[1].trim();
+  if (line.length > 90) return null;
   m = line.match(/^(?:slide\s+\d+\s*[:\-–]\s*)(.+)$/i);
   if (m) return m[1].trim();
+  // "Section 2 is violated." ends a sentence that wrapped; only a title-like rest is a heading.
   m = line.match(/^(?:chapter|section|part|topic|week|lecture)\s+\d+[.:)\-–]?\s+(.+)$/i);
-  if (m) return m[1].trim();
+  if (m && titleLike(m[1], 12)) return unshout(m[1].trim());
+  // Appendices keep their label: "Appendix II: Stability proof" is how the paper refers to it.
+  m = line.match(/^(appendix\s+(?:\d+|[IVX]+|[A-Z]))[.:)\-–]?\s+(.+)$/i);
+  if (m && titleLike(m[2], 12)) return `${unshout(m[1])}: ${unshout(m[2].trim())}`;
   m = line.match(/^(\d+(?:\.\d+){0,2})[.)]?\s+([A-Z][^.!?]{2,80})$/);
-  if (m && !/[,;]$/.test(m[2])) return m[2].trim();
-  const words = line.split(/\s+/);
-  if (words.length >= 1 && words.length <= 8 && /^[A-Z0-9][A-Z0-9 &:\-/,()']+$/.test(line) && /[A-Z]{3}/.test(line)) {
-    return titleCase(line);
+  // Numbered list items in running prose ("2. Equations (9)-(10) are the Euler equations of") and
+  // wrapped maths ("2 KE2, E = 1") aren't headings.
+  if (m && titleLike(m[2], 9)) return unshout(m[2].trim());
+  const caps = line.replace(/[*†‡]+$/, "");
+  const words = caps.split(/\s+/);
+  if (words.length >= 1 && words.length <= 8 && /^[A-Z0-9][A-Z0-9 &:\-/,()']+$/.test(caps) && /[A-Z]{3}/.test(caps)) {
+    return titleCase(caps);
   }
   return null;
 }
 
+const TRAILING_FUNCTION_WORD = /\b(of|the|and|or|to|in|a|an|by|with|for|from|on)$/i;
+
+/** Reads like a title rather than a sentence or a line of maths. */
+function titleLike(s: string, maxWords: number): boolean {
+  const t = s.trim();
+  return (
+    /^\p{Lu}/u.test(t) &&
+    /\p{L}{3}/u.test(t) &&
+    !/[.,;:=]$|[=<>≤≥]/.test(t) &&
+    t.split(/\s+/).length <= maxWords &&
+    !SENTENCE_WORDS.test(t) &&
+    !/\(\d/.test(t) &&
+    !TRAILING_FUNCTION_WORD.test(t)
+  );
+}
+
+const SENTENCE_WORDS = /\b(is|are|was|were|be|been|has|have|had|can|will|we|our|this|these|which|that|it)\b/i;
+
+/** Back matter that teaches nothing: references, funding, declarations and the like. */
+export const BACK_MATTER = /^(references|bibliography|works cited|literature cited|acknowledge?ments?|funding|declarations?( of (conflicting )?interests?)?|conflicts? of interests?|competing interests?|author(s'|'s)? contributions?|credit authorship contribution statement|data availability( statement)?|orcid( id)?s?|supplementary (material|data)|ethical approval|consent for publication)$/i;
+
+/** Labels on a document's first page that aren't topics. */
+const FRONT_LABELS = /^(lecture notes?|notes|handout|original article|research article|review article|article|abstract|keywords?|contents|table of contents|summary)$/i;
+
+/** "Behzad Abdellahi, Fatemeh Azhari and Phu Nguyen": names joined by commas and "and". */
+export function isAuthorLine(s: string): boolean {
+  // Private-use glyphs are ORCID and e-mail icons.
+  const t = s.replace(/[*†‡§\d\uE000-\uF8FF]/g, "").trim();
+  if (!/,|\sand\s|&/i.test(t)) return false;
+  const words = t.split(/[\s,&]+/).filter(Boolean);
+  // "Kinematics and Primary Solution Field" is a title: names come with commas or initials.
+  if (!t.includes(",") && !words.some((w) => /^\p{Lu}\.$/u.test(w))) return false;
+  return words.length >= 3 && words.length <= 30 && words.every((w) => /^(and|et|al\.?|van|von|de|der|da|di|du|la|le|bin|ibn)$/i.test(w) || /^\p{Lu}[\p{L}.'-]*$/u.test(w));
+}
+
+/**
+ * The sections worth studying: headings without numbering clutter, back matter (references, funding,
+ * declarations) left out, and front-page labels and author lines kept only as untitled text.
+ */
+export function studySections(text: string): Section[] {
+  const out: Section[] = [];
+  splitSections(text).forEach((s, i) => {
+    const h = s.heading.replace(/^(appendix\s+)?[\dIVX]+(\.\d+)*\.?\s+(?=\p{L})/u, "").trim();
+    if (BACK_MATTER.test(h)) return;
+    // Front matter sits before the first few headings; a closing "Summary" is a real section.
+    if (s.heading && i < 5 && (FRONT_LABELS.test(h) || isAuthorLine(s.heading))) out.push({ heading: "", body: s.body });
+    // Numbering is the paper's bookkeeping; the level keeps the structure it carried.
+    else out.push({ ...s, heading: h });
+  });
+  return out;
+}
+
+/** "INTRODUCTION AND MOTIVATION" reads as "Introduction and Motivation". */
+function unshout(s: string) {
+  return /\p{Ll}/u.test(s) || !/\p{Lu}{4}/u.test(s) ? s : titleCase(s);
+}
+
+const SMALL_WORDS = new Set("a an and as at but by for from in of on or the to via with".split(" "));
+
 function titleCase(s: string) {
-  return s.toLowerCase().replace(/\b([a-z])/g, (c) => c.toUpperCase());
+  return s.toLowerCase().replace(/[a-z][a-z']*/g, (w, i: number) => (i > 0 && SMALL_WORDS.has(w) ? w : w[0].toUpperCase() + w.slice(1)));
+}
+
+const CAPTION = /^(figure|fig\.|table|scheme)\s*[\dIVX]+[.:]\s/i;
+const SENTENCE_END = /[.!?]["')\]]?(\d+(,\d+)*)?$/;
+const PAGE_MARK = /^-{2,}\s*page\s+\d+\s*-{2,}$/i;
+/** A flattened table row: mostly numbers ("Elastic modulus (GPa) 294 620 3.15"). */
+function tableRow(line: string): boolean {
+  const toks = line.split(/\s+/).filter(Boolean);
+  const nums = toks.filter((x) => /^[-+±~≈]?\d[\d.,]*%?$/.test(x)).length;
+  return nums >= 3 && nums / toks.length >= 0.4;
+}
+/** A line of running text rather than a table's header or cells. */
+function prose(line: string): boolean {
+  const toks = line.split(/\s+/).filter(Boolean);
+  const nums = toks.filter((x) => /\d/.test(x)).length;
+  return toks.filter((x) => /^[a-z][a-z'’-]+[,.;:]?$/.test(x)).length >= 5 && nums / toks.length < 0.25;
+}
+
+/**
+ * A document's lines without its layout: figure and table captions (with the lines they wrap onto),
+ * the rows under a table's caption, flattened numeric rows and page markers. A sentence they cut in
+ * two (a figure or page break mid-sentence) is joined again by dropping the blank lines between.
+ */
+export function proseLines(lines: string[]): string[] {
+  const out: string[] = [];
+  let inCaption = false;
+  let inTable = false;
+  for (const l of lines) {
+    const line = l.trim();
+    if (CAPTION.test(line) || (inCaption && line)) {
+      inCaption = !SENTENCE_END.test(line);
+      inTable = /^table/i.test(line) || inTable;
+      continue;
+    }
+    if (PAGE_MARK.test(line) || tableRow(line) || (inTable && line && !prose(line))) continue;
+    inTable = false;
+    if (/^[a-z]/.test(line) && out.length && !out[out.length - 1].trim()) {
+      let i = out.length - 1;
+      while (i >= 0 && !out[i].trim()) i--;
+      const before = i >= 0 ? out[i].trim() : "";
+      if (before && !/[.!?:]$/.test(before) && !/^([-*+]|\d+[.)]|\||\$\$|#)/.test(before)) out.length = i + 1;
+    }
+    out.push(l);
+  }
+  return out;
 }

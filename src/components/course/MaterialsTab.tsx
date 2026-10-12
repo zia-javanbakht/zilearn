@@ -12,7 +12,11 @@ import {
   DEFAULT_SETTINGS,
   type TranscribeSettings,
 } from "../transcribe";
+import { batches, filterPicked, fromDrop, fromInput, type PickedFile } from "../folderImport";
 import { MATERIAL_KINDS, MATERIAL_KIND_LABELS, type Material, type MaterialKind } from "@/lib/types";
+import { hasTimestamps } from "@/lib/transcript";
+import { Markdown } from "../Markdown";
+import { DigestKeywords, MaterialDigest } from "./MaterialDigest";
 import type { CourseData } from "./CourseWorkspace";
 
 export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; reload: () => void; onBrainmap: () => void }) {
@@ -24,7 +28,15 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
   const [link, setLink] = useState("");
   const [paste, setPaste] = useState({ title: "", text: "" });
   const [added, setAdded] = useState(0);
+  const [ai, setAi] = useState(false);
+  useEffect(() => {
+    api<{ ai: boolean }>("/api/status")
+      .then((st) => setAi(st.ai))
+      .catch(() => {});
+  }, []);
   const fileRef = useRef<HTMLInputElement>(null);
+  const folderRef = useRef<HTMLInputElement>(null);
+  const [report, setReport] = useState<{ added: number; skipped: { name: string; reason: string }[]; ignored: number } | null>(null);
 
   // Transcription runs one recording at a time, in the browser.
   const [settings, setSettings] = useState<TranscribeSettings>(DEFAULT_SETTINGS);
@@ -52,11 +64,8 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
     setBusy(label);
     setError(null);
     try {
-      const r = await fn();
-      if (Array.isArray(r)) {
-        setAdded((n) => n + r.length);
-        if (loadSettings().auto) for (const m of r as Material[]) if (isRecording(m) && m.status !== "ready") transcribe(m);
-      }
+      const r = (await fn()) as { materials?: Material[] } | undefined;
+      if (r?.materials) onAdded(r.materials);
       reload();
     } catch (e) {
       setError((e as Error).message);
@@ -65,19 +74,70 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
     }
   }
 
+  /** Count new materials; recordings without text are transcribed (after the whole import, so captions found later win). */
+  function onAdded(list: Material[], defer?: Map<string, Material>) {
+    setAdded((n) => n + list.filter((m) => !defer?.has(m.id)).length);
+    if (defer) for (const m of list) defer.set(m.id, m);
+    else afterImport(list);
+  }
+
+  /** Transcribe recordings that came without text, and clean up imported transcripts if the student turned timestamps off. */
+  function afterImport(list: Iterable<Material>) {
+    const s = loadSettings();
+    const cleanups: Promise<unknown>[] = [];
+    for (const m of list) {
+      if (s.auto && isRecording(m) && m.status !== "ready") transcribe(m);
+      else if (!s.stamps && hasTimestamps(m.text)) cleanups.push(api(`/api/materials/${m.id}`, { method: "PATCH", json: { clean: true } }));
+    }
+    if (cleanups.length) Promise.allSettled(cleanups).then(reload);
+  }
+
   function update(p: Partial<TranscribeSettings>) {
     const next = { ...settings, ...p };
     setSettings(next);
     saveSettings(next);
   }
 
-  function upload(files: FileList | File[], forceKind?: MaterialKind) {
-    const list = Array.from(files);
-    if (!list.length) return;
-    const fd = new FormData();
-    list.forEach((f) => fd.append("files", f));
-    if (forceKind || kind) fd.append("kind", forceKind || kind);
-    return run(`Reading ${list.length} file${list.length > 1 ? "s" : ""}…`, () => api(`/api/courses/${id}/materials`, { method: "POST", body: fd }));
+  /** Upload files (or a whole folder) a few at a time, so big folders show progress and one bad file doesn't stop the rest. */
+  async function upload(picked: PickedFile[], forceKind?: MaterialKind) {
+    const { keep, ignored } = filterPicked(picked);
+    if (!keep.length) {
+      if (ignored) setReport({ added: 0, skipped: [], ignored });
+      return;
+    }
+    setBusy(`Importing ${keep.length} file${keep.length > 1 ? "s" : ""}…`);
+    setError(null);
+    setReport(null);
+    const total = { added: 0, skipped: [] as { name: string; reason: string }[], ignored };
+    const fresh = new Map<string, Material>();
+    let done = 0;
+    // Keep each folder's files together, so a video and its captions file usually arrive in the same batch.
+    keep.sort((a, b) => (a.path || a.file.name).localeCompare(b.path || b.file.name));
+    try {
+      for (const group of batches(keep)) {
+        const fd = new FormData();
+        for (const p of group) {
+          fd.append("files", p.file);
+          fd.append("paths", p.path);
+        }
+        if (forceKind || kind) fd.append("kind", forceKind || kind);
+        try {
+          const r = await api<{ materials: Material[]; skipped: { name: string; reason: string }[] }>(`/api/courses/${id}/materials`, { method: "POST", body: fd });
+          onAdded(r.materials, fresh);
+          total.skipped.push(...r.skipped);
+        } catch (e) {
+          total.skipped.push(...group.map((p) => ({ name: p.path || p.file.name, reason: (e as Error).message })));
+        }
+        done += group.length;
+        setBusy(`Importing ${done} of ${keep.length} files…`);
+        reload();
+      }
+      total.added = fresh.size; // a video updated by its captions later counts once
+      if (keep.length > 1 || total.skipped.length || ignored) setReport(total);
+      afterImport(fresh.values());
+    } finally {
+      setBusy(null);
+    }
   }
 
   function addUrl(url: string) {
@@ -87,7 +147,12 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
     setOver(false);
-    if (e.dataTransfer.files.length) return upload(e.dataTransfer.files);
+    if (e.dataTransfer.files.length) {
+      fromDrop(e.dataTransfer)
+        .then((list) => upload(list))
+        .catch(() => upload(Array.from(e.dataTransfer.files).map((file) => ({ file, path: "" }))));
+      return;
+    }
     const uri = e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain");
     const urls = uri.split(/\s+/).filter((u) => /^https?:\/\//.test(u));
     if (urls.length) urls.forEach((u) => addUrl(u));
@@ -107,13 +172,70 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
         onDrop={onDrop}
         onClick={() => fileRef.current?.click()}
       >
-        <strong>{busy ?? "Drop files or links here"}</strong>
+        <strong>{busy ?? "Drop files, a whole folder, or links here"}</strong>
         <span className="muted small">
-          PDF, slides (PPTX), Word, text/Markdown, images of notes, audio memos, sample exams, workshop and tutorial sheets. You can also drag a
-          YouTube link from your browser.
+          PDF, slides (PPTX), Word, text/Markdown, images of notes, audio and video recordings (with .srt/.vtt captions), saved YouTube links, sample exams, workshop and tutorial sheets, or a .zip of them.
+          Folders are read with all their subfolders, and folder names like &quot;Tutorials&quot; or &quot;Past exams&quot; set the item type. You can
+          also drag a YouTube link from your browser.
         </span>
-        <input ref={fileRef} type="file" multiple hidden onChange={(e) => e.target.files && upload(e.target.files)} />
+        <div className="row" style={{ justifyContent: "center" }} onClick={(e) => e.stopPropagation()}>
+          <button className="sm" disabled={!!busy} onClick={() => fileRef.current?.click()}>
+            Choose files
+          </button>
+          <button className="sm" disabled={!!busy} onClick={() => folderRef.current?.click()}>
+            📁 Choose a folder
+          </button>
+        </div>
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files) upload(fromInput(e.target.files));
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={folderRef}
+          type="file"
+          hidden
+          // @ts-expect-error: non-standard but supported by every current browser
+          webkitdirectory=""
+          onChange={(e) => {
+            if (e.target.files) upload(fromInput(e.target.files));
+            e.target.value = "";
+          }}
+        />
       </div>
+      {report && (
+        <div className="alert info stack" role="status">
+          <div className="spread">
+            <span>
+              Added {report.added} item{report.added === 1 ? "" : "s"}.
+              {report.skipped.length > 0 && ` Skipped ${report.skipped.length}.`}
+              {report.ignored > 0 && ` Left out ${report.ignored} system or non-study file${report.ignored === 1 ? "" : "s"}.`}
+            </span>
+            <button className="sm ghost" onClick={() => setReport(null)} aria-label="Dismiss">
+              ✕
+            </button>
+          </div>
+          {report.skipped.length > 0 && (
+            <details>
+              <summary style={{ cursor: "pointer" }} className="small">
+                What was skipped
+              </summary>
+              <ul className="small" style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+                {report.skipped.slice(0, 200).map((s, i) => (
+                  <li key={i}>
+                    {s.name}: {s.reason}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
 
       <div className="row">
         <label className="field">
@@ -144,7 +266,7 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
       </div>
 
       <div className="row">
-        <Recorder onRecorded={(f) => upload([f], "audio_memo")} disabled={!!busy} />
+        <Recorder onRecorded={(f) => upload([{ file: f, path: "" }], "audio_memo")} disabled={!!busy} />
         <details className="grow">
           <summary style={{ cursor: "pointer" }} className="small">
             Transcription settings
@@ -172,10 +294,13 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
               </select>
             </label>
             <label className="row">
-              <input type="checkbox" checked={settings.tidy} onChange={(e) => update({ tidy: e.target.checked })} /> Organise transcripts into notes with AI (Claude or Gemini)
+              <input type="checkbox" checked={settings.tidy} onChange={(e) => update({ tidy: e.target.checked })} /> Organise transcripts into notes with AI (set up in Settings)
             </label>
             <label className="row">
               <input type="checkbox" checked={settings.auto} onChange={(e) => update({ auto: e.target.checked })} /> Transcribe new recordings automatically
+            </label>
+            <label className="row" title="Timestamps help you find a spot in the recording; without them transcripts read like plain notes">
+              <input type="checkbox" checked={!settings.stamps} onChange={(e) => update({ stamps: !e.target.checked })} /> Clean up transcripts: remove [mm:ss] timestamps
             </label>
           </div>
           <p className="small muted">
@@ -208,7 +333,9 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
       {added > 0 && (
         <div className="alert info spread">
           <span>
-            {added} item{added > 1 ? "s" : ""} added. {data.tree.length ? "Rebuild the brainmap to include them." : "Build the brainmap when you've added everything."}
+            {added} item{added > 1 ? "s" : ""} added. {data.tree.length
+              ? "Videos and recordings join the brainmap as their own branches; rebuild it to merge everything into one map."
+              : "Build the brainmap when you've added everything."}
           </span>
           <button className="primary" onClick={onBrainmap}>
             Go to brainmap
@@ -223,7 +350,7 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
         ) : (
           <div className="list">
             {data.materials.map((m) => (
-              <MaterialRow key={m.id} m={m} reload={reload} job={jobs[m.id]} onTranscribe={() => transcribe(m)} />
+              <MaterialRow key={m.id} m={m} ai={ai} reload={reload} job={jobs[m.id]} onTranscribe={() => transcribe(m)} />
             ))}
           </div>
         )}
@@ -234,11 +361,13 @@ export function MaterialsTab({ data, reload, onBrainmap }: { data: CourseData; r
 
 function MaterialRow({
   m,
+  ai,
   reload,
   job,
   onTranscribe,
 }: {
   m: Material;
+  ai: boolean;
   reload: () => void;
   job?: { label: string; error?: boolean };
   onTranscribe: () => void;
@@ -248,7 +377,70 @@ function MaterialRow({
   const [text, setText] = useState("");
   const isAudio = isRecording(m);
   const running = job && !job.error;
-  const yt = m.url?.match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([\w-]{6,})/)?.[1];
+  const yt = m.url?.match(/(?:v=|youtu\.be\/|shorts\/|embed\/|live\/)([\w-]{6,})/)?.[1];
+  const [refetch, setRefetch] = useState<{ busy?: boolean; error?: string } | null>(null);
+  const [preview, setPreview] = useState(false);
+  const [layer, setLayer] = useState<{ label: string; error?: boolean } | null>(null);
+  const media = useRef<HTMLMediaElement | null>(null);
+  const canLayer = !!m.path && !!m.scan?.pages.length && !m.scan.layer;
+  // Pages the AI should transcribe (scans, poor OCR, equations) that it hasn't read yet.
+  const unread = m.scan ? [...new Set([...m.scan.pages, ...(m.scan.poor ?? []), ...(m.scan.maths ?? [])])].filter((n) => !m.scan?.ai_pages?.includes(n)) : [];
+  const canReread = ai && !!m.path && unread.length > 0;
+  const [reread, setReread] = useState<{ busy?: boolean; error?: string } | null>(null);
+
+  async function readAgain() {
+    setReread({ busy: true });
+    try {
+      const f = await api<Material>(`/api/materials/${m.id}`, { method: "PATCH", json: { reread: true } });
+      setReread(null);
+      if (full) {
+        setFull(f);
+        setText(f.text ?? "");
+      }
+      reload();
+    } catch (e) {
+      setReread({ error: (e as Error).message });
+    }
+  }
+
+  /** OCR the scanned pages on the server, a batch per request, until the text layer is written. */
+  async function addLayer() {
+    const n = m.scan?.pages.length ?? 0;
+    setLayer({ label: `Reading ${n} scanned page${n === 1 ? "" : "s"} with OCR…` });
+    try {
+      for (;;) {
+        const r = await api<{ done: boolean; read: number; total: number }>(`/api/materials/${m.id}/ocr`, { method: "POST" });
+        if (r.done) break;
+        setLayer({ label: `Read ${r.read} of ${r.total} scanned pages with OCR…` });
+      }
+      setLayer(null);
+      setFull(null);
+      reload();
+    } catch (e) {
+      setLayer({ label: (e as Error).message, error: true });
+    }
+  }
+  const [ytStart, setYtStart] = useState(0);
+
+  /** Jump the recording (or the YouTube player) to a topic's timestamp. */
+  function seek(sec: number) {
+    if (yt) setYtStart(sec);
+    else if (media.current) {
+      media.current.currentTime = sec;
+      media.current.play().catch(() => {});
+    }
+  }
+
+  async function fetchAgain() {
+    setRefetch({ busy: true });
+    try {
+      await api(`/api/materials/${m.id}`, { method: "PATCH", json: { refresh: true } });
+      setRefetch(null);
+      reload();
+    } catch (e) {
+      setRefetch({ error: (e as Error).message });
+    }
+  }
 
   async function toggle() {
     if (!open && !full) {
@@ -276,6 +468,11 @@ function MaterialRow({
             ))}
           </select>
           <strong style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{m.title}</strong>
+          {m.rel_path && (
+            <span className="small muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={m.rel_path}>
+              {m.rel_path.split("/").slice(0, -1).join(" / ")}
+            </span>
+          )}
           {m.status !== "ready" && <span className={`badge ${m.status === "error" ? "dont_know" : "familiar"}`}>{m.status === "error" ? "error" : "needs text"}</span>}
         </div>
         <div className="row">
@@ -289,9 +486,50 @@ function MaterialRow({
               Link
             </a>
           )}
+          {yt && m.status !== "ready" && (
+            <button className="sm" disabled={refetch?.busy} onClick={fetchAgain} title="Fetch the video's transcript again">
+              {refetch?.busy ? "Fetching…" : "Try again"}
+            </button>
+          )}
+          {canLayer && (
+            <button
+              className={`sm${m.status === "ready" ? "" : " primary"}`}
+              disabled={!!layer && !layer.error}
+              onClick={addLayer}
+              title="Read the pages that are pictures with OCR on this computer, and write the text into the PDF so it can be searched and selected"
+            >
+              Add text layer
+            </button>
+          )}
+          {canReread && (
+            <button
+              className="sm"
+              disabled={reread?.busy}
+              onClick={readAgain}
+              title={`Have the AI transcribe page${unread.length === 1 ? "" : "s"} ${unread.join(", ")} from the PDF itself: scans, poor OCR and equations come back as clean text and LaTeX`}
+            >
+              {reread?.busy ? "Reading…" : "Read again"}
+            </button>
+          )}
           {isAudio && m.path && (
             <button className={`sm${m.status === "ready" ? "" : " primary"}`} disabled={!!running} onClick={onTranscribe}>
               {m.status === "ready" ? "Re-transcribe" : "Transcribe"}
+            </button>
+          )}
+          {hasTimestamps(m.text) && !running && (
+            <button
+              className="sm"
+              title="Remove the [mm:ss] timestamps so the transcript reads like plain notes"
+              onClick={async () => {
+                const f = await api<Material>(`/api/materials/${m.id}`, { method: "PATCH", json: { clean: true } });
+                if (full) {
+                  setFull(f);
+                  setText(f.text ?? "");
+                }
+                reload();
+              }}
+            >
+              Clean up
             </button>
           )}
           <button className="sm" onClick={toggle}>
@@ -309,30 +547,54 @@ function MaterialRow({
           </button>
         </div>
       </div>
-      {job ? (
-        <div className={`small ${job.error ? "" : "muted"}`} role="status" style={job.error ? { color: "var(--dont)" } : undefined}>
-          {!job.error && <span className="spinner" aria-hidden />} {job.label}
+      {job || layer ? (
+        <div className={`small ${(job ?? layer)!.error ? "" : "muted"}`} role="status" style={(job ?? layer)!.error ? { color: "var(--dont)" } : undefined}>
+          {!(job ?? layer)!.error && <span className="spinner" aria-hidden />} {(job ?? layer)!.label}
         </div>
       ) : (
         m.note && <div className="small muted">{m.note}</div>
       )}
+      <DigestKeywords d={m.digest} />
+      {reread?.error && (
+        <div className="small" role="alert" style={{ color: "var(--dont)" }}>
+          {reread.error}
+        </div>
+      )}
+      {refetch?.error && (
+        <div className="small" role="status" style={{ color: "var(--dont)" }}>
+          {refetch.error}
+        </div>
+      )}
       {isAudio && m.path && (m.mime ?? "").startsWith("audio/") && (
-        <audio controls preload="none" src={`/api/materials/${m.id}/file`} style={{ width: "100%", marginTop: 6 }} />
+        <audio ref={(el) => void (media.current = el)} controls preload="none" src={`/api/materials/${m.id}/file`} style={{ width: "100%", marginTop: 6 }} />
+      )}
+      {isAudio && m.path && (m.mime ?? "").startsWith("video/") && open && (
+        <video ref={(el) => void (media.current = el)} controls preload="metadata" src={`/api/materials/${m.id}/file`} style={{ width: "100%", maxWidth: 640, maxHeight: 360, marginTop: 6, borderRadius: 8 }} />
       )}
       {yt && open && (
         <iframe
           style={{ width: "100%", maxWidth: 560, aspectRatio: "16/9", border: 0, borderRadius: 8, marginTop: 6 }}
-          src={`https://www.youtube-nocookie.com/embed/${yt}`}
+          src={`https://www.youtube-nocookie.com/embed/${yt}${ytStart ? `?start=${ytStart}&autoplay=1` : ""}`}
           allowFullScreen
           title={m.title}
         />
       )}
       {open && full && (
         <div className="stack" style={{ marginTop: 8 }}>
-          <textarea value={text} onChange={(e) => setText(e.target.value)} style={{ minHeight: 220, fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }} />
+          {full.text?.trim() && <MaterialDigest m={m} ai={ai} onChanged={reload} onSeek={isAudio || yt ? seek : undefined} />}
+          {preview ? (
+            <div className="card" style={{ maxHeight: 420, overflow: "auto" }}>
+              <Markdown>{text}</Markdown>
+            </div>
+          ) : (
+            <textarea value={text} onChange={(e) => setText(e.target.value)} style={{ minHeight: 220, fontFamily: "ui-monospace, monospace", fontSize: "0.85rem" }} />
+          )}
           <div className="row">
             <button className="primary sm" onClick={() => patch({ text })} disabled={text === (full.text ?? "")}>
               Save text
+            </button>
+            <button className="sm" onClick={() => setPreview(!preview)} title="Show the text formatted, with formulas rendered">
+              {preview ? "Edit" : "Preview"}
             </button>
             <span className="small muted">{text.length.toLocaleString()} characters. Edits are searchable and used for the brainmap.</span>
           </div>
