@@ -1,11 +1,14 @@
 import JSZip from "jszip";
 import { aiEnabled, generateText, providerName } from "./ai";
-import type { MaterialKind } from "./types";
+import { findScannedPages, pageList } from "./ocr";
+import { repairNote, repairText } from "./textRepair";
+import type { MaterialKind, ScanInfo } from "./types";
 
 export interface Extracted {
   text: string;
   status: "ready" | "partial" | "error";
   note: string | null;
+  scan?: ScanInfo;
 }
 
 const AUDIO_EXT = /\.(mp3|m4a|wav|ogg|oga|webm|aac|flac|opus)$/i;
@@ -41,7 +44,7 @@ export async function extractFile(buf: Buffer, filename: string, mime: string): 
     if (n.endsWith(".pdf") || mime === "application/pdf") return await extractPdf(buf);
     if (n.endsWith(".docx")) return await extractDocx(buf);
     if (n.endsWith(".pptx")) return await extractPptx(buf);
-    if (n.endsWith(".html") || n.endsWith(".htm")) return ok(stripHtml(buf.toString("utf8")));
+    if (n.endsWith(".html") || n.endsWith(".htm")) return repaired(stripHtml(buf.toString("utf8")));
     if (TEXT_EXT.test(n) || mime.startsWith("text/")) return ok(buf.toString("utf8"));
     if (IMAGE_EXT.test(n) || mime.startsWith("image/")) return await extractImage(buf, mime || "image/png");
     if (AUDIO_EXT.test(n) || VIDEO_EXT.test(n) || mime.startsWith("audio/") || mime.startsWith("video/")) {
@@ -57,6 +60,12 @@ export async function extractFile(buf: Buffer, filename: string, mime: string): 
   }
 }
 
+/** Text with extraction damage repaired, saying what was fixed. */
+function repaired(text: string): Extracted {
+  const { text: fixed, report } = repairText(text);
+  return withNote(ok(fixed), repairNote(report));
+}
+
 function ok(text: string): Extracted {
   const t = text.trim();
   return t ? { text: t, status: "ready", note: null } : { text: "", status: "partial", note: "No text found in this file." };
@@ -66,35 +75,103 @@ async function extractPdf(buf: Buffer): Promise<Extracted> {
   const { extractText, getDocumentProxy } = await import("unpdf");
   const pdf = await getDocumentProxy(new Uint8Array(buf));
   const { text } = await extractText(pdf, { mergePages: false });
-  const pages = (Array.isArray(text) ? text : [text]).map((p, i) => `--- Page ${i + 1} ---\n${p.trim()}`);
-  const joined = pages.join("\n\n");
-  const letters = joined.replace(/--- Page \d+ ---/g, "").replace(/\s/g, "").length;
-  if (letters / Math.max(1, pages.length) > 80) return ok(joined);
+  const raw = (Array.isArray(text) ? text : [text]).map((p) => p.trim());
+  const scan = await findScannedPages(pdf, raw);
+  // Repair the whole document at once: a word spelled right on one page vouches for a fix on another.
+  const { text: repaired, report } = repairText(joinPages(raw));
+  const pages = splitPages(repaired, raw.length);
+  const fixed = repairNote(report);
+  if (!scan.pages.length) return withNote(ok(repaired), fixed);
 
-  // Little or no embedded text: probably a scan. Claude can read the PDF directly.
+  const scanned = new Set(scan.pages);
+  const textPages = raw.length - scan.pages.length;
+  const which = scan.pages.length === raw.length ? "This PDF is scanned pages (pictures without text)" : `Page${scan.pages.length === 1 ? "" : "s"} ${pageList(scan.pages)} ${scan.pages.length === 1 ? "is a picture" : "are pictures"} without text`;
+  // Little or no embedded text: the AI can read the pages directly.
   if (aiEnabled() && buf.length < 30 * 1024 * 1024) {
-    const { text: md, truncated } = await generateText({
-      effort: "low",
-      maxTokens: 32000,
-      prompt: [
-        { type: "document", source: { type: "base64", media_type: "application/pdf", data: buf.toString("base64") } },
-        {
-          type: "text",
-          text: "Transcribe this document into clean Markdown. Keep headings, lists, equations (as LaTeX) and tables. Describe important diagrams in one or two sentences in [brackets]. Output only the transcription.",
-        },
-      ],
-    });
-    return truncated
-      ? { text: md, status: "partial", note: `Scanned PDF transcribed by ${providerName()}, but it was too long to finish. Split the PDF for the rest.` }
-      : { text: md, status: "ready", note: `Scanned PDF transcribed by ${providerName()}.` };
+    try {
+      const part = scan.pages.length === raw.length ? buf : await pickPages(buf, scan.pages);
+      const { text: md, truncated } = await generateText({
+        effort: "low",
+        maxTokens: 32000,
+        prompt: [
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: part.toString("base64") } },
+          {
+            type: "text",
+            text: `Transcribe this document into clean Markdown. Start each page with a line "=== Page N ===" (N counts from 1 in this document). Keep headings, lists, equations (as LaTeX) and tables. Describe important diagrams in one or two sentences in [brackets]. Spell words correctly where the scan is hard to read, using the context. Output only the transcription.`,
+          },
+        ],
+      });
+      const read = transcribedPages(md, scan.pages.length);
+      const all = pages.map((p, i) => (scanned.has(i + 1) ? (read[scan.pages.indexOf(i + 1)] ?? "") : p));
+      const result = repairText(joinPages(all)).text;
+      const by = providerName();
+      return {
+        text: result,
+        status: truncated ? "partial" : "ready",
+        note: truncated
+          ? `${which}; ${by} read them but the PDF was too long to finish. Split it for the rest, or add a text layer.`
+          : `${which}; ${by} read ${scan.pages.length === 1 ? "it" : "them"}. Add a text layer to make the PDF itself searchable.`,
+        scan: { ...scan, text_by: "ai" },
+      };
+    } catch (err) {
+      console.error("AI transcription of scanned pages failed", err);
+    }
   }
-  return { text: joined, status: "partial", note: "This PDF has little selectable text (likely scanned). Choose an AI provider in Settings to transcribe it, or paste notes." };
+  return {
+    text: repaired,
+    // A few pictured pages in a long document still leave plenty to study from.
+    status: textPages >= Math.max(1, raw.length / 2) ? "ready" : "partial",
+    note: `${which}. Use “Add text layer” to read ${scan.pages.length === 1 ? "it" : "them"} with OCR on this computer${aiEnabled() ? "" : ", or choose an AI provider in Settings to transcribe"}.${fixed ? ` ${fixed}` : ""}`,
+    scan,
+  };
+}
+
+const PAGE = /^--- Page (\d+) ---$/m;
+
+export function joinPages(pages: string[]): string {
+  return pages.map((p, i) => `--- Page ${i + 1} ---\n${p}`).join("\n\n");
+}
+
+/** The pages of a text made by joinPages (after editing it), `n` of them. */
+export function splitPages(text: string, n: number): string[] {
+  const out = Array.from({ length: n }, () => "");
+  const parts = text.split(new RegExp(PAGE.source, "m"));
+  for (let i = 1; i + 1 < parts.length; i += 2) {
+    const k = Number(parts[i]) - 1;
+    if (k >= 0 && k < n) out[k] = parts[i + 1].trim();
+  }
+  return out;
+}
+
+/** An AI transcription cut at its "=== Page N ===" lines; without them, all of it is the first page. */
+function transcribedPages(md: string, n: number): string[] {
+  const parts = md.split(/^\s*=+\s*Page\s+(\d+)\s*=+\s*$/im);
+  if (parts.length < 3) return [md.trim()];
+  const out: string[] = Array.from({ length: n }, () => "");
+  for (let i = 1; i + 1 < parts.length; i += 2) {
+    const k = Number(parts[i]) - 1;
+    if (k >= 0 && k < n) out[k] = (out[k] ? out[k] + "\n\n" : "") + parts[i + 1].trim();
+  }
+  return out;
+}
+
+/** A PDF of just these pages (1-based), to send only the scanned ones to the AI. */
+async function pickPages(buf: Buffer, pages: number[]): Promise<Buffer> {
+  const { PDFDocument } = await import("pdf-lib");
+  const src = await PDFDocument.load(buf, { ignoreEncryption: true });
+  const out = await PDFDocument.create();
+  for (const p of await out.copyPages(src, pages.map((n) => n - 1))) out.addPage(p);
+  return Buffer.from(await out.save());
+}
+
+function withNote(e: Extracted, note: string | null): Extracted {
+  return note && e.status === "ready" ? { ...e, note: e.note ? `${e.note} ${note}` : note } : e;
 }
 
 async function extractDocx(buf: Buffer): Promise<Extracted> {
   const mammoth = await import("mammoth");
   const res = await mammoth.extractRawText({ buffer: buf });
-  return ok(res.value);
+  return repaired(res.value);
 }
 
 async function extractPptx(buf: Buffer): Promise<Extracted> {
@@ -121,7 +198,7 @@ async function extractPptx(buf: Buffer): Promise<Extracted> {
     const [title, ...rest] = paras;
     out.push(`Slide ${n}: ${title ?? "(untitled)"}\n${rest.map((r) => `- ${r}`).join("\n")}${notes ? `\nSpeaker notes: ${notes}` : ""}`);
   }
-  return ok(out.join("\n\n"));
+  return repaired(out.join("\n\n"));
 }
 
 async function extractImage(buf: Buffer, mime: string): Promise<Extracted> {
@@ -139,7 +216,7 @@ async function extractImage(buf: Buffer, mime: string): Promise<Extracted> {
       { type: "text", text: "Transcribe all text in this image (e.g. handwritten notes, a whiteboard, a slide) into Markdown. Describe any diagram briefly in [brackets]. Output only the transcription." },
     ],
   });
-  return { text: md, status: "ready", note: `Image transcribed by ${providerName()}.` };
+  return { text: repairText(md).text, status: "ready", note: `Image transcribed by ${providerName()}.` };
 }
 
 function num(f: string) {

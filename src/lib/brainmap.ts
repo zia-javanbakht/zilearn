@@ -2,6 +2,7 @@ import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
 import { offlineDigest } from "./digest";
 import { splitSections, topKeywords, truncate } from "./text";
+import { checkKeywords, repairTerm } from "./textRepair";
 import type { NewTopic } from "./store";
 import type { Course, Material } from "./types";
 import { MATERIAL_KIND_LABELS } from "./types";
@@ -65,9 +66,11 @@ Build a brainmap of the course content:
 - Order branches and subtopics in a sensible learning order (prerequisites first).
 - Mark importance 3 for topics that are core or appear in sample exams.
 - Cite source material ids for each topic.
-- Do not create topics for administrative content (assessment dates, course logistics).`;
+- Do not create topics for administrative content (assessment dates, course logistics).
+- The text came from PDF extraction, OCR or speech recognition and may be damaged ("e ect" for "effect", "rst" for "first", misread or misheard terms). Read it in context and spell every title, summary and key term correctly; key terms must be terms the materials actually use.`;
 
   const out = await generateStructured({ schema: TopicSchema, prompt, effort: "medium", maxTokens: 32000 });
+  const textOf = new Map(materials.map((m, i) => [`M${i + 1}`, `${m.title}\n${m.text ?? ""}`]));
   const seen = new Set<string>();
   const topics: NewTopic[] = [];
   for (const t of out.topics) {
@@ -78,12 +81,19 @@ Build a brainmap of the course content:
       parent_ref: t.parent_ref && t.parent_ref !== t.ref ? t.parent_ref : null,
       title: t.title.trim(),
       summary: t.summary.trim(),
-      keywords: t.keywords.slice(0, 8),
+      keywords: groundedTerms(t.keywords, t.sources.map((r) => textOf.get(r.trim()) ?? "").join("\n")),
       importance: t.importance,
       material_ids: t.sources.map((s) => refs.get(s.trim())).filter((x): x is string => Boolean(x)),
     });
   }
   return { topics, summary: out.course_summary };
+}
+
+/** Key terms spelt as the sources spell them; ones the sources never use are dropped unless that leaves too few. */
+function groundedTerms(terms: string[], sources: string): string[] {
+  if (!sources.trim()) return terms.slice(0, 8);
+  const checked = checkKeywords(terms, sources, { max: 8 });
+  return checked.length >= Math.min(3, terms.length) ? checked : terms.map((t) => repairTerm(t, sources)).filter(Boolean).slice(0, 8);
 }
 
 /** Offline structuring: one branch per material, subtopics from detected headings. */
@@ -124,7 +134,7 @@ export function heuristicTopics(materials: Material[]): NewTopic[] {
         parent_ref: ref,
         title: truncate(s.heading, 60),
         summary: firstSentences(s.body, 2),
-        keywords: topKeywords(`${s.heading} ${s.body}`, 6),
+        keywords: checkKeywords(topKeywords(`${s.heading} ${s.body}`, 10), `${s.heading} ${s.body}`, { strict: true, max: 6 }),
         material_ids: [m.id],
         importance: 2,
       });

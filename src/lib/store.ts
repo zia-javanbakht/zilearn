@@ -16,6 +16,7 @@ import type {
   PlanItem,
   Podcast,
   ReviewNote,
+  ScanInfo,
   Topic,
   TopicNode,
 } from "./types";
@@ -95,17 +96,21 @@ export function deleteCourse(id: string) {
 /* ---------------- Materials ---------------- */
 
 function mapMaterial(r: Row): Material {
-  return { ...(r as unknown as Material), digest: json<Material["digest"]>(r.digest, null) };
+  return { ...(r as unknown as Material), digest: json<Material["digest"]>(r.digest, null), scan: json<Material["scan"]>(r.scan, null) };
 }
 
 export function listMaterials(courseId: string, withText = false): Material[] {
-  const cols = withText ? "*" : "id, course_id, kind, title, source_type, filename, mime, path, url, substr(text, 1, 400) AS text, status, note, rel_path, digest, created_at";
+  const cols = withText ? "*" : "id, course_id, kind, title, source_type, filename, mime, path, url, substr(text, 1, 400) AS text, status, note, rel_path, digest, scan, created_at";
   return (db().prepare(`SELECT ${cols} FROM materials WHERE course_id = ? ORDER BY created_at, rowid`).all(courseId) as Row[]).map(mapMaterial);
 }
 
 export function getMaterial(id: string): Material | null {
   const r = db().prepare("SELECT * FROM materials WHERE id = ?").get(id) as Row | undefined;
   return r ? mapMaterial(r) : null;
+}
+
+export function setScan(id: string, scan: ScanInfo | null) {
+  db().prepare("UPDATE materials SET scan = ? WHERE id = ?").run(scan ? JSON.stringify(scan) : null, id);
 }
 
 export function setDigest(id: string, digest: Digest | null) {
@@ -117,9 +122,9 @@ export function insertMaterial(m: Omit<Material, "id" | "created_at">): Material
   const d = db();
   d.transaction(() => {
     d.prepare(
-      `INSERT INTO materials (id, course_id, kind, title, source_type, filename, mime, path, url, text, status, note, sha256, rel_path)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).run(id, m.course_id, m.kind, m.title, m.source_type, m.filename, m.mime, m.path, m.url, m.text, m.status, m.note, m.sha256 ?? null, m.rel_path ?? null);
+      `INSERT INTO materials (id, course_id, kind, title, source_type, filename, mime, path, url, text, status, note, sha256, rel_path, scan)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(id, m.course_id, m.kind, m.title, m.source_type, m.filename, m.mime, m.path, m.url, m.text, m.status, m.note, m.sha256 ?? null, m.rel_path ?? null, m.scan ? JSON.stringify(m.scan) : null);
     indexMaterialText(id, m.course_id, `${m.title}\n${m.text ?? ""}`);
   })();
   return getMaterial(id)!;

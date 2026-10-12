@@ -90,7 +90,18 @@ export interface Material {
   sha256?: string | null; // content hash of an uploaded file
   rel_path?: string | null; // e.g. "Week 3/Lecture notes.pdf" when imported from a folder or zip
   digest?: Digest | null; // summary, key terms and topics of this material
+  scan?: ScanInfo | null; // PDF pages that are pictures without text, and what was done about them
   created_at: string;
+}
+
+/** Pages of a PDF that are only pictures (a scan without OCR). */
+export interface ScanInfo {
+  pages: number[]; // 1-based
+  total: number;
+  /** OCR text was written into the PDF itself, so the file is searchable. */
+  layer?: boolean;
+  /** Who read the pictured pages for the material's text, if anyone. */
+  text_by?: "ai" | "ocr" | null;
 }
 
 export interface DigestTopic {

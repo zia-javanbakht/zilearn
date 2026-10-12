@@ -2,7 +2,8 @@ import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
 import { splitSections, stem, topKeywords, truncate } from "./text";
 import { stripTimestamps } from "./transcript";
-import { addTopic, getMaterial, listTopics, normTitle, setDigest } from "./store";
+import { addTopic, getMaterial, listTopics, normTitle, setDigest, updateMaterial } from "./store";
+import { checkKeywords, isGarbled, isWord, repairTerm, repairText } from "./textRepair";
 import type { Digest, DigestTopic, Material } from "./types";
 
 /**
@@ -13,11 +14,14 @@ import type { Digest, DigestTopic, Material } from "./types";
  */
 
 const RECORDING_KINDS = new Set(["youtube", "video", "audio_memo"]);
+// A recording is summarised whole (its topics run its full length); a document's opening pages are
+// enough to name its terms and catch the extraction's misspellings, and keep the cost down.
 const MAX_AI_CHARS = 200_000;
+const MAX_AI_DOC_CHARS = 60_000;
 
-/** Recordings are summarised by the AI on import; other materials keep the offline digest unless asked. */
-export function wantsAiDigest(m: Pick<Material, "kind">): boolean {
-  return aiEnabled() && RECORDING_KINDS.has(m.kind);
+/** With an AI provider every material gets an AI digest after import: it reads the text in context. */
+export function wantsAiDigest(): boolean {
+  return aiEnabled();
 }
 
 const TopicSchema = z.object({
@@ -31,33 +35,103 @@ const DigestSchema = z.object({
   topics: z
     .array(TopicSchema.extend({ subtopics: z.array(TopicSchema).describe("0-6 subtopics") }))
     .describe("3-10 main topics in the order they are covered"),
+  corrections: z
+    .array(
+      z.object({
+        wrong: z.string().describe("The misspelt word or words exactly as they appear in the text"),
+        right: z.string().describe("The correct spelling"),
+        context: z.string().describe("The wrong word with 2-4 words around it, copied exactly from the text, so the right place is fixed"),
+      }),
+    )
+    .describe("Words the text extraction, OCR or speech recognition got wrong (broken ligatures like 'e ect' for 'effect', misread letters, misheard terms). Not style or grammar. Empty if none."),
 });
 
+export type Correction = z.infer<typeof DigestSchema>["corrections"][number];
+
 export async function makeDigest(m: Pick<Material, "title" | "kind" | "text">, useAi: boolean): Promise<Digest | null> {
+  return (await digestWithFixes(m, useAi))?.digest ?? null;
+}
+
+/** A digest, plus (from the AI) the words it found misspelt in the text. */
+export async function digestWithFixes(m: Pick<Material, "title" | "kind" | "text">, useAi: boolean): Promise<{ digest: Digest; corrections: Correction[] } | null> {
   const text = (m.text ?? "").trim();
   if (!text) return null;
   if (useAi && aiEnabled()) {
     try {
+      const recording = RECORDING_KINDS.has(m.kind);
       const out = await generateStructured({
         schema: DigestSchema,
         effort: "low",
         maxTokens: 8000,
-        context: `<material title="${m.title.replace(/"/g, "'")}" kind="${m.kind}">\n${truncate(text, MAX_AI_CHARS)}\n</material>`,
-        prompt:
-          "Summarise this course material for a student's study map: an overview, the key terms, and the topics it covers in order with their subtopics. Keep only subject content (no greetings, logistics or small talk). Fix obvious speech-recognition errors in terms. Use the [mm:ss] markers, when present, for where each topic starts.",
+        context: `<material title="${m.title.replace(/"/g, "'")}" kind="${m.kind}">\n${truncate(text, recording ? MAX_AI_CHARS : MAX_AI_DOC_CHARS)}\n</material>`,
+        prompt: `Summarise this course material for a student's study map: an overview, the key terms, and the topics it covers in order with their subtopics. Keep only subject content (no greetings, logistics or small talk). Use the [mm:ss] markers, when present, for where each topic starts.
+
+The text came from ${recording ? "speech recognition" : "PDF or document extraction, sometimes OCR"} and can be damaged: letters lost where a font joined ff/fi/fl ("e ect", "di erent", "rst" for "first"), words split or run together, misread letters ("rn" for "m", "1" for "l"), misheard technical terms. Read it in context:
+- Write every key term, title and summary with correct spelling, as the subject spells it. Key terms must be terms the material actually uses (in the reader's words, not invented ones).
+- List each damaged word you notice under corrections, with a few words of exact context. Don't list style, grammar or British/American spelling.`,
       });
-      const clean = (t: z.infer<typeof TopicSchema>): DigestTopic => ({ title: t.title.trim(), start: normStart(t.start), summary: t.summary.trim() });
+      const clean = (t: z.infer<typeof TopicSchema>): DigestTopic => ({ title: repairTerm(t.title, text), start: normStart(t.start), summary: t.summary.trim() });
+      const keywords = out.keywords.map((k) => k.trim()).filter(Boolean);
+      const checked = checkKeywords(keywords, text, { max: 12 });
       return {
-        summary: out.summary.trim(),
-        keywords: out.keywords.map((k) => k.trim()).filter(Boolean).slice(0, 12),
-        topics: out.topics.slice(0, 12).map((t) => ({ ...clean(t), subtopics: t.subtopics.slice(0, 8).map(clean) })),
-        by: "ai",
+        digest: {
+          summary: out.summary.trim(),
+          // Terms the text never mentions are dropped; if that would leave too few, the AI's list stands.
+          keywords: checked.length >= Math.min(4, keywords.length) ? checked : keywords.slice(0, 12),
+          topics: out.topics.slice(0, 12).map((t) => ({ ...clean(t), subtopics: t.subtopics.slice(0, 8).map(clean) })),
+          by: "ai",
+        },
+        corrections: out.corrections ?? [],
       };
     } catch (err) {
       console.error("AI digest failed; using the offline one", err);
     }
   }
-  return offlineDigest(text);
+  return { digest: offlineDigest(text), corrections: [] };
+}
+
+/**
+ * Apply the AI's spelling corrections to the text, carefully: a fix must be a small change of spelling
+ * (not a rewrite), and a real word is only changed in the place the AI quoted ("form" -> "from" there,
+ * not everywhere). Returns the text and the fixes made.
+ */
+export function applyCorrections(text: string, corrections: Correction[]): { text: string; applied: string[] } {
+  const applied: string[] = [];
+  const squash = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  for (const c of corrections) {
+    const wrong = c.wrong?.trim();
+    const right = c.right?.trim();
+    if (!wrong || !right || wrong === right || wrong.length > 40 || right.length > 40 || /\n/.test(wrong + right)) continue;
+    const a = squash(wrong);
+    const b = squash(right);
+    if (!b || distance(a, b) > Math.max(2, Math.ceil(Math.max(a.length, b.length) * 0.4))) continue;
+    const esc = wrong.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+    const word = new RegExp(`(?<![A-Za-z])${esc}(?![A-Za-z])`, "g");
+    const ctx = c.context?.trim();
+    const at = ctx ? text.replace(/\s+/g, " ").indexOf(ctx.replace(/\s+/g, " ")) : -1;
+    let next = text;
+    if (ctx && at >= 0 && ctx.includes(wrong)) {
+      // Fix it inside the quoted context only (found again in the original spacing).
+      const ctxRe = new RegExp(ctx.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+"));
+      next = text.replace(ctxRe, (hit) => hit.replace(new RegExp(esc), right));
+    } else if (!wrong.split(/\s+/).every((w) => isWord(w.toLowerCase()))) {
+      // Not a real word anywhere: safe to fix every occurrence.
+      next = text.replace(word, right);
+    }
+    if (next !== text) {
+      text = next;
+      applied.push(`"${wrong}" → "${right}"`);
+    }
+  }
+  return { text, applied };
+}
+
+function distance(a: string, b: string): number {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
 }
 
 function normStart(s: string | null | undefined): string | null {
@@ -75,14 +149,20 @@ export function digestNow(materials: Material[]): Material[] {
   });
 }
 
-/** Replace the offline digest of recordings with an AI one (run after the response, it can take a while). */
+/** Replace the offline digest with an AI one (run after the response, it can take a while), fixing the typos it finds. */
 export async function upgradeDigests(ids: string[]): Promise<void> {
   for (const id of ids) {
     const m = getMaterial(id);
-    if (!m?.text?.trim() || m.digest?.by === "ai" || !wantsAiDigest(m)) continue;
-    const digest = await makeDigest(m, true);
+    if (!m?.text?.trim() || m.digest?.by === "ai" || !wantsAiDigest()) continue;
+    const r = await digestWithFixes(m, true);
     // Skip if the text was edited meanwhile; that edit made its own digest.
-    if (digest?.by === "ai" && getMaterial(id)?.text === m.text) setDigest(id, digest);
+    if (r?.digest.by !== "ai" || getMaterial(id)?.text !== m.text) continue;
+    const { text, applied } = applyCorrections(m.text, r.corrections);
+    if (applied.length) {
+      const note = `Corrected ${applied.length} misspelt word${applied.length === 1 ? "" : "s"} from the extraction (e.g. ${applied.slice(0, 2).join(", ")}).`;
+      updateMaterial(id, { text, note: m.note ? `${m.note} ${note}` : note });
+    }
+    setDigest(id, r.digest);
   }
 }
 
@@ -129,7 +209,9 @@ const STAMP = /\[((?:\d{1,2}:)?\d{1,2}:\d{2})\]/;
 /** Text without LaTeX, so "\\eta \\nabla" isn't taken for a key term. */
 const noMath = (s: string) => s.replace(/\$\$[\s\S]*?\$\$|\$[^$\n]*\$|\\\(.*?\\\)/g, " ");
 
-export function offlineDigest(text: string): Digest {
+export function offlineDigest(raw: string): Digest {
+  // Text saved before extraction repairs existed may still be broken ("e ect"); terms and summary use the repaired form.
+  const text = repairText(raw).text;
   const plain = stripTimestamps(text);
   const terms = noMath(plain);
   const sections = splitSections(text).filter((s) => s.heading);
@@ -149,7 +231,8 @@ export function offlineDigest(text: string): Digest {
   }
   const phrases = topPhrases(terms, 6).filter((p) => p.count >= 2).map((p) => p.phrase);
   const covered = new Set(phrases.flatMap((p) => p.split(" ").map(stem)));
-  const keywords = [...phrases, ...topKeywords(terms, 12).filter((w) => !covered.has(stem(w)))].slice(0, 10);
+  // Only terms the text really contains, in its own spelling, with no extraction fragments.
+  const keywords = checkKeywords([...phrases, ...topKeywords(terms, 16).filter((w) => !covered.has(stem(w)))], terms, { strict: true, max: 10 });
   return { summary: keySentences(plain, 3), keywords, topics: topics.filter((t) => t.title), by: "offline" };
 }
 
@@ -234,7 +317,9 @@ export function keySentences(raw: string, n: number): string {
     .replace(/^\s*#{1,6}\s+.*$/gm, "")
     .replace(/^\s*([-*+]|\d+[.)])\s+/gm, "")
     .trim();
-  const sentences = (text.replace(/\s+/g, " ").match(/[^.!?]+[.!?]+/g) ?? [text]).map((s) => s.trim()).filter((s) => s.split(" ").length >= 6 && s.length <= 400);
+  const sentences = (text.replace(/\s+/g, " ").match(/[^.!?]+[.!?]+/g) ?? [text])
+    .map((s) => s.trim())
+    .filter((s) => s.split(" ").length >= 6 && s.length <= 400 && !isGarbled(s));
   if (!sentences.length) return truncate(text.replace(/\s+/g, " ").trim(), 300);
   const weight = new Map(topKeywords(text, 25).map((w, i) => [stem(w), 25 - i]));
   const scored = sentences.map((s, i) => {
