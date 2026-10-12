@@ -67,6 +67,9 @@ describe("page quality", () => {
   it("spots pages of equations the text layer can't carry", () => {
     expect(mathsHeavy("Equilibrium gives\nDiv P + f0 = 0 in B0 (12)\nand the weak form\nG(φ, η) = 0 (13)")).toBe(true);
     expect(mathsHeavy("The results agree with Simo and Rifai (1990) and with the tests of Wilson (19)")).toBe(false);
+    // abs2024 p. 5: one numbered equation whose exponent and logarithm the text layer flattens.
+    expect(mathsHeavy("The Weibull distribution gives the strength:\nσ = σ0 [ln(1/(1 − η))]1/m (1)\nwhere m is the shape parameter.")).toBe(true);
+    expect(mathsHeavy("The strength is drawn from\nln\n1 − η\n(1)\nwhere η is a random number in [0,1].")).toBe(true);
     expect(mathsHeavy(["∂Ψ", "∂E", "= S", "1", "2", "(λ2 − 1)", "Some prose that explains the derivation step by step."].join("\n"))).toBe(true);
   });
 });
@@ -151,6 +154,21 @@ describe("AI transcription of pages", () => {
     expect([...out.keys()].sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 9]);
     expect(out.get(6)).toBe("## Read 6-6");
     expect(out.get(9)).toBe("## Read 2-2");
+  });
+
+  it("sends the same bytes for the same pages on every run", async () => {
+    const sent: string[] = [];
+    generateText.mockReset();
+    generateText.mockImplementation(async ({ prompt }: { prompt: { source?: { data: string } }[] }) => {
+      sent.push(prompt[0].source!.data);
+      return { text: "=== Page 1 ===\nx", truncated: false };
+    });
+    const { transcribePages } = await import("@/lib/extract");
+    const buf = await pdf(2);
+    await transcribePages(buf, [2]);
+    await new Promise((r) => setTimeout(r, 1100));
+    await transcribePages(buf, [2]);
+    expect(sent[0]).toBe(sent[1]);
   });
 
   it("skips a batch whose answer has no page markers", async () => {

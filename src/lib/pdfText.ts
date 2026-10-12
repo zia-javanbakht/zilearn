@@ -271,18 +271,20 @@ export function isPoor(q: PageQuality, ocrLayer: boolean): boolean {
 export const OCR_PRODUCER = /paper capture|capture|scan|abbyy|finereader|omnipage|readiris|tesseract|ocr|kofax|xerox|canon|ricoh|kodak|fujitsu|digital sender|imagerunner|hp digital/i;
 
 /**
- * A page whose maths the text layer can't carry: numbered display equations, or lines that are mostly
+ * A page whose maths the text layer can't carry: a numbered display equation, or lines that are mostly
  * symbols and single letters (fractions and sub/superscripts split onto lines of their own).
  */
 export function mathsHeavy(text: string): boolean {
   const lines = text.split("\n").filter((l) => l.trim());
   if (!lines.length) return false;
-  const numbered = lines.filter((l) => /\S\s*\(\d{1,3}[a-z]?\)\s*$/.test(l) && !/[a-z]{4,}[.,]?\s*\(\d{1,3}\)\s*$/.test(l)).length;
+  // The number may end the equation's line or sit on a line of its own after it.
+  const numbered = lines.filter((l) => /(?:\S\s*|^\s*)\(\d{1,3}[a-z]?\)\s*$/.test(l) && !/[a-z]{4,}[.,]?\s*\(\d{1,3}\)\s*$/.test(l)).length;
   const scraps = lines.filter((l) => {
     const t = l.trim();
     if (t.length > 25) return false;
     const letters = (t.match(/[A-Za-z]{3,}/g) ?? []).length;
     return letters <= 1 && /[=+−\-−∫∑∂∇·×/^_()[\]{}|0-9α-ωΑ-Ω]/.test(t);
   }).length;
-  return numbered >= 2 || scraps >= 6 || (numbered >= 1 && scraps >= 3);
+  // One numbered equation is enough: its sub- and superscripts, bars and fractions are lost all the same.
+  return numbered >= 1 || scraps >= 6;
 }

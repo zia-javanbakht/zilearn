@@ -187,7 +187,7 @@ const TRANSCRIBE = (n: number) =>
   `Transcribe ${n === 1 ? "this page" : `these ${n} pages`} of a PDF into clean Markdown, so a student can learn from it. Start each page with a line "=== Page N ===" (N counts from 1 in this document).
 - Headings as Markdown headings (# for the document title, ## for sections, ### below), with their numbers.
 - Every equation in LaTeX: inline as $...$, display as $$...$$ on its own lines, keeping its number as \\tag{n}. Keep primes, bars, hats, tildes, transposes and inverses, bold vectors and tensors, and blackboard bold exactly as printed.
-- Tables as Markdown tables. A figure becomes one line "[Figure n: what it shows]"; don't copy the labels inside figures into the text.
+- Tables as Markdown tables, with their printed captions. For a figure, copy its printed caption word for word ("Figure 4. Illustration of …") on a line of its own, followed by a one-sentence description of what it shows in square brackets; don't copy the labels inside figures into the text.
 - Leave out running headers and footers, page numbers, and line-end hyphens (join the word).
 - If the page is a scan, fix OCR errors from the context, but never invent what you can't read: write [unreadable] instead.
 Output only the transcription.`;
@@ -227,6 +227,10 @@ async function pickPages(buf: Buffer, pages: number[]): Promise<Buffer> {
   const src = await PDFDocument.load(buf, { ignoreEncryption: true });
   const out = await PDFDocument.create();
   for (const p of await out.copyPages(src, pages.map((n) => n - 1))) out.addPage(p);
+  // Fixed dates, so the same pages give the same bytes (and can be cached) on every run.
+  const epoch = new Date(0);
+  out.setCreationDate(epoch);
+  out.setModificationDate(epoch);
   return Buffer.from(await out.save());
 }
 
