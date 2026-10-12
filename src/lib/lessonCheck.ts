@@ -97,7 +97,8 @@ function setPath(doc: LessonDoc, path: string, value: string | null) {
 export function lintLesson(doc: LessonDoc): TextProblem[] {
   const out: TextProblem[] = [];
   for (const [path, raw] of texts(doc)) {
-    const text = stripHtml(normalizeMath(raw));
+    // "Faded example" is the method's name, not the student's.
+    const text = stripHtml(normalizeMath(raw)).replace(/\bfaded (example|problem)(s?)\b/gi, (_, w: string, pl: string) => `partly worked ${w.toLowerCase()}${pl}`);
     if (text !== raw) setPath(doc, path, text);
     const problems = mathProblems(text);
     if (problems.length) out.push({ path, text, problems });
@@ -143,6 +144,18 @@ export interface Spoiler {
   paths: string[];
   source: string;
   numbers: string[];
+  /** "data": the same numbers, which gives the answer away; "wording": the same setup and phrasing, which pre-solves it. */
+  kind: "data" | "wording";
+}
+
+/** Runs of three words, with numbers and maths as #, to compare how two problems are set up and worded. */
+function shingles(s: string): Set<string> {
+  const w = s
+    .toLowerCase()
+    .replace(/\$[^$]*\$/g, " # ")
+    .replace(/\d+(?:\.\d+)?/g, "#")
+    .match(/[a-z#]+/g) ?? [];
+  return new Set(w.slice(2).map((_, i) => w.slice(i, i + 3).join(" ")));
 }
 
 /**
@@ -150,22 +163,28 @@ export interface Spoiler {
  * which would hand them the answer before they have tried it.
  */
 export function spoilers(doc: LessonDoc, questions: { text: string; source: string }[]): Spoiler[] {
-  const qs = questions.map((q) => ({ ...q, nums: numbersIn(q.text) })).filter((q) => q.nums.size >= 2);
+  const qs = questions.map((q) => ({ ...q, nums: numbersIn(q.text), sh: shingles(q.text) }));
   if (!qs.length) return [];
   const units: { paths: string[]; text: string }[] = [];
   for (const [i, x] of doc.sections.entries())
     for (const [j, b] of x.blocks.entries())
       if (b.kind === "example" || b.solution)
-        units.push({ paths: [`sections.${i}.blocks.${j}.body`, ...(["solution", "try_steps", "try_answer"] as const).filter((k) => b[k]).map((k) => `sections.${i}.blocks.${j}.${k}`)], text: b.body });
+        units.push({ paths: [`sections.${i}.blocks.${j}.body`, ...(["solution", "try_steps", "try_answer"] as const).filter((k) => b[k]).map((k) => `sections.${i}.blocks.${j}.${k}`)], text: `${b.title}\n${b.body}` });
   for (const [k, list] of [["recall", doc.recall], ["check_yourself", doc.check_yourself]] as const)
     for (const [i, q] of list.entries()) units.push({ paths: [`${k}.${i}.question`, `${k}.${i}.answer`], text: q.question });
   const out: Spoiler[] = [];
   for (const u of units) {
     const nums = numbersIn(u.text);
+    const sh = shingles(u.text);
     for (const q of qs) {
       const shared = [...q.nums].filter((n) => nums.has(n));
-      if (shared.length >= 2 && shared.length >= 0.6 * q.nums.size) {
-        out.push({ paths: u.paths, source: q.source, numbers: shared });
+      if (q.nums.size >= 2 && shared.length >= 2 && shared.length >= 0.6 * q.nums.size) {
+        out.push({ paths: u.paths, source: q.source, numbers: shared, kind: "data" });
+        break;
+      }
+      // The same setup in the same words with new numbers still walks the student through their own question.
+      if (q.sh.size >= 10 && [...q.sh].filter((x) => sh.has(x)).length >= 0.3 * q.sh.size) {
+        out.push({ paths: u.paths, source: q.source, numbers: [], kind: "wording" });
         break;
       }
     }
@@ -175,7 +194,7 @@ export function spoilers(doc: LessonDoc, questions: { text: string; source: stri
 
 /** Removes the blocks and questions behind spoilers that couldn't be rewritten. */
 function dropSpoilers(doc: LessonDoc, sp: Spoiler[]) {
-  const gone = new Set(sp.map((x) => x.paths[0].split(".").slice(0, -1).join(".")));
+  const gone = new Set(sp.filter((x) => x.kind === "data").map((x) => x.paths[0].split(".").slice(0, -1).join(".")));
   for (const x of doc.sections) x.blocks = x.blocks.filter((_, j) => !gone.has(`sections.${doc.sections.indexOf(x)}.blocks.${j}`));
   doc.recall = doc.recall.filter((_, i) => !gone.has(`recall.${i}`));
   doc.check_yourself = doc.check_yourself.filter((_, i) => !gone.has(`check_yourself.${i}`));
@@ -203,7 +222,9 @@ export async function checkLesson(doc: LessonDoc, practice: { text: string; sour
     for (const sp of spoiled)
       for (const path of sp.paths)
         (fields.get(path) ?? fields.set(path, []).get(path)!).push(
-          `Reuses the student's own question (${sp.source}, same numbers ${sp.numbers.join(", ")}), which would give its answer away. Rewrite it as a new problem of the same type with different numbers and a different setting, and recompute the working and answer so they stay correct and consistent across the fields listed together.`,
+          sp.kind === "data"
+            ? `Reuses the student's own question (${sp.source}, same numbers ${sp.numbers.join(", ")}), which would give its answer away. Rewrite it as a new problem of the same type with different numbers and a different setting, and recompute the working and answer so they stay correct and consistent across the fields listed together.`
+            : `Copies the setup and wording of the student's own question (${sp.source}), which walks them through it before they try it. Rewrite it as a different problem on the same idea: a different physical setting, different given and asked quantities, your own wording; recompute the working and answer so they stay correct and consistent across the fields listed together.`,
         );
     try {
       const { fixes } = await generateStructured({
@@ -248,6 +269,45 @@ function refereeFields(doc: LessonDoc): [string, string][] {
   return out;
 }
 
+/** The referee's instructions and the fields it may correct. */
+export function refereePrompt(doc: LessonDoc, framing: string[] = []): string {
+  const fields = refereeFields(doc);
+  const tested = new Set([...doc.check_yourself].map((q) => q.objective).filter((n): n is number => typeof n === "number"));
+  const untested = doc.objectives.map((_, i) => i + 1).filter((n) => !tested.has(n));
+  return `You are refereeing a lesson written for a student from the materials above. Check it like a careful examiner and correct only real errors:
+- Physics, maths and engineering mistakes, including approximations stated with the wrong accuracy.
+- Statements that contradict another part of the lesson or the student's sources (including values quoted from them).
+- Questions whose data don't agree with their answers or with each other; recompute every number you can.
+- Sources that don't state the block's claim: set the right title plus timestamp, section or question number, or an empty string if the claim isn't in the sources.
+- Section headings that promise something their section doesn't teach.
+- Figure captions that state a quantity an example or question asks the student to find.${framing.length ? `\n- How the lesson uses its key terms, diagrams and words (fix by editing the fields named, e.g. a block body or a diagram box label):\n  - ${framing.slice(0, 8).join("\n  - ")}` : ""}${untested.length && doc.check_yourself.length ? `\n- Objectives ${untested.join(", ")} have no check_yourself question. Rewrite the least useful check_yourself questions (question and answer) so each of these objectives is tested.` : ""}
+Leave style alone, keep the student's notation, and keep maths KaTeX-compatible ($...$ and $$...$$). Return an empty list if nothing is wrong.
+
+${fields.map(([path, text]) => `<field path="${path}">\n${text}\n</field>`).join("\n")}`;
+}
+
+/** Applies the referee's corrections in place; returns what was fixed. */
+export function applyReferee(doc: LessonDoc, corrections: z.infer<typeof RefereeSchema>["corrections"]): string[] {
+  const paths = new Set(refereeFields(doc).map(([p]) => p));
+  const done: string[] = [];
+  for (const c of corrections) {
+    if (!paths.has(c.path)) continue;
+    if (c.path.endsWith(".caption")) {
+      const [, i, , j] = c.path.split(".");
+      const f = doc.sections[+i]?.blocks[+j]?.figure;
+      if (f) f.caption = c.text;
+    } else if (/\.figure\.diagram\.nodes\.\d+\.label$/.test(c.path)) {
+      const [, i, , j, , , , k] = c.path.split(".");
+      const n = doc.sections[+i]?.blocks[+j]?.figure?.diagram?.nodes[+k];
+      if (n) n.label = c.text;
+    } else setPath(doc, c.path, c.path.endsWith(".source") ? c.text.trim() || null : normalizeMath(c.text));
+    done.push(`${c.path}: ${c.problem}`);
+  }
+  return done;
+}
+
+export { RefereeSchema };
+
 /**
  * A second reader for the lesson, with the student's sources: physics and maths errors, statements that
  * contradict each other or the sources, numbers that don't agree between a question and its answer,
@@ -256,36 +316,9 @@ function refereeFields(doc: LessonDoc): [string, string][] {
  */
 export async function refereeLesson(doc: LessonDoc, context: string, framing: string[] = []): Promise<string[]> {
   if (!aiEnabled()) return [];
-  const fields = refereeFields(doc);
-  const paths = new Set(fields.map(([p]) => p));
-  const tested = new Set([...doc.check_yourself].map((q) => q.objective).filter((n): n is number => typeof n === "number"));
-  const untested = doc.objectives.map((_, i) => i + 1).filter((n) => !tested.has(n));
   try {
-    const { corrections } = await generateStructured({
-      schema: RefereeSchema,
-      effort: "medium",
-      maxTokens: 10000,
-      context,
-      prompt: `You are refereeing a lesson written for a student from the materials above. Check it like a careful examiner and correct only real errors:
-- Physics, maths and engineering mistakes, including approximations stated with the wrong accuracy.
-- Statements that contradict another part of the lesson or the student's sources.
-- Questions whose data don't agree with their answers or with each other; recompute every number you can.
-- Sources that don't state the block's claim: set the right title plus timestamp, section or question number, or an empty string if the claim isn't in the sources.
-- Figure captions that state a quantity an example or question asks the student to find.${framing.length ? `\n- How the lesson uses its key terms and diagrams (fix by editing the fields named, e.g. a block body or a diagram box label):\n  - ${framing.slice(0, 6).join("\n  - ")}` : ""}${untested.length && doc.check_yourself.length ? `\n- Objectives ${untested.join(", ")} have no check_yourself question. Rewrite the least useful check_yourself questions (question and answer) so each of these objectives is tested.` : ""}
-Leave style alone, keep the student's notation, and keep maths KaTeX-compatible ($...$ and $$...$$). Return an empty list if nothing is wrong.
-
-${fields.map(([path, text]) => `<field path="${path}">\n${text}\n</field>`).join("\n")}`,
-    });
-    const done: string[] = [];
-    for (const c of corrections) {
-      if (!paths.has(c.path)) continue;
-      if (c.path.endsWith(".caption")) {
-        const [, i, , j] = c.path.split(".");
-        const f = doc.sections[+i]?.blocks[+j]?.figure;
-        if (f) f.caption = c.text;
-      } else setPath(doc, c.path, c.path.endsWith(".source") ? c.text.trim() || null : normalizeMath(c.text));
-      done.push(`${c.path}: ${c.problem}`);
-    }
+    const { corrections } = await generateStructured({ schema: RefereeSchema, effort: "medium", maxTokens: 10000, context, prompt: refereePrompt(doc, framing) });
+    const done = applyReferee(doc, corrections);
     if (done.length) console.info(`Lesson refereed: ${done.length} correction(s)\n${done.join("\n")}`);
     return done;
   } catch (e) {

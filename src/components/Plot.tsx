@@ -27,7 +27,7 @@ export function Plot({ spec }: { spec: PlotSpec }) {
   const drawn = useMemo(() => {
     const curves = spec.curves.flatMap((c, i) => {
       try {
-        return [{ label: plainLabel(c.label), color: COLORS[i % COLORS.length], pts: sample(parseExpr(c.expr), spec.x_min, spec.x_max, 400) }];
+        return [{ label: plainLabel(c.label), color: COLORS[i % COLORS.length], dash: c.style === "dashed" ? "7 5" : c.style === "dotted" ? "2 4" : undefined, pts: sample(parseExpr(c.expr), spec.x_min, spec.x_max, 400) }];
       } catch {
         return [];
       }
@@ -95,14 +95,14 @@ export function Plot({ spec }: { spec: PlotSpec }) {
           </text>
         </g>
         {paths.map((p) => (
-          <path key={p.label} d={p.d} fill="none" stroke={p.color} strokeWidth={2} />
+          <path key={p.label} d={p.d} fill="none" stroke={p.color} strokeWidth={2} strokeDasharray={p.dash} />
         ))}
       </svg>
       {paths.length > 1 && (
         <figcaption className="plot-legend">
           {paths.map((p) => (
             <span key={p.label}>
-              <i style={{ background: p.color }} /> {p.label}
+              <i style={p.dash ? { borderTop: `2px ${p.dash === "2 4" ? "dotted" : "dashed"} ${p.color}`, background: "transparent" } : { background: p.color }} /> {p.label}
             </span>
           ))}
         </figcaption>

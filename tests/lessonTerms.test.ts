@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { badge, conceptMermaid, framingProblems, homes, linksFromText, mentions, tidyTerms } from "@/lib/lessonTerms";
+import { badge, conceptMermaid, framingProblems, homes, linksFromText, mainTerms, mapGroups, mentions, repeats, shortHeading, tidyTerms } from "@/lib/lessonTerms";
+import { spoilers } from "@/lib/lessonCheck";
 import type { LessonDoc } from "@/lib/lesson";
 
 const doc = (over: Partial<LessonDoc> = {}): LessonDoc => ({
@@ -83,5 +84,63 @@ describe("key terms", () => {
       diagram: { direction: "LR", nodes: [{ id: "a", label: "Pluck" }, { id: "b", label: "Accelerometer" }, { id: "c", label: "Spectrum" }], edges: [] },
     };
     expect(framingProblems(d).some((p) => p.includes("Accelerometer"))).toBe(true);
+  });
+
+  it("drops links that say what doesn't happen", () => {
+    const d = doc({ concept_links: [{ from: "damping ratio $\\zeta$", to: "critical damping", label: "does not change" }] });
+    expect(tidyTerms(d).concept_links?.some((l) => l.label === "does not change")).toBe(false);
+  });
+
+  it("finds the main key terms and flags a missing one and a map in pieces", () => {
+    const d = tidyTerms(doc({ keywords: ["damping ratio", "critical damping", "damped natural frequency"], concept_links: [] }));
+    d.concept_links = [{ from: "damping ratio $\\zeta$", to: "critical damping", label: "compares damping with" }];
+    expect(mainTerms(d)).toEqual(["damping ratio $\\zeta$", "critical damping"]);
+    expect(mapGroups(d)).toEqual([["damping ratio $\\zeta$", "critical damping"], ["logarithmic decrement $\\delta$"]]);
+    const p = framingProblems(d).join("\n");
+    expect(p).toMatch(/main key term "damped natural frequency" is missing/);
+    expect(p).toMatch(/falls apart into 2 unconnected groups/);
+    expect(conceptMermaid(d)).toContain("class k0,k1 main");
+  });
+
+  it("flags the app's own words, a dashed curve that isn't, and text over budget", () => {
+    const d = doc();
+    d.sections[0].blocks[0].body += " The exam needs level 3, so this is a faded example.";
+    d.sections[1].blocks[0].figure = { type: "plot", caption: "The envelope (dashed) bounds the response.", diagram: null, plot: { x_label: "t", y_label: "u", x_min: 0, x_max: 1, y_min: null, y_max: null, curves: [{ expr: "x", label: "u" }] } };
+    const p = framingProblems(d, { budget: 10 }).join("\n");
+    expect(p).toMatch(/"level 3" is the app's own word/);
+    expect(p).toMatch(/mentions a dashed curve/);
+    expect(p).toMatch(/over this level's 10/);
+  });
+
+  it("catches a sentence or a derivation an earlier level already gave", () => {
+    const early = doc({ depth: 1 });
+    early.sections[0].blocks[0].body = "Each cycle the amplitude shrinks by about twelve percent when the damping ratio is two percent, which is typical for steel frames. $$\\delta = 2\\pi\\zeta$$ $$u = e^{-\\zeta\\omega_n t}$$";
+    const now = doc();
+    now.sections[1].blocks[0].body = "For steel frames, the amplitude shrinks by about twelve percent each cycle when the damping ratio is two percent.";
+    expect(repeats(now, [early])[0]).toMatch(/repeats what level 1 already said/);
+    now.sections[1].blocks[0].body = "Again: $$\\delta = 2\\pi\\zeta$$ and $$u = e^{-\\zeta\\omega_n t}$$";
+    expect(repeats(now, [early])[0]).toMatch(/redoes 2 equations from level 1/);
+  });
+
+  it("shortens a long heading at a word for the map", () => {
+    expect(shortHeading("Measuring damping from a free-vibration record in the lab")).toBe("Measuring damping from a…");
+    expect(shortHeading("Short one")).toBe("Short one");
+  });
+
+  it("draws maths subscripts the app can't write in Unicode as HTML", () => {
+    const d = tidyTerms(doc({ glossary: [{ term: "damping ratio $\\zeta$", meaning: "" }, { term: "critical damping $c_{cr}$", meaning: "" }] }));
+    expect(conceptMermaid(d)).toContain('"critical damping c<sub>cr</sub>"');
+  });
+
+  it("flags an example that copies the setup and wording of the student's own question", () => {
+    const d = doc();
+    d.sections[1].blocks.push({
+      kind: "example",
+      title: "A rooftop sign",
+      body: "A sign frame has mass 2 t and lateral stiffness 900 kN/m. A pull-back test displaces the top 40 mm and releases it. After 8 complete cycles the amplitude is 9 mm. Find the damping ratio.",
+      solution: "1. ...",
+    });
+    const q = { source: "Tutorial 3, Q1", text: "A one-storey frame has mass 20 t and lateral stiffness 8000 kN/m. A pull-back test displaces the roof 25 mm and releases it. After 5 complete cycles the amplitude is 12 mm. (a) Find the natural period. (b) Find the damping ratio." };
+    expect(spoilers(d, [q])).toEqual([expect.objectContaining({ kind: "wording", source: "Tutorial 3, Q1" })]);
   });
 });

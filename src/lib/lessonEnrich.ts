@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
 import { normalizeMath } from "./lessonCheck";
-import { framingProblems } from "./lessonTerms";
+import { framingProblems, mainTerms, type FramingOptions } from "./lessonTerms";
 import type { BlockKind, LessonBlock, LessonDoc } from "./lesson";
 
 /**
@@ -27,9 +27,12 @@ const EnrichSchema = z.object({
       }),
     )
     .describe("At most 4 edits; empty when the lesson already goes as deep as its level should"),
+  new_terms: z
+    .array(z.object({ term: z.string().describe("The key term, with its symbol if it has one"), meaning: z.string().describe("One line; units if it has them") }))
+    .describe("Key terms an edit teaches that the glossary lacks (at most 2; a missing main key term first); may be empty"),
   concept_links: z
     .array(z.object({ from: z.string(), to: z.string(), label: z.string() }))
-    .describe("New links between existing key terms that the edits explain (exact glossary spellings); may be empty"),
+    .describe("New links between key terms that the edits explain (exact glossary spellings, or a new term's); short verb phrases saying how one acts on the other; may be empty"),
 });
 
 function blockText(b: LessonBlock): string {
@@ -50,6 +53,7 @@ function blockText(b: LessonBlock): string {
 function lessonText(doc: LessonDoc): string {
   return [
     `Objectives: ${doc.objectives.join(" | ")}`,
+    doc.keywords?.length ? `The topic's main key terms: ${doc.keywords.join("; ")}${mainTerms(doc).length ? ` (spelt here: ${mainTerms(doc).join("; ")})` : ""}` : "",
     `Key terms: ${doc.glossary.map((g) => `${g.term} (${g.meaning})`).join("; ")}`,
     doc.concept_links?.length ? `Links already explained: ${doc.concept_links.map((l) => `${l.from} ${l.label} ${l.to}`).join("; ")}` : "",
     ...doc.sections.map(
@@ -67,11 +71,13 @@ export interface EnrichOptions {
   next?: string | null;
   /** What the student asked to have deepened, if they asked. */
   request?: string | null;
+  /** The earlier levels and the word budget, for the framing checks. */
+  framing?: FramingOptions;
 }
 
 /** The instructions for the enrichment pass (the student's materials go separately, as context). */
 export function enrichPrompt(doc: LessonDoc, o: EnrichOptions): string {
-  const framing = framingProblems(doc);
+  const framing = framingProblems(doc, o.framing);
   return `You are a senior tutor giving this lesson a final enrichment before the student reads it. The student's materials are above.
 
 This is the "${doc.level}" pass (level ${doc.depth} of 4): ${o.brief}${o.next ? `\nThe next pass will cover: ${o.next}. Leave that for it.` : ""}
@@ -81,8 +87,9 @@ Make it deeper, not longer. Find the places where the lesson states something wi
 - the physical or practical meaning of a parameter or symbol;
 - a limiting case, a sense of size or a sanity check that makes a result believable;
 - a step missing from a derivation or worked solution;
-- how two key terms connect, where the text treats them separately.
-A rewritten block keeps its idea and its kind, keeps everything that was correct, and grows by at most a third. Add at most 2 new blocks. Keep the student's notation; bold a key term at its first use; maths in KaTeX-compatible LaTeX ($...$ inline, $$...$$ display); no HTML, no headings. Never solve the student's own tutorial or exam questions. British spelling; avoid em dashes.${framing.length ? `\nAlso fix these problems with how the lesson uses its key terms, where an edit can:\n- ${framing.slice(0, 5).join("\n- ")}` : ""}${o.request ? `\nThe student asked for this; do it first: "${o.request.slice(0, 500)}"` : ""}
+- how two key terms connect, where the text treats them separately (above all when the concept map falls apart into unconnected groups);
+- what this level adds to a main key term that the lesson leaves where an earlier level left it.
+A rewritten block keeps its idea and its kind, keeps everything that was correct, and grows by at most a third. Add at most 2 new blocks. Keep the student's notation; bold a key term at its first use; maths in KaTeX-compatible LaTeX ($...$ inline, $$...$$ display); no HTML, no headings. Never solve the student's own tutorial or exam questions, or copy their wording or setup. Never mention levels, passes or how the lesson is built. British spelling; avoid em dashes.${framing.length ? `\nAlso fix these problems with how the lesson uses its key terms, where an edit can:\n- ${framing.slice(0, 7).join("\n- ")}` : ""}${o.request ? `\nThe student asked for this; do it first: "${o.request.slice(0, 500)}"` : ""}
 
 <lesson title="${doc.title.replace(/"/g, "'")}">
 ${lessonText(doc)}
@@ -111,6 +118,8 @@ export function applyEnrich(doc: LessonDoc, out: EnrichOutput): string[] {
     }
     added.push(e.adds.trim());
   }
+  for (const t of (out.new_terms ?? []).slice(0, 2))
+    if (t.term.trim() && !doc.glossary.some((g) => g.term.toLowerCase() === t.term.trim().toLowerCase())) doc.glossary.push({ term: t.term.trim(), meaning: t.meaning.trim() });
   if (out.concept_links.length) doc.concept_links = [...(doc.concept_links ?? []), ...out.concept_links];
   return added;
 }

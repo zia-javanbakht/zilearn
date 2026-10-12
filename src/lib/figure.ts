@@ -10,6 +10,7 @@ import { parseExpr, toPgf } from "./expr";
 export interface Curve {
   expr: string; // in x, e.g. "exp(-0.5*x)*cos(10*x)"
   label: string;
+  style?: "solid" | "dashed" | "dotted" | null;
 }
 
 export interface PlotSpec {
@@ -52,6 +53,7 @@ export const FigureSchema = z
             z.object({
               expr: z.string().describe("y as a function of x with numbers substituted: + - * / ^ ( ), pi, e, sin cos tan exp ln log sqrt abs min max. Trig in radians. E.g. exp(-0.5*x)*cos(10*x)"),
               label: z.string().describe("Legend entry, e.g. '$\\zeta = 0.05$'"),
+              style: z.enum(["solid", "dashed", "dotted"]).nullable().describe("Line style, when the caption or text tells the curves apart by it (e.g. an envelope dashed); null for solid"),
             }),
           )
           .describe("1-4 curves"),
@@ -106,15 +108,21 @@ const GREEK: Record<string, string> = {
 const SUB: Record<string, string> = { "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉", n: "ₙ", i: "ᵢ", j: "ⱼ", k: "ₖ", x: "ₓ", a: "ₐ", e: "ₑ", o: "ₒ", r: "ᵣ", t: "ₜ", "+": "₊", "-": "₋", "=": "₌" };
 const SUP: Record<string, string> = { "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "-": "⁻", "+": "⁺", n: "ⁿ" };
 
-/** Sub- or superscript characters when all exist, else the plain form (x_(ab)). */
-function script(x: string, map: Record<string, string>, mark: string): string {
+/** Sub- or superscript characters when all exist, else the plain form (x_(ab)), or for HTML a marked span. */
+function script(x: string, map: Record<string, string>, mark: string, html: boolean): string {
+  if (html) return mark === "_" ? `\u0001${x}\u0002` : `\u0003${x}\u0004`;
   return [...x].every((c) => map[c]) ? [...x].map((c) => map[c]).join("") : `${mark}${x.length > 1 && !/^\w+$/.test(x) ? `(${x})` : x}`;
+}
+
+/** Turns the sub- and superscripts marked by plainLabel(s, true) into <sub> and <sup>, after escaping. */
+export function htmlScripts(s: string): string {
+  return s.replace(/\u0001([^\u0002]*)\u0002/g, "<sub>$1</sub>").replace(/\u0003([^\u0004]*)\u0004/g, "<sup>$1</sup>").replace(/[\u0001-\u0004]/g, "");
 }
 
 /** A label with simple $...$ maths as Unicode text, for SVG and Mermaid (ζ = 0.05, ω_n → ωₙ). */
 const OPS: Record<string, string> = { pm: "±", mp: "∓", cdot: "·", times: "×", approx: "≈", leq: "≤", le: "≤", geq: "≥", ge: "≥", neq: "≠", ne: "≠", to: "→", infty: "∞", partial: "∂", circ: "°" };
 
-export function plainLabel(s: string): string {
+export function plainLabel(s: string, html = false): string {
   return s.replace(/\$([^$]+)\$/g, (_, m: string) =>
     m
       // Roots, fractions and common operators first, while their braces still mark what they apply to.
@@ -122,8 +130,8 @@ export function plainLabel(s: string): string {
       .replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, (_, a: string, b: string) => `${/^\w+$/.test(a) ? a : `(${a})`}/${/^([A-Za-z]|\d+(\.\d+)?)$/.test(b) ? b : `(${b})`}`)
       .replace(/\\(pm|mp|cdot|times|approx|leq|le|geq|ge|neq|ne|to|infty|partial|circ)(?![A-Za-z])/g, (_, op: string) => OPS[op])
       .replace(/\\([A-Za-z]+)/g, (w, name) => GREEK[name] ?? (["mathrm", "text", "mathit", "mathbf", "operatorname"].includes(name) ? "" : w))
-      .replace(/_\{([^{}]*)\}|_([0-9a-z])/gi, (w, a: string | undefined, b: string | undefined) => script(a ?? b!, SUB, "_"))
-      .replace(/\^\{([^{}]*)\}|\^([0-9n])/g, (w, a: string | undefined, b: string | undefined) => script(a ?? b!, SUP, "^"))
+      .replace(/_\{([^{}]*)\}|_([0-9a-z])/gi, (w, a: string | undefined, b: string | undefined) => script(a ?? b!, SUB, "_", html))
+      .replace(/\^\{([^{}]*)\}|\^([0-9n])/g, (w, a: string | undefined, b: string | undefined) => script(a ?? b!, SUP, "^", html))
       .replace(/[{}]/g, "")
       .replace(/\\,|\\;|\\ /g, " "),
   );
@@ -131,22 +139,24 @@ export function plainLabel(s: string): string {
 
 
 // Mermaid labels: quoted, with < > " as Mermaid entity codes and its syntax characters dropped.
-const mq = (s: string) =>
-  `"${s
-    .replace(/[#;`[\]{}|$]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 60)
-    .replace(/"/g, "#quot;")
-    .replace(/</g, "#lt;")
-    .replace(/>/g, "#gt;")}"`;
+export const mq = (s: string, max = 60) =>
+  `"${htmlScripts(
+    plainLabel(s, true)
+      .replace(/[#;`[\]{}|$\\]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, max)
+      .replace(/"/g, "#quot;")
+      .replace(/</g, "#lt;")
+      .replace(/>/g, "#gt;"),
+  )}"`;
 const mid = (s: string) => "n_" + s.replace(/[^A-Za-z0-9_]/g, "_");
 
 export function diagramMermaid(d: DiagramSpec): string {
   return [
     `flowchart ${d.direction === "TD" ? "TD" : "LR"}`,
-    ...d.nodes.map((n) => `  ${mid(n.id)}[${mq(plainLabel(n.label))}]`),
-    ...d.edges.map((e) => `  ${mid(e.from)} -->${e.label ? `|${mq(plainLabel(e.label))}|` : ""} ${mid(e.to)}`),
+    ...d.nodes.map((n) => `  ${mid(n.id)}[${mq(n.label)}]`),
+    ...d.edges.map((e) => `  ${mid(e.from)} -->${e.label ? `|${mq(e.label)}|` : ""} ${mid(e.to)}`),
   ].join("\n");
 }
 
@@ -218,7 +228,7 @@ const PLOT_COLORS = ["DodgerBlue3", "Firebrick3", "SeaGreen4", "DarkOrange2"];
 export function plotTikz(p: PlotSpec, tex: (s: string) => string): string {
   const curves = p.curves.flatMap((c, i) => {
     try {
-      return [`  \\addplot[${PLOT_COLORS[i % 4]}, thick, samples=300, domain=${p.x_min}:${p.x_max}] {${toPgf(parseExpr(c.expr))}};`, `  \\addlegendentry{${tex(c.label)}}`];
+      return [`  \\addplot[${PLOT_COLORS[i % 4]}, thick,${c.style && c.style !== "solid" ? ` ${c.style},` : ""} samples=300, domain=${p.x_min}:${p.x_max}] {${toPgf(parseExpr(c.expr))}};`, `  \\addlegendentry{${tex(c.label)}}`];
     } catch {
       return [];
     }

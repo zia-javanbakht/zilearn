@@ -91,7 +91,9 @@ describe("LaTeX export", () => {
     expect(t).toContain("\\section{\\texorpdfstring{The update rule and $\\eta$}{The update rule and}}");
     expect(t).toContain("\\begin{qubox}[Note: Further reading][Lecture 3 slides {[}p. 4{]}]");
     expect(t).toContain("\\begin{subox}[Critical Takeaways]");
-    expect(t).toContain("child[concept color=DarkOrange1!70] { node {Newton's method (Numerical Methods)} }");
+    // The brainmap neighbourhood is told in words, not drawn a second time.
+    expect(t).not.toContain("mindmap");
+    expect(t).toContain("\\section*{Where this fits}");
     expect(t).toContain("\\title{Gradient descent \\& step sizes}");
     expect(t).not.toMatch(/---/);
     // Balanced environments.
@@ -103,7 +105,7 @@ describe("LaTeX export", () => {
   it("renders the same lesson as Markdown for the app", () => {
     const md = lessonToMarkdown(SAMPLE);
     expect(md).toContain('<div class="lb lb-definition">');
-    expect(md).toContain("```mermaid\nflowchart LR");
+    expect(md).toContain("### Where this fits");
     expect(md).toContain("<details><summary>Worked solution</summary>");
     expect(md).toContain("| **Step size $\\eta$** | How far each step moves; too big diverges. |");
     expect(md).toContain("### The update rule and $\\eta$");

@@ -1,5 +1,5 @@
 import { diagramTikz, plotTikz, type Figure } from "./figure";
-import { conceptDiagram, homes } from "./lessonTerms";
+import { conceptLayout, homes } from "./lessonTerms";
 import { markProvenance, normalizeDoc, type LessonBlock, type LessonDoc, type QA } from "./lesson";
 
 /**
@@ -246,45 +246,77 @@ function items(xs: string[]): string {
   return xs.map((x) => `\\item ${blockTex(x)}`).join("\n");
 }
 
-/** The topic's neighbourhood in the brainmap as a TikZ mindmap. */
-export function mapTikz(doc: LessonDoc): string {
-  const nodes: { label: string; color: string }[] = [
-    ...doc.map.path.slice(-1).map((p) => ({ label: p, color: "Thistle3" })),
-    ...doc.map.before.slice(-2).map((p) => ({ label: p, color: "LightSteelBlue3" })),
-    ...doc.map.children.slice(0, 5).map((c) => ({ label: c.title, color: "SeaGreen3" })),
-    ...doc.map.after.slice(0, 2).map((p) => ({ label: p, color: "LightSteelBlue3" })),
-    ...doc.map.related.slice(0, 3).map((r) => ({ label: `${r.title} (${r.course})`, color: "DarkOrange1" })),
-  ].slice(0, 10);
-  if (!nodes.length) return "";
-  const used = new Set(nodes.map((n) => n.color));
-  const legend = (
-    [
-      ["Thistle3", "Purple: parent branch"],
-      ["LightSteelBlue3", "Blue: before and after"],
-      ["SeaGreen3", "Green: subtopics"],
-      ["DarkOrange1", "Orange: other courses"],
-    ] as const
-  )
-    .filter(([c]) => used.has(c))
-    .map(([, label]) => label);
-  const short = (s: string) => tex(s.length > 40 ? s.slice(0, 39) + "…" : s);
+/**
+ * The lesson's concept map in TikZ, laid out like the app's: a column per section (numbered as the
+ * sections are), the key terms stacked in it and the main key terms in bold. On paper the links are
+ * lettered on the arrows and read out in full below, so no label sits on a box or another label.
+ */
+export function conceptTikz(doc: LessonDoc): string {
+  const m = conceptLayout(doc);
+  if (!m) return "";
+  const col = new Map<string, number>();
+  const term = new Map<string, string>();
+  const lines: string[] = [];
+  m.groups.forEach((g, c) => {
+    g.terms.forEach((t, k) => {
+      col.set(t.id, c);
+      term.set(t.id, t.term);
+      lines.push(`  \\node[${t.main ? "zmain" : "zterm"}] (${t.id}) at (${(c * 4).toFixed(1)},${(-k * 1.5).toFixed(2)}) {${inline(t.term)}};`);
+    });
+    lines.push(
+      `  \\node[zgroup, fit=${g.terms.map((t) => `(${t.id})`).join("")}] (g${c}) {};`,
+      `  \\node[zgtitle, anchor=south west] at (g${c}.north west) {\\textbf{${g.section + 1}}\\enspace ${tex(g.heading)}};`,
+    );
+  });
+  const letter = (i: number) => String.fromCharCode(97 + i);
+  const row = new Map(m.groups.flatMap((g) => g.terms.map((t, k) => [t.id, k] as const)));
+  const rows = Math.max(...m.groups.map((g) => g.terms.length));
+  let lane = 0;
+  m.links.forEach((l, i) => {
+    const a = col.get(l.from)!;
+    const b = col.get(l.to)!;
+    const tag = `node[zletter] {${letter(i)}}`;
+    let draw: string;
+    // Within a section the arrow loops out to the left, clear of the boxes between.
+    if (a === b) draw = `(${l.from}.west) to[out=180, in=180, looseness=1.4] ${tag} (${l.to}.west)`;
+    else if (Math.abs(a - b) === 1) draw = `(${l.from}) -- ${tag} (${l.to})`;
+    else {
+      // Across a section: down the gap beside the start, along a lane under the map, and up beside the end.
+      const dir = Math.sign(b - a);
+      const x1 = (a * 4 + dir * 2).toFixed(1);
+      const x2 = (b * 4 - dir * 2).toFixed(1);
+      const y = (-(rows - 1) * 1.5 - 1.1 - 0.3 * lane++).toFixed(2);
+      draw = `(${l.from}.${dir > 0 ? "east" : "west"}) -| (${x1},${y}) -- ${tag} (${x2},${y}) |- (${l.to}.${dir > 0 ? "west" : "east"})`;
+    }
+    lines.push(`  \\draw[zlink] ${draw};`);
+  });
+  const legend = m.links.map((l, i) => `\\item[\\textbf{${letter(i)}}] ${inline(term.get(l.from)!)} \\emph{${inline(l.label)}} ${inline(term.get(l.to)!)}`);
   return [
     "\\begin{center}",
-    `\\begin{tikzpicture}[mindmap, grow cyclic, every node/.style={concept, font=\\sffamily\\scriptsize, text width=2.2cm, align=center}, concept color=DodgerBlue3!70, text=black,`,
-    `  level 1/.append style={level distance=3.3cm, sibling angle=${Math.round(360 / nodes.length)}}]`,
-    `\\node[concept, font=\\sffamily\\small\\bfseries, text width=2.6cm] {${short(doc.title)}}`,
-    ...nodes.map((n) => `  child[concept color=${n.color}!70] { node {${short(n.label)}} }`),
-    ";",
+    "\\begin{adjustbox}{max width=\\linewidth, max totalheight=0.4\\textheight}",
+    "\\begin{tikzpicture}[font=\\sffamily\\footnotesize,",
+    "  zterm/.style={draw=SteelBlue4, fill=SteelBlue1!12, rounded corners=2pt, align=center, text width=2.6cm, minimum height=0.8cm, inner sep=3pt},",
+    "  zmain/.style={zterm, line width=1.2pt, fill=SteelBlue1!30, font=\\sffamily\\footnotesize\\bfseries},",
+    "  zgroup/.style={draw=gray!60, dashed, rounded corners=4pt, inner xsep=6pt, inner ysep=8pt},",
+    "  zgtitle/.style={font=\\sffamily\\scriptsize, text=gray!70!black, inner sep=1pt, text width=3.2cm, align=left, execute at begin node=\\hyphenpenalty10000\\relax},",
+    "  zlink/.style={-{Stealth[length=2mm]}, thick, SteelBlue4!80, rounded corners=4pt},",
+    "  zletter/.style={midway, circle, fill=white, draw=SteelBlue4!80, inner sep=0.6pt, minimum size=3.6mm, font=\\sffamily\\scriptsize\\bfseries, text=SteelBlue4}]",
+    ...lines,
     "\\end{tikzpicture}",
+    "\\end{adjustbox}",
     "\\end{center}",
-    `{\\centering\\footnotesize\\sffamily ${legend.join(" \\quad ")}\\par}`,
+    `{\\centering\\footnotesize\\itshape Each box is a key term, inside the numbered section that teaches it${m.groups.some((g) => g.terms.some((t) => t.main)) ? " (the topic's main terms in bold)" : ""}${legend.length ? "; each lettered arrow is a link the lesson explains:" : "."}\\par}`,
+    legend.length ? `{\\small\\begin{itemize}[nosep, leftmargin=1.6em, labelsep=0.5em]\n${legend.join("\n")}\n\\end{itemize}}` : "",
   ].join("\n");
 }
 
 export function lessonToTex(raw: LessonDoc): string {
   const doc = markProvenance(normalizeDoc(raw));
   const s: string[] = [];
-  const sec = (title: string, body: string) => body.trim() && s.push(`\\Needspace{14\\baselineskip}\n\\section{${heading(title)}}\n${body.trim()}\n`);
+  // The teaching sections are numbered 1, 2, 3 (as on the concept map); the rest are not.
+  const sec = (title: string, body: string, numbered = false) =>
+    body.trim() &&
+    s.push(`\\Needspace{14\\baselineskip}\n${numbered ? `\\section{${heading(title)}}` : `\\section*{${heading(title)}}\\addcontentsline{toc}{section}{${heading(title)}}`}\n${body.trim()}\n`);
   const ask = (q: QA) => `${q.kind ? `\\textit{${KIND[q.kind]}.} ` : ""}${blockTex(q.question)}${q.hint ? ` \\hfill{\\footnotesize\\itshape Hint: ${inline(q.hint)}}` : ""}`;
   const answers = [
     ...(doc.recall.length ? [`\\subsection*{Warm-up}\n\\begin{enumerate}\n${doc.recall.map((r) => `\\item ${blockTex(r.answer)}`).join("\n")}\n\\end{enumerate}`] : []),
@@ -294,19 +326,15 @@ export function lessonToTex(raw: LessonDoc): string {
 
   if (doc.objectives.length) s.push(`\\begin{chbox}[By the end of this pass you can]\n${items(doc.objectives)}\n\\end{chbox}\n`);
   // The concept map: the key terms, each marked with the section that teaches it, and the links the text explains.
-  const concept = conceptDiagram(doc, (i) => `ZREF${i}ZREF`);
-  if (concept)
-    sec(
-      "Map of this lesson",
-      `${diagramTikz(concept, inline).replace(/ZREF(\d+)ZREF/g, (_, i) => `\\\\{\\scriptsize\\S\\ref{sec:lesson-${i}}}`)}\n{\\centering\\footnotesize\\itshape Each box is a key term, with the section that teaches it; the arrows are the links the lesson explains.\\par}`,
-    );
-  sec("Where this fits", `${blockTex(doc.where_it_fits)}\n\n${mapTikz(doc)}`);
+  const concept = conceptTikz(doc);
+  if (concept) sec("Map of this lesson", concept);
+  sec("Where this fits", blockTex(doc.where_it_fits));
   if (doc.recall.length) sec("Warm-up", `\\begin{enbox}[Recall]\n${doc.recall.map((q) => `\\item ${ask(q)}`).join("\n")}\n\\end{enbox}`);
   const home = homes(doc);
   for (const [i, x] of doc.sections.entries()) {
     const mine = [...home].filter(([, at]) => at === i).map(([t]) => `\\textbf{${inline(t)}}`);
     const terms = mine.length ? `{\\small\\sffamily\\color{SteelBlue4}Key terms: ${mine.join(" \\textperiodcentered{} ")}\\par}\\medskip\n\n` : "";
-    sec(x.heading, `\\label{sec:lesson-${i}}\n${terms}${x.blocks.map(blockToTex).join("\n\n")}`);
+    sec(x.heading, `\\label{sec:lesson-${i}}\n${terms}${x.blocks.map(blockToTex).join("\n\n")}`, true);
   }
   // A two-column table rather than Z's dsbox, whose description list breaks on \\item[...] labels.
   if (doc.glossary.length)
@@ -321,7 +349,7 @@ export function lessonToTex(raw: LessonDoc): string {
   if (doc.check_yourself.length) sec("Check yourself", `\\begin{enbox}[Questions]\n${doc.check_yourself.map((q) => `\\item ${ask(q)}`).join("\n")}\n\\end{enbox}`);
   if (doc.takeaways.length) sec("Takeaways", `\\begin{subox}[Critical Takeaways]\n\\begin{itemize}\n${items(doc.takeaways)}\n\\end{itemize}\n\\end{subox}`);
   if (doc.read.length) s.push(`\\paragraph{Go back to} ${doc.read.map((r) => `\\textbf{${inline(r.title)}}${r.focus ? ` (${inline(r.focus.trim().replace(/[.;:,]+$/, ""))})` : ""}`).join("; ")}.\n`);
-  if (answers.length) s.push(`\\clearpage\n\\section{Answers}\n${answers.join("\n\n")}\n`);
+  if (answers.length) s.push(`\\clearpage\n\\section*{Answers}\\addcontentsline{toc}{section}{Answers}\n${answers.join("\n\n")}\n`);
 
   return zDocument(doc, s.join("\n"));
 }
@@ -340,7 +368,7 @@ function zDocument(doc: Head, body: string): string {
 % minted, so -shell-escape isn't needed.)
 % ══════════════════════════════════════════════════════════════════════════════════════════════════
 \\documentclass[10pt,stix,minimal]{Z}
-\\usetikzlibrary{mindmap,arrows.meta}
+\\usetikzlibrary{arrows.meta,fit}
 \\usepackage{pgfplots}
 \\usepackage{cancel}
 \\usepackage{needspace}

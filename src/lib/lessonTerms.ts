@@ -1,4 +1,4 @@
-import { plainLabel, type DiagramSpec } from "./figure";
+import { mq, plainLabel } from "./figure";
 import type { LessonDoc } from "./lesson";
 
 /*
@@ -94,6 +94,25 @@ export function homes(doc: LessonDoc): Map<string, number> {
   return out;
 }
 
+// "A does not change B" is not a link: the map shows what acts on what.
+const NEGATIVE = /\b(not|no|never|cannot|without|doesn't|don't|isn't|aren't|can't|won't)\b/i;
+
+/** The topic's main key terms as the lesson spells them (glossary entries), in the topic's order. */
+export function mainTerms(doc: LessonDoc): string[] {
+  return (doc.keywords ?? []).map((k) => doc.glossary.find((g) => key(g.term) === key(k) || mentions(g.term, k))?.term).filter((t): t is string => !!t);
+}
+
+/** The concept map's separate groups: key terms joined by links, the largest first. */
+export function mapGroups(doc: LessonDoc): string[][] {
+  const terms = [...homes(doc).keys()];
+  const up = new Map(terms.map((t) => [t, t]));
+  const root = (t: string): string => (up.get(t) === t ? t : root(up.get(t)!));
+  for (const l of doc.concept_links ?? []) if (up.has(l.from) && up.has(l.to)) up.set(root(l.from), root(l.to));
+  const groups = new Map<string, string[]>();
+  for (const t of terms) groups.set(root(t), [...(groups.get(root(t)) ?? []), t]);
+  return [...groups.values()].sort((a, b) => b.length - a.length);
+}
+
 /**
  * Brings a lesson's key terms in line with its text, in place: section terms use the glossary's
  * spelling and only name terms the section uses; every glossary term the lesson uses gets a home
@@ -109,7 +128,7 @@ export function tidyTerms(doc: LessonDoc): LessonDoc {
   const together = (a: string, b: string) => doc.sections.some((_, i) => blockTexts(doc, i).some((t) => mentions(t, a) && mentions(t, b)));
   let links = (doc.concept_links ?? [])
     .map((l) => ({ from: findTerm(doc, l.from), to: findTerm(doc, l.to), label: l.label.replace(/\s+/g, " ").trim().slice(0, 48) }))
-    .filter((l): l is ConceptLink => !!l.from && !!l.to && l.from !== l.to && !!l.label)
+    .filter((l): l is ConceptLink => !!l.from && !!l.to && l.from !== l.to && !!l.label && !NEGATIVE.test(l.label))
     .filter((l) => home.has(l.from) && home.has(l.to) && together(l.from, l.to))
     .filter((l) => {
       const k = [l.from, l.to].sort().join("|");
@@ -148,70 +167,164 @@ export function linksFromText(doc: LessonDoc, terms: string[]): ConceptLink[] {
   return out.slice(0, 10);
 }
 
-/** Problems with how the lesson uses its key terms, figures and links, as messages for a fix pass. */
-export function framingProblems(doc: LessonDoc): string[] {
+export interface FramingOptions {
+  /** The earlier levels of the same topic, to catch text this level repeats. */
+  earlier?: LessonDoc[];
+  /** The most words of teaching text this level should have. */
+  budget?: number;
+}
+
+/** Problems with how the lesson uses its key terms, figures, map and words, as messages for a fix pass. */
+export function framingProblems(doc: LessonDoc, o: FramingOptions = {}): string[] {
   const out: string[] = [];
   const home = homes(doc);
+  const main = mainTerms(doc);
+  for (const k of doc.keywords ?? [])
+    if (!main.some((t) => mentions(t, k)) && !doc.glossary.some((g) => mentions(g.term, k)))
+      out.push(`The topic's main key term "${k}" is missing from the key terms: every level takes each main key term one layer deeper, so teach what this level adds to it and add it to the key terms.`);
   for (const g of doc.glossary) if (!home.has(g.term)) out.push(`The key term "${g.term}" is in the glossary but no section uses it: teach it in the section where it belongs (bold at first use), or drop it from the glossary.`);
+  const groups = mapGroups(doc);
+  if (home.size >= 3 && groups.length > 1)
+    out.push(
+      `The concept map falls apart into ${groups.length} unconnected groups (${groups.map((g) => g.map((t) => plainLabel(t)).join(", ")).join(" | ")}): explain in a block how ${plainLabel(groups[1][0])} relates to ${plainLabel(groups[0][0])} and add that link, so the map reads as one idea.`,
+    );
   doc.sections.forEach((s, i) => {
     if (doc.glossary.length && !(s.terms ?? []).length && s.blocks.length)
       out.push(`Section ${i + 1} ("${s.heading}") teaches none of the key terms: say which key term it develops and use it.`);
     s.blocks.forEach((b, j) => {
+      const where = `section ${i + 1}, block ${j + 1} ("${b.title}")`;
+      const text = `${b.title}\n${b.body}\n${b.solution ?? ""}\n${b.try_steps ?? ""}`;
+      const jargon = text.match(JARGON);
+      if (jargon) out.push(`In ${where}, "${jargon[0]}" is the app's own word, not the student's: say it in plain words (e.g. "partly worked example", "a deeper treatment").`);
       const d = b.figure?.diagram;
-      if (!d) return;
-      const text = `${b.title}\n${b.body}\n${b.solution ?? ""}\n${b.figure!.caption}`;
-      const missing = d.nodes.filter((n) => !mentions(text, n.label)).map((n) => n.label);
-      if (missing.length > d.nodes.length / 3)
-        out.push(`The diagram in section ${i + 1}, block ${j + 1} ("${b.title}") has boxes the block's text never mentions (${missing.slice(0, 4).join(", ")}): label the boxes with the words the text uses, and walk through the diagram in the caption.`);
+      if (d) {
+        const missing = d.nodes.filter((n) => !mentions(`${text}\n${b.figure!.caption}`, n.label)).map((n) => n.label);
+        if (missing.length > d.nodes.length / 3)
+          out.push(`The diagram in ${where} has boxes the block's text never mentions (${missing.slice(0, 4).join(", ")}): label the boxes with the words the text uses, and walk through the diagram in the caption.`);
+      }
+      const p = b.figure?.plot;
+      const styled = /\b(dashed|dotted)\b/i.exec(b.figure?.caption ?? "");
+      if (p && styled && !p.curves.some((c) => c.style === styled[1].toLowerCase()))
+        out.push(`The caption of the plot in ${where} mentions a ${styled[1]} curve, but every curve is drawn solid: tell the curves apart by their legend labels instead.`);
     });
   });
+  if (o.budget) {
+    const words = teachingWords(doc);
+    if (words > o.budget * 1.15) out.push(`The lesson's teaching text is about ${words} words, over this level's ${o.budget}: cut repetition and restatement rather than ideas.`);
+  }
+  if (o.earlier?.length) out.push(...repeats(doc, o.earlier));
   return out;
 }
 
-/** Concept-map labels: plain text, no Mermaid syntax characters. */
-const ml = (s: string) =>
-  `"${plainLabel(s)
-    .replace(/[#;`[\]{}|$\\]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 48)
-    .replace(/"/g, "#quot;")
-    .replace(/</g, "#lt;")
-    .replace(/>/g, "#gt;")}"`;
+// Words that belong to the app's design, not to the student's subject.
+const JARGON = /\bfaded (?:example|problem)s?\b|\b(?:level|pass) [1-4]\b|\b(?:this|next|earlier|previous) pass\b/i;
+
+/** The words of the lesson's sections: what the level's word budget counts. */
+export function teachingWords(doc: LessonDoc): number {
+  return doc.sections
+    .map((_, i) => sectionText(doc, i))
+    .join(" ")
+    .replace(/\$\$[\s\S]*?\$\$/g, " ")
+    .split(/\s+/)
+    .filter((w) => /\p{L}/u.test(w)).length;
+}
+
+const content = (s: string) =>
+  new Set(
+    s
+      .toLowerCase()
+      .replace(/\$[^$]*\$/g, " ")
+      .split(/[^\p{L}\p{N}%.]+/u)
+      .map((w) => w.replace(/\.$/, ""))
+      .filter((w) => w.length > 2 && !STOP.has(w) && !COMMON.has(w)),
+  );
+const COMMON = new Set(["this", "that", "which", "when", "then", "than", "from", "into", "each", "every", "here", "there", "they", "them", "their", "these", "those", "have", "has", "was", "were", "will", "would", "can", "not", "but", "you", "your", "are", "also", "only", "just", "more", "less", "about"]);
+const sentences = (s: string) => s.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
+const displays = (s: string) => new Set([...s.matchAll(/\$\$([\s\S]+?)\$\$/g)].map((m) => m[1].replace(/\s+/g, "")));
+
+/**
+ * Text this level repeats from an earlier one: sentences that say the same thing in nearly the same
+ * words, and derivations that redo the same display equations.
+ */
+export function repeats(doc: LessonDoc, earlier: LessonDoc[]): string[] {
+  const old = earlier.flatMap((e) =>
+    e.sections.flatMap((s) => s.blocks.flatMap((b) => [b.body, b.solution ?? ""].flatMap(sentences).map((x) => ({ level: e.depth, text: x, words: content(x) })))),
+  );
+  const oldMaths = new Map<string, number>();
+  for (const e of earlier) for (const s of e.sections) for (const b of s.blocks) for (const m of displays(`${b.body}\n${b.solution ?? ""}`)) oldMaths.set(m, e.depth);
+  const out: string[] = [];
+  doc.sections.forEach((s, i) =>
+    s.blocks.forEach((b, j) => {
+      if (out.length >= 5) return;
+      const where = `Section ${i + 1}, block ${j + 1} ("${b.title}")`;
+      for (const x of [b.body, b.solution ?? ""].flatMap(sentences)) {
+        const w = content(x);
+        if (w.size < 7) continue;
+        const hit = old.find((o) => o.words.size >= 5 && [...w].filter((t) => o.words.has(t)).length >= 0.7 * Math.min(w.size, o.words.size));
+        if (hit) {
+          out.push(`${where} repeats what level ${hit.level} already said ("${hit.text.slice(0, 120)}"): refer back to it in a clause and spend the words on what this level adds.`);
+          return;
+        }
+      }
+      const same = [...displays(`${b.body}\n${b.solution ?? ""}`)].filter((m) => oldMaths.has(m));
+      if (same.length >= 2) out.push(`${where} redoes ${same.length} equations from level ${oldMaths.get(same[0])}: quote the result from there in one line and go further with it.`);
+    }),
+  );
+  return out;
+}
+
+/** A section heading short enough for a map's group title: whole words, then an ellipsis. */
+export function shortHeading(h: string, max = 34): string {
+  const t = plainLabel(h).replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max - 1);
+  return `${cut.slice(0, cut.lastIndexOf(" ") > max / 2 ? cut.lastIndexOf(" ") : cut.length).replace(/[\s,;:.-]+$/, "")}…`;
+}
 
 /**
  * The lesson's concept map for the app: one box per key term, grouped by the section that teaches it
- * (titled with the section's number), and the links between them. `%% jump` lines tell the app which
- * section heading each box opens.
+ * (titled with the section's number), the topic's main key terms in bold, and the links between them.
+ * `%% jump` lines tell the app which section heading each box opens.
  */
 export function conceptMermaid(doc: LessonDoc): string {
   const home = homes(doc);
   if (home.size < 2) return "";
   const terms = [...home.keys()];
+  const main = new Set(mainTerms(doc));
   const id = (t: string) => `k${terms.indexOf(t)}`;
   const lines = ["flowchart LR"];
   doc.sections.forEach((s, i) => {
     const mine = terms.filter((t) => home.get(t) === i);
     if (!mine.length) return;
-    lines.push(`  subgraph s${i}[${ml(`${badge(i + 1)} ${s.heading}`)}]`, "    direction TB", ...mine.map((t) => `    ${id(t)}[${ml(t)}]`), "  end");
+    lines.push(`  subgraph s${i}[${mq(`${badge(i + 1)} ${shortHeading(s.heading)}`)}]`, "    direction TB", ...mine.map((t) => `    ${id(t)}[${mq(t, 48)}]`), "  end");
   });
-  for (const l of doc.concept_links ?? []) if (home.has(l.from) && home.has(l.to)) lines.push(`  ${id(l.from)} -->|${ml(l.label)}| ${id(l.to)}`);
+  for (const l of doc.concept_links ?? []) if (home.has(l.from) && home.has(l.to)) lines.push(`  ${id(l.from)} -->|${mq(l.label, 48)}| ${id(l.to)}`);
   lines.push(
     "  classDef default fill:#e8edff,stroke:#3b5bdb,color:#1f2433",
+    "  classDef main fill:#c9d6ff,stroke:#2b4acb,stroke-width:2.5px,color:#1f2433,font-weight:bold",
     ...doc.sections.map((_, i) => `  style s${i} fill:transparent,stroke:#adb5bd,stroke-dasharray:4 3,color:#5d6680`).filter((_, i) => terms.some((t) => home.get(t) === i)),
   );
+  if (main.size) lines.push(`  class ${terms.filter((t) => main.has(t)).map(id).join(",")} main`);
   for (const t of terms) lines.push(`  %% jump ${id(t)} ${badge(home.get(t)! + 1)}`);
   return lines.join("\n");
 }
 
-/** The concept map as a plain diagram (for the printed lesson), each box naming its section. */
-export function conceptDiagram(doc: LessonDoc, sectionRef: (i: number) => string): DiagramSpec | null {
+export interface ConceptLayout {
+  groups: { section: number; heading: string; terms: { id: string; term: string; main: boolean }[] }[];
+  links: { from: string; to: string; label: string }[];
+}
+
+/** The concept map as data, for drawing it elsewhere (the printed lesson): groups by section, and the links. */
+export function conceptLayout(doc: LessonDoc): ConceptLayout | null {
   const home = homes(doc);
   if (home.size < 2) return null;
   const terms = [...home.keys()];
+  const main = new Set(mainTerms(doc));
+  const id = (t: string) => `k${terms.indexOf(t)}`;
   return {
-    direction: "LR",
-    nodes: terms.map((t, i) => ({ id: `k${i}`, label: `${t} ${sectionRef(home.get(t)!)}` })),
-    edges: (doc.concept_links ?? []).filter((l) => home.has(l.from) && home.has(l.to)).map((l) => ({ from: `k${terms.indexOf(l.from)}`, to: `k${terms.indexOf(l.to)}`, label: l.label })),
+    groups: doc.sections
+      .map((s, i) => ({ section: i, heading: shortHeading(s.heading, 56), terms: terms.filter((t) => home.get(t) === i).map((t) => ({ id: id(t), term: t, main: main.has(t) })) }))
+      .filter((g) => g.terms.length),
+    links: (doc.concept_links ?? []).filter((l) => home.has(l.from) && home.has(l.to)).map((l) => ({ from: id(l.from), to: id(l.to), label: l.label })),
   };
 }
