@@ -162,6 +162,14 @@ CREATE VIRTUAL TABLE IF NOT EXISTS topics_fts USING fts5(
   tokenize = 'porter unicode61'
 );
 
+CREATE TABLE IF NOT EXISTS topic_undo (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  label TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  data TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_materials_course ON materials(course_id);
 
 CREATE INDEX IF NOT EXISTS idx_topics_course ON topics(course_id);

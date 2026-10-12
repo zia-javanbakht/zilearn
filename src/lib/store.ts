@@ -305,8 +305,25 @@ export function replaceTopics(courseId: string, generated: NewTopic[]) {
         cur = parentOf.get(cur) ?? null;
       }
       if (cyclic) parentOf.set(id, null);
-      else if (pid) setParent.run(pid, id);
     }
+    // A topic the student moved stays where they put it, when that place survived and causes no loop.
+    for (const t of old) {
+      if (!t.manual || !reused.has(t.id) || t.parent_id === (parentOf.get(t.id) ?? null)) continue;
+      if (t.parent_id && !done.has(t.parent_id) && !keep.some((k) => k.id === t.parent_id)) continue;
+      let cur = t.parent_id;
+      let cyclic = false;
+      for (let hops = 0; cur && hops < 1000; hops++) {
+        if (cur === t.id) {
+          cyclic = true;
+          break;
+        }
+        cur = parentOf.has(cur) ? parentOf.get(cur) ?? null : (old.find((o) => o.id === cur)?.parent_id ?? null);
+      }
+      if (cyclic) continue;
+      parentOf.set(t.id, t.parent_id);
+      d.prepare("UPDATE topics SET position = ? WHERE id = ?").run(t.position, t.id);
+    }
+    for (const [id, pid] of parentOf) if (pid) setParent.run(pid, id);
     // Put kept topics back under their parent when it survived, else at the top level, after the new ones.
     const alive = new Set([...done, ...keep.map((t) => t.id)]);
     keep.forEach((t, i) => {
@@ -316,12 +333,12 @@ export function replaceTopics(courseId: string, generated: NewTopic[]) {
   })();
 }
 
-function removedTitles(courseId: string): Set<string> {
+export function removedTitles(courseId: string): Set<string> {
   const r = db().prepare("SELECT removed_topics FROM courses WHERE id = ?").get(courseId) as { removed_topics: string | null } | undefined;
   return new Set(json<string[]>(r?.removed_topics ?? null, []));
 }
 
-function setRemovedTitles(courseId: string, titles: Set<string>) {
+export function setRemovedTitles(courseId: string, titles: Set<string>) {
   db().prepare("UPDATE courses SET removed_topics = ? WHERE id = ?").run(JSON.stringify([...titles].slice(-2000)), courseId);
 }
 
@@ -343,7 +360,7 @@ export function withoutRemoved(topics: NewTopic[], removed: Set<string>): NewTop
     });
 }
 
-function descendants(courseId: string, id: string): Topic[] {
+export function descendants(courseId: string, id: string): Topic[] {
   const all = listTopics(courseId);
   const out: Topic[] = [];
   const walk = (pid: string) => all.filter((t) => t.parent_id === pid).forEach((t) => (out.push(t), walk(t.id)));
@@ -414,10 +431,13 @@ export function removeTopic(id: string, keepChildren = false): boolean {
   d.transaction(() => {
     if (keepChildren) d.prepare("UPDATE topics SET parent_id = ? WHERE parent_id = ?").run(t.parent_id, id);
     const removed = removedTitles(t.course_id);
+    // A name stays allowed while another copy of the topic is left in the map.
+    const gone = new Set(branch.map((b) => b.id));
+    const left = new Set(listTopics(t.course_id).filter((x) => !gone.has(x.id)).map((x) => normTitle(x.title)));
     for (const b of branch) {
       d.prepare("UPDATE plan_items SET topic_id = NULL WHERE topic_id = ?").run(b.id);
       d.prepare("DELETE FROM topics_fts WHERE topic_id = ?").run(b.id);
-      removed.add(normTitle(b.title));
+      if (!left.has(normTitle(b.title))) removed.add(normTitle(b.title));
     }
     setRemovedTitles(t.course_id, removed);
     d.prepare("DELETE FROM topics WHERE id = ?").run(id); // subtopics go with it (ON DELETE CASCADE)
