@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import { aiEnabled, generateText, providerName } from "./ai";
-import { findScannedPages, pageList } from "./ocr";
+import { findScannedPages, ocrLayerPages, pageList } from "./ocr";
+import { fixMathGlyphs, isPoor, mathsHeavy, OCR_PRODUCER, pageQuality, pagesFromLines, pdfLines, wordCounts, type GlyphReport } from "./pdfText";
 import { repairNote, repairText } from "./textRepair";
 import type { MaterialKind, ScanInfo } from "./types";
 
@@ -72,59 +73,124 @@ function ok(text: string): Extracted {
 }
 
 async function extractPdf(buf: Buffer): Promise<Extracted> {
-  const { extractText, getDocumentProxy } = await import("unpdf");
+  const { getDocumentProxy } = await import("unpdf");
   const pdf = await getDocumentProxy(new Uint8Array(buf));
-  const { text } = await extractText(pdf, { mergePages: false });
-  const raw = (Array.isArray(text) ? text : [text]).map((p) => p.trim());
+  // Lines with font sizes: running heads and page numbers dropped, larger lines marked as headings.
+  const layered = await ocrLayerPages(pdf);
+  const { pages: raw, running } = pagesFromLines(await pdfLines(pdf), { ocrPages: layered });
   const scan = await findScannedPages(pdf, raw);
+  const meta = (await pdf.getMetadata().catch(() => null)) as { info?: { Producer?: string; Creator?: string } } | null;
+  const scanner = OCR_PRODUCER.test(`${meta?.info?.Producer ?? ""} ${meta?.info?.Creator ?? ""}`);
   // Repair the whole document at once: a word spelled right on one page vouches for a fix on another.
-  const { text: repaired, report } = repairText(joinPages(raw));
+  // Ligature slots are read before the symbol-font glyphs, which share some of their codes.
+  const { text: rep, report } = repairText(joinPages(raw));
+  const { text: repaired, report: glyphs } = fixMathGlyphs(rep);
   const pages = splitPages(repaired, raw.length);
-  const fixed = repairNote(report);
-  if (!scan.pages.length) return withNote(ok(repaired), fixed);
-
   const scanned = new Set(scan.pages);
-  const textPages = raw.length - scan.pages.length;
-  const which = scan.pages.length === raw.length ? "This PDF is scanned pages (pictures without text)" : `Page${scan.pages.length === 1 ? "" : "s"} ${pageList(scan.pages)} ${scan.pages.length === 1 ? "is a picture" : "are pictures"} without text`;
-  // Little or no embedded text: the AI can read the pages directly.
-  if (aiEnabled() && buf.length < 30 * 1024 * 1024) {
-    try {
-      const part = scan.pages.length === raw.length ? buf : await pickPages(buf, scan.pages);
-      const { text: md, truncated } = await generateText({
-        effort: "low",
-        maxTokens: 32000,
-        prompt: [
-          { type: "document", source: { type: "base64", media_type: "application/pdf", data: part.toString("base64") } },
-          {
-            type: "text",
-            text: `Transcribe this document into clean Markdown. Start each page with a line "=== Page N ===" (N counts from 1 in this document). Keep headings, lists, equations (as LaTeX) and tables. Describe important diagrams in one or two sentences in [brackets]. Spell words correctly where the scan is hard to read, using the context. Output only the transcription.`,
-          },
-        ],
-      });
-      const read = transcribedPages(md, scan.pages.length);
-      const all = pages.map((p, i) => (scanned.has(i + 1) ? (read[scan.pages.indexOf(i + 1)] ?? "") : p));
-      const result = repairText(joinPages(all)).text;
+  const counts = wordCounts(repaired);
+  const poor = pages.flatMap((p, i) => (!scanned.has(i + 1) && isPoor(pageQuality(p, counts), scanner || layered.has(i + 1)) ? [i + 1] : []));
+  const maths = pages.flatMap((p, i) => (!scanned.has(i + 1) && mathsHeavy(raw[i]) ? [i + 1] : []));
+  const fixes = [repairNote(report), glyphNote(glyphs, running)].filter(Boolean).join(" ");
+  const info: ScanInfo = { pages: scan.pages, total: scan.total, ...(poor.length ? { poor } : {}), ...(maths.length ? { maths } : {}) };
+  const reread = [...new Set([...scan.pages, ...poor, ...maths])].sort((a, b) => a - b);
+
+  if (aiEnabled() && reread.length && buf.length < 30 * 1024 * 1024) {
+    const read = await transcribePages(buf, reread);
+    if (read.size) {
+      const all = pages.map((p, i) => read.get(i + 1) ?? p);
+      const missed = reread.filter((n) => !read.has(n));
+      const unreadScans = scan.pages.filter((n) => !read.has(n));
       const by = providerName();
+      const what = [
+        scan.pages.length ? `${scan.pages.length} scanned` : "",
+        poor.length ? `${poor.length} with a poor text layer` : "",
+        maths.length ? `${maths.length} with equations` : "",
+      ].filter(Boolean);
       return {
-        text: result,
-        status: truncated ? "partial" : "ready",
-        note: truncated
-          ? `${which}; ${by} read them but the PDF was too long to finish. Split it for the rest, or add a text layer.`
-          : `${which}; ${by} read ${scan.pages.length === 1 ? "it" : "them"}. Add a text layer to make the PDF itself searchable.`,
-        scan: { ...scan, text_by: "ai" },
+        text: all.join("\n\n").trim() ? joinPages(all) : "",
+        status: unreadScans.length > scan.pages.length / 2 && scan.pages.length > raw.length / 2 ? "partial" : "ready",
+        note: `${by} read ${read.size} page${read.size === 1 ? "" : "s"} from the PDF itself (${what.join(", ")}).${missed.length ? ` Pages ${pageList(missed)} couldn't be read this way and keep the PDF's own text.` : ""}${fixes ? ` ${fixes}` : ""}`,
+        scan: { ...info, text_by: scan.pages.length ? "ai" : null, ai_pages: [...read.keys()].sort((a, b) => a - b) },
       };
-    } catch (err) {
-      console.error("AI transcription of scanned pages failed", err);
     }
   }
+
+  const notes: string[] = [];
+  if (scan.pages.length) {
+    const which = scan.pages.length === raw.length ? "This PDF is scanned pages (pictures without text)" : `Page${scan.pages.length === 1 ? "" : "s"} ${pageList(scan.pages)} ${scan.pages.length === 1 ? "is a picture" : "are pictures"} without text`;
+    notes.push(`${which}. Use “Add text layer” to read ${scan.pages.length === 1 ? "it" : "them"} with OCR on this computer${aiEnabled() ? "" : ", or choose an AI provider in Settings to transcribe"}.`);
+  }
+  if (poor.length)
+    notes.push(`The PDF's own text on page${poor.length === 1 ? "" : "s"} ${pageList(poor)} is a poor OCR layer, so words and equations there are garbled. ${aiEnabled() ? `“Read again” asks ${providerName()} to transcribe those pages from the PDF.` : "With an AI provider (Settings), “Read again” transcribes those pages from the PDF."}`);
+  else if (maths.length >= 2) notes.push(`Equations on pages ${pageList(maths)} lose their layout in the PDF's text. ${aiEnabled() ? `“Read again” asks ${providerName()} to write them out as LaTeX.` : "With an AI provider (Settings), “Read again” writes them out as LaTeX."}`);
+  if (fixes) notes.push(fixes);
+  const textPages = raw.length - scan.pages.length;
+  const t = repaired.replace(/^--- Page \d+ ---$/gm, "").trim() ? repaired : "";
   return {
-    text: repaired,
+    text: t,
     // A few pictured pages in a long document still leave plenty to study from.
-    status: textPages >= Math.max(1, raw.length / 2) ? "ready" : "partial",
-    note: `${which}. Use “Add text layer” to read ${scan.pages.length === 1 ? "it" : "them"} with OCR on this computer${aiEnabled() ? "" : ", or choose an AI provider in Settings to transcribe"}.${fixed ? ` ${fixed}` : ""}`,
-    scan,
+    status: !t ? "partial" : textPages >= Math.max(1, raw.length / 2) ? "ready" : "partial",
+    note: !t && !notes.length ? "No text found in this file." : notes.join(" ") || null,
+    ...(scan.pages.length || poor.length || maths.length ? { scan: info } : {}),
   };
 }
+
+/** What the page cleanup did, for the material's note. */
+function glyphNote(g: GlyphReport, running: number): string {
+  const bits: string[] = [];
+  if (running >= 3) bits.push("running headers and page numbers removed");
+  if (g.mathpi || g.controls >= 3 || g.integrals) bits.push("maths symbols from the PDF's symbol fonts restored");
+  return bits.length ? `${bits.join("; ").replace(/^./, (c) => c.toUpperCase())}.` : "";
+}
+
+/** Pages read per AI call: a page of dense maths is 1-2k tokens of LaTeX. */
+const BATCH = 6;
+
+/**
+ * Transcribe some pages (1-based) from the PDF itself, a few per call, so a long maths-heavy document
+ * fits. Returns the pages read; a batch that fails leaves its pages out.
+ */
+export async function transcribePages(buf: Buffer, pages: number[]): Promise<Map<number, string>> {
+  const batches: number[][] = [];
+  for (let i = 0; i < pages.length; i += BATCH) batches.push(pages.slice(i, i + BATCH));
+  const out = new Map<number, string>();
+  let next = 0;
+  const work = async () => {
+    while (next < batches.length) {
+      const batch = batches[next++];
+      try {
+        const part = await pickPages(buf, batch);
+        const { text: md } = await generateText({
+          effort: "low",
+          maxTokens: 16000,
+          prompt: [
+            { type: "document", source: { type: "base64", media_type: "application/pdf", data: part.toString("base64") } },
+            { type: "text", text: TRANSCRIBE(batch.length) },
+          ],
+        });
+        const read = transcribedPages(md, batch.length);
+        // Without page markers the answer can't be placed, unless there was only one page.
+        if (read.length === 1 && batch.length > 1 && !/^\s*=+\s*Page/im.test(md)) continue;
+        read.forEach((t, k) => {
+          if (t.trim() && batch[k]) out.set(batch[k], t.trim());
+        });
+      } catch (err) {
+        console.error("AI transcription of PDF pages failed", err);
+      }
+    }
+  };
+  await Promise.all([work(), work(), work()]);
+  return out;
+}
+
+const TRANSCRIBE = (n: number) =>
+  `Transcribe ${n === 1 ? "this page" : `these ${n} pages`} of a PDF into clean Markdown, so a student can learn from it. Start each page with a line "=== Page N ===" (N counts from 1 in this document).
+- Headings as Markdown headings (# for the document title, ## for sections, ### below), with their numbers.
+- Every equation in LaTeX: inline as $...$, display as $$...$$ on its own lines, keeping its number as \\tag{n}. Keep primes, bars, hats, tildes, transposes and inverses, bold vectors and tensors, and blackboard bold exactly as printed.
+- Tables as Markdown tables. A figure becomes one line "[Figure n: what it shows]"; don't copy the labels inside figures into the text.
+- Leave out running headers and footers, page numbers, and line-end hyphens (join the word).
+- If the page is a scan, fix OCR errors from the context, but never invent what you can't read: write [unreadable] instead.
+Output only the transcription.`;
 
 const PAGE = /^--- Page (\d+) ---$/m;
 

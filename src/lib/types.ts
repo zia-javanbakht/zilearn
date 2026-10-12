@@ -102,6 +102,12 @@ export interface ScanInfo {
   layer?: boolean;
   /** Who read the pictured pages for the material's text, if anyone. */
   text_by?: "ai" | "ocr" | null;
+  /** Pages whose own text layer is too damaged to trust (a poor OCR layer from a scanner). */
+  poor?: number[];
+  /** Pages with display maths the text layer flattens. */
+  maths?: number[];
+  /** Pages the AI read again from the PDF itself (the scanned, poor and maths pages). */
+  ai_pages?: number[];
 }
 
 export interface DigestTopic {

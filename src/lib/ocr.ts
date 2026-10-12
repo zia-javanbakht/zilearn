@@ -50,6 +50,23 @@ export async function findScannedPages(pdf: Pdf, texts: string[]): Promise<PageS
   return { pages, total: pdf.numPages };
 }
 
+/**
+ * Pages carrying an OCR layer: invisible text (rendering mode 3) over a picture, as scanners and
+ * Acrobat's Paper Capture write it. That text was guessed from the image, so it can't be trusted the
+ * way a born-digital PDF's text can.
+ */
+export async function ocrLayerPages(pdf: Pdf): Promise<Set<number>> {
+  const { OPS } = await (await import("unpdf")).getResolvedPDFJS();
+  const imageOps = new Set<number>([OPS.paintImageXObject, OPS.paintInlineImageXObject, OPS.paintImageMaskXObject, OPS.paintImageXObjectRepeat]);
+  const out = new Set<number>();
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const { fnArray, argsArray } = await (await pdf.getPage(i)).getOperatorList();
+    const invisible = fnArray.some((op: number, k: number) => op === OPS.setTextRenderingMode && argsArray[k]?.[0] === 3);
+    if (invisible && fnArray.some((op: number) => imageOps.has(op))) out.add(i);
+  }
+  return out;
+}
+
 /** "3", "3-5", "2, 4-6": page numbers for a note. */
 export function pageList(pages: number[]): string {
   const out: string[] = [];

@@ -56,6 +56,7 @@ const SLOTS: Record<string, string> = {
 const MARKER = "[\\uFFFD\\uE000-\\uF8FF\\x0B-\\x0F\\x1B-\\x1F]";
 // Prefixes that keep their hyphen when a line break falls after them ("self-\nadjoint" is "self-adjoint").
 const KEEP_HYPHEN = new Set("self well non ill all half cross high low long short full semi quasi pre post anti multi first second third two three one time state".split(" "));
+const SPACED_CAPS = new Set(["AND", "THE", "FOR", "ARE", "NOT", "BUT", "ITS"]);
 // Real two-letter words: anything else of that length ("de", "ne") is a fragment, not a word.
 const SHORT_WORDS = new Set("a i am an as at be by do go he if in is it me my no of on or so to up us we ok ah oh ox".split(" "));
 
@@ -157,6 +158,15 @@ export function repairText(input: string, opts: RepairOptions = {}): { text: str
     return joined;
   });
 
+  // Short capitals spaced out in a title ("METHODS A N D THE"): only the common little words.
+  text = text.replace(/\b([A-Z]) ([A-Z]) ([A-Z])\b/g, (all, a: string, b: string, c: string) => {
+    const joined = a + b + c;
+    if (!SPACED_CAPS.has(joined)) return all;
+    report.spaced++;
+    note(all, joined);
+    return joined;
+  });
+
   // 5. OCR letter-shape confusions, judged by the document's own majority spelling.
   if (opts.ocr) text = fixOcrShapes(text, opts.context, report, note);
   return { text, report };
@@ -210,8 +220,9 @@ function fixLigatureWords(text: string, vocab: Vocab, report: RepairReport, note
           merge(i, i + 2, likeCase(w0, joined));
           continue;
         }
-        // "e ect", "di erent", "o ce": the ligature became the space.
-        const fits = LIGS.map((l) => l0 + l + l1).filter((c) => vocab.has(c));
+        // "e ect", "di erent", "o ce": the ligature became the space. Two lone letters ("e e") are
+        // more likely maths than a word.
+        const fits = l0.length + l1.length < 3 ? [] : LIGS.map((l) => l0 + l + l1).filter((c) => vocab.has(c));
         const pick = fits.find((c) => vocab.inDoc(c)) ?? (fits.length === 1 ? fits[0] : null);
         if (pick) {
           merge(i, i + 2, likeCase(w0, pick));

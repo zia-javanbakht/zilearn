@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
-import { splitSections, stem, topKeywords, truncate } from "./text";
+import { studySections, stem, topKeywords, truncate } from "./text";
 import { stripTimestamps } from "./transcript";
 import { addTopic, getMaterial, listTopics, normTitle, setDigest, updateMaterial } from "./store";
 import { checkKeywords, isGarbled, isWord, repairTerm, repairText } from "./textRepair";
@@ -214,7 +214,7 @@ export function offlineDigest(raw: string): Digest {
   const text = repairText(raw).text;
   const plain = stripTimestamps(text);
   const terms = noMath(plain);
-  const sections = splitSections(text).filter((s) => s.heading);
+  const sections = studySections(text).filter((s) => s.heading);
   let topics: DigestTopic[];
   if (sections.length >= 2) {
     topics = sections.slice(0, 15).map((s) => ({

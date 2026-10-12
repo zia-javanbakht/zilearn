@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
 import { offlineDigest } from "./digest";
-import { splitSections, topKeywords, truncate } from "./text";
+import { studySections, topKeywords, truncate } from "./text";
 import { checkKeywords, repairTerm } from "./textRepair";
 import type { NewTopic } from "./store";
 import type { Course, Material } from "./types";
@@ -102,7 +102,7 @@ export function heuristicTopics(materials: Material[]): NewTopic[] {
   materials.forEach((m, i) => {
     const ref = `M${i}`;
     const text = m.text ?? "";
-    const sections = splitSections(text).filter((s) => s.heading);
+    const sections = studySections(text).filter((s) => s.heading);
     // Transcripts have no headings: their topics come from the material's digest instead.
     const digest = m.digest ?? (sections.length < 2 && text.trim() ? offlineDigest(text) : null);
     topics.push({
