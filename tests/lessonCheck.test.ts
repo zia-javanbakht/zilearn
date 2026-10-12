@@ -47,6 +47,21 @@ describe("lesson checks", () => {
     expect(d.sections[0].blocks[0].figure).toBeNull();
   });
 
+  it("checks diagram labels like body text and turns HTML sub- and superscripts into maths", () => {
+    const d = doc("b");
+    d.sections[0].blocks[0].figure = {
+      type: "diagram",
+      caption: "c",
+      plot: null,
+      diagram: { direction: "LR", nodes: [{ id: "a", label: "∫<sub>S_p</sub>σ·n̂ dA" }, { id: "b", label: "bad $\\frac{a}{b$" }], edges: [{ from: "a", to: "b", label: "F<sup>int</sup>" }] },
+    };
+    const problems = lintLesson(d);
+    expect(problems.map((p) => p.path)).toEqual(["sections.0.blocks.0.figure.diagram.nodes.1.label"]);
+    const g = d.sections[0].blocks[0].figure!.diagram!;
+    expect(g.nodes[0].label).toBe("∫$_{S_p}$σ·n̂ dA");
+    expect(g.edges[0].label).toBe("F$^{int}$");
+  });
+
   it("shows maths that still won't render as code", async () => {
     expect(defuse("ok $x^2$ but $\\frac{1}{$ here")).toBe("ok $x^2$ but `\\frac{1}{` here");
     const d = await checkLesson(doc("see $\\undefinedmacro{x}$"));

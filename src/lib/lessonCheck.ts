@@ -43,8 +43,9 @@ export function mathProblems(s: string): string[] {
 
 const HTML = /<\/?(?:details|summary|div|span|p|b|i|em|strong|u|sup|sub|code|pre|table|thead|tbody|tr|td|th|ul|ol|li|h[1-6]|font|center|a|img|br|hr)\b[^<>]*>/gi;
 
-/** Removes HTML tags outside maths (lessons are Markdown; the app adds its own boxes). */
+/** Removes HTML tags outside maths (lessons are Markdown; the app adds its own boxes); sub- and superscripts become maths. */
 function stripHtml(s: string): string {
+  s = s.replace(/<sub>([^<>$]{1,20})<\/sub>/gi, "$$_{$1}$$").replace(/<sup>([^<>$]{1,20})<\/sup>/gi, "$$^{$1}$$");
   let out = "";
   let last = 0;
   for (const m of s.matchAll(MATH)) {
@@ -72,6 +73,12 @@ export function* texts(doc: LessonDoc): Generator<[string, string]> {
       if (b.solution) yield [`sections.${i}.blocks.${j}.solution`, b.solution];
       if (b.try_steps) yield [`sections.${i}.blocks.${j}.try_steps`, b.try_steps];
       if (b.try_answer) yield [`sections.${i}.blocks.${j}.try_answer`, b.try_answer];
+      // A diagram's labels are text the student reads too, with the same maths.
+      const d = b.figure?.diagram;
+      if (d) {
+        for (const [k, n] of d.nodes.entries()) yield [`sections.${i}.blocks.${j}.figure.diagram.nodes.${k}.label`, n.label];
+        for (const [k, e] of d.edges.entries()) if (e.label) yield [`sections.${i}.blocks.${j}.figure.diagram.edges.${k}.label`, e.label];
+      }
     }
   }
   for (const [i, g] of doc.glossary.entries()) {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { PDFDocument, StandardFonts } from "pdf-lib";
-import { fixMathGlyphs, isPoor, isPublisherLine, mathsHeavy, pageQuality, pagesFromLines, pdfLines, runningLines, shatteredMatrices, wordCounts, type PdfLine } from "@/lib/pdfText";
+import { figureLabels, fixMathGlyphs, isPoor, isPublisherLine, mathsHeavy, pageQuality, pagesFromLines, pdfLines, runningLines, shatteredMatrices, type PdfLine, wordCounts } from "@/lib/pdfText";
 import { isAuthorLine, splitSections, studySections } from "@/lib/text";
 
 const generateText = vi.fn();
@@ -245,5 +245,14 @@ describe("AI transcription of pages", () => {
     generateText.mockResolvedValue({ text: "Some text with no markers", truncated: false });
     const { transcribePages } = await import("@/lib/extract");
     expect((await transcribePages(await pdf(3), [1, 2])).size).toBe(0);
+  });
+
+  it("points to a drawn figure instead of its labels, but keeps tables", () => {
+    const fig = ["### Flow", "Pre", "Gauss", "Quadrature", "𝑲𝑼 = 𝒇", "(reduced)", "Figure 2. The FE pipeline.", "Prose after."];
+    expect(figureLabels(fig, 6)).toEqual(["### Flow", "[diagram, see PDF page 6]", "Figure 2. The FE pipeline.", "Prose after."]);
+    const prose = ["A paragraph that ends just before the figure and carries on for a while,", "locally", "Figure 1. Caption."];
+    expect(figureLabels(prose, 1)).toEqual(prose);
+    const table = ["Table V. Bending of a plate", "Mesh Present Series", "2 x 2 3.97 4.06", "4 x 4 4.04 4.06", "8 x 8 4.05 4.06", "Fig. 3. Mesh."];
+    expect(figureLabels(table, 35)).toEqual(table);
   });
 });

@@ -372,7 +372,7 @@ export function pagesFromLines(pages: PdfLine[][], opts: { ocrPages?: ReadonlySe
       level: x.level && p === 0 && i < 12 && sizes.length > 1 && x.size >= sizes[0] * 0.98 ? 1 : x.level,
     }));
     const kept = structural(marked, p, deck);
-    return shatteredMatrices(kept.map((x) => (x.level ? `${"#".repeat(x.level)} ${x.text}` : x.text)), p + 1).join("\n").trim();
+    return figureLabels(shatteredMatrices(kept.map((x) => (x.level ? `${"#".repeat(x.level)} ${x.text}` : x.text)), p + 1), p + 1).join("\n").trim();
   });
   return { pages: texts, running };
 }
@@ -393,6 +393,30 @@ export function shatteredMatrices(lines: string[], page: number): string[] {
       }
     }
     out.push(lines[i]);
+  }
+  return out;
+}
+
+/**
+ * A drawn figure's labels come out as a run of short lines ("Gauss", "Quadrature", "𝑲𝑼 = 𝒇", "(reduced)")
+ * just before its caption; read as prose they are noise, so the run is pointed to instead. A run is at least
+ * four lines of at most five plain words with no sentence end, stopping at a heading, list item, blank line
+ * or prose. A run that holds or follows a table's caption, or three rows of numbers, is a table and is kept.
+ */
+export function figureLabels(lines: string[], page: number): string[] {
+  const words = (l: string) => (l.match(/[A-Za-z]{2,}/g) ?? []).length;
+  const label = (l: string) => l.trim() !== "" && !/^\s*(#|- |\d+\.\s|\[matrix)/.test(l) && !/[.;:]$/.test(l.trim()) && words(l) <= 5;
+  const out = [...lines];
+  for (let i = out.length - 1; i > 0; i--) {
+    if (!/^\s*(Figure|Fig\.)\s*\d+[.:]/.test(out[i])) continue;
+    let start = i;
+    while (start > 0 && label(out[start - 1])) start--;
+    const run = out.slice(start, i);
+    const table = /^\s*Table\s+[\dIVXl]+\b/i.test(out[start - 1] ?? "") || run.some((l) => /^\s*Table\s+[\dIVXl]+\b/i.test(l)) || run.filter((l) => (l.match(/\d+(?:[.,:]\d+)?/g) ?? []).length >= 3).length >= 3;
+    if (run.length >= 4 && !table) {
+      out.splice(start, i - start, `[diagram, see PDF page ${page}]`);
+      i = start;
+    }
   }
   return out;
 }
