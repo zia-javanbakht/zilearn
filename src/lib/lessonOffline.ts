@@ -33,7 +33,8 @@ function units(sources: Source[]): Unit[] {
   for (const s of sources) {
     let cur: Unit = { title: s.title, section: null, lines: [] };
     for (const line of s.text.split("\n")) {
-      const h = line.match(/^#{1,6}\s+(.*)$/);
+      // "References" on a line of its own starts the back matter even when it wasn't marked as a heading.
+      const h = line.match(/^#{1,6}\s+(.*)$/) ?? (BACK_MATTER.test(line.trim()) ? ["", line.trim()] : null);
       if (h) {
         if (cur.lines.some((l) => l.trim())) out.push(cur);
         cur = { title: s.title, section: h[1].replace(/^(lecture|week|tutorial|chapter)\s*\d+\s*[:.-]\s*/i, "").trim(), lines: [] };
@@ -48,6 +49,31 @@ function units(sources: Source[]): Unit[] {
 /** Publishing boilerplate that can sit in a paper's text: funding and conflict statements, licences, ORCID. */
 const BOILERPLATE = /^(funding|declaration of conflicting interests|the author\(s\) (received|declared|disclosed)|the authors? (declare|received|disclosed)|orcid|this article is distributed under|open access|data availability|conflicts? of interest)/i;
 
+const CAPTION = /^(figure|fig\.|table|scheme)\s*[\dIVX]+[.:]\s/i;
+const SENTENCE_END = /[.!?]["')\]]?(\d+(,\d+)*)?$/;
+const PAGE_MARK = /^-{2,}\s*page\s+\d+\s*-{2,}$/i;
+/** A flattened table row: mostly numbers ("Elastic modulus (GPa) 294 620 3.15"). */
+function tableRow(line: string): boolean {
+  const toks = line.split(/\s+/).filter(Boolean);
+  const nums = toks.filter((x) => /^[-+±~≈]?\d[\d.,]*%?$/.test(x)).length;
+  return nums >= 3 && nums / toks.length >= 0.4;
+}
+/** A line of running text rather than a table's header or cells. */
+function prose(line: string): boolean {
+  const toks = line.split(/\s+/).filter(Boolean);
+  const nums = toks.filter((x) => /\d/.test(x)).length;
+  return toks.filter((x) => /^[a-z][a-z'’-]+[,.;:]?$/.test(x)).length >= 5 && nums / toks.length < 0.25;
+}
+
+/** Pieces split after "i.e." or "et al." belong to one sentence. */
+function joinAbbreviations(pieces: string[]): string[] {
+  const out: string[] = [];
+  for (const p of pieces)
+    if (out.length && /\b(i\.e|e\.g|et al|etc|vs|cf|figs?|eqs?|refs?|no|approx|resp)\.$/i.test(out[out.length - 1])) out[out.length - 1] += ` ${p}`;
+    else out.push(p);
+  return out;
+}
+
 /** Sentences of a unit's prose (not lists, tables or display maths), each with where it came from. */
 function sentences(u: Unit): Sentence[] {
   const out: Sentence[] = [];
@@ -55,11 +81,27 @@ function sentences(u: Unit): Sentence[] {
   // Paragraphs end at blank lines and at anything that isn't prose, so lead-ins don't run into the next line.
   const paras: string[] = [];
   let cur: string[] = [];
+  let inCaption = false;
+  let inTable = false;
   for (const l of u.lines) {
-    if (!l.trim() || /^\s*([-*+]|\d+[.)]|\||\$\$)/.test(l)) {
+    const line = l.trim();
+    // Captions (with the lines they wrap onto), the table rows under a table's caption, and page
+    // markers describe the layout, not the subject; a paragraph they interrupt carries on after them.
+    if (CAPTION.test(line) || (inCaption && line)) {
+      inCaption = !SENTENCE_END.test(line);
+      inTable = /^table/i.test(line) || inTable;
+      continue;
+    }
+    if (PAGE_MARK.test(line) || tableRow(line) || (inTable && line && !prose(line))) continue;
+    inTable = false;
+    if (!line || /^\s*([-*+]|\d+[.)]|\||\$\$)/.test(l)) {
       if (cur.length) paras.push(cur.join(" "));
       cur = [];
-    } else cur.push(l.trim());
+    } else {
+      // A page break or figure between two halves of a sentence: the lower-case half joins the first.
+      if (!cur.length && /^[a-z]/.test(line) && paras.length && !/[.!?:]$/.test(paras[paras.length - 1])) cur.push(paras.pop()!);
+      cur.push(line);
+    }
   }
   if (cur.length) paras.push(cur.join(" "));
   for (const para of paras)
@@ -70,7 +112,7 @@ function sentences(u: Unit): Sentence[] {
         stamp = st[1];
         continue;
       }
-      for (const raw of piece.split(/(?<=[.!?])\s+(?=[A-Z$(])/)) {
+      for (const raw of joinAbbreviations(piece.split(/(?<=[.!?])\s+(?=[A-Z$(])/))) {
         // A clause continuing a display equation ("where ... is ...") reads as a sentence without its first word.
         let text = raw.replace(/\s+/g, " ").trim().replace(/^(where|and so|and|so|which)\s+(?=\$)/i, "");
         if (!text) continue;
@@ -91,8 +133,44 @@ function relevance(text: string, terms: Set<string>): number {
   return n;
 }
 
+/** Describing words that are only half of a term on their own ("high" of high-strain). */
+const ADJECTIVE = /^(high(er)?|low(er)?|large|small|big|different|new|same|other|main|good|various|several|total|present|proposed|numerical|experimental|initial|final|general|specific|simple|important|first|second|third|two|three|single|multiple)$/i;
+
+/**
+ * A single word that the materials nearly always use as part of a longer term ("fraction" in volume
+ * fraction, "low" in low-strain), or a bare describing word: not a key term on its own.
+ */
+function fragment(word: string, texts: string[]): boolean {
+  if (ADJECTIVE.test(word) || /^(types?|kinds?|ways?|parts?|terms?)$/i.test(word)) return true;
+  const esc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`(?:([\\p{L}]+)(\\s+|-))?\\b${esc}\\b(?:(-|\\s+)([\\p{L}]+))?`, "giu");
+  const near = new Map<string, number>();
+  let n = 0;
+  let modifies = 0;
+  for (const text of texts)
+    for (const m of text.replace(/\$[^$]*\$/g, " ").matchAll(re)) {
+      n++;
+      const seen = new Set<string>();
+      if (m[1] && (m[2] === "-" || !STOPWORD.test(m[1]))) seen.add(`<${m[1].toLowerCase()}`);
+      if (m[4] && (m[3] === "-" || !STOPWORD.test(m[4]))) seen.add(`>${m[4].toLowerCase()}`);
+      for (const k of seen) near.set(k, (near.get(k) ?? 0) + 1);
+      if (m[4] && !STOPWORD.test(m[4]) && !/^(is|are|was|were|has|have|can|may|will|should)$/i.test(m[4])) modifies++;
+    }
+  // Mostly followed by another word it describes ("tensile strength", "tensile load"): a modifier.
+  return n > 0 && (Math.max(0, ...near.values()) / n >= 0.5 || modifies / n >= 0.75);
+}
+const STOPWORD = /^(the|a|an|of|in|on|at|to|for|and|or|is|are|was|were|be|by|with|as|this|that|these|those|it|its|from|than|which|while|between|into|their|both)$/i;
+
+/** A term as the materials spell it, when they write it as an acronym ("rves" → "RVEs"). */
+function asWritten(term: string, texts: string[]): string {
+  const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const forms = texts.join(" ").match(new RegExp(`\\b${esc}\\b`, "gi")) ?? [];
+  const caps = forms.filter((f) => (f.match(/[A-Z]/g) ?? []).length >= 2);
+  return caps.length > forms.length / 2 ? caps[0] : term;
+}
+
 /** Words every paper uses about itself: no use as key terms on their own. */
-const GENERIC = /^(models?|methods?|results?|study|studies|paper|approach(es)?|work|analysis|analyses|data|cases?|values?|numbers?|figures?|tables?|sections?|equations?|effects?|properties|parameters?|behaviou?r|performance|process(es)?|system|problems?|solutions?|fibers|fibres)$/i;
+const GENERIC = /^(models?|methods?|results?|study|studies|paper|approach(es)?|work|analysis|analyses|data|cases?|values?|numbers?|figures?|tables?|sections?|equations?|effects?|properties|parameters?|behaviou?r|performance|process(es)?|system|problems?|solutions?|fibers|fibres|types?|kinds?)$/i;
 
 const DEFINES = /\b(is|are|means|refers to|is defined as|is called|we call|we define)\b/i;
 const ANALOGY = /\b(think of|imagine|picture|like a|as if|analogy|for example, a)\b/i;
@@ -203,20 +281,21 @@ export function offlineLesson(
   const defBlocks: LessonBlock[] = [];
   const used = new Set<string>();
   // Longer terms first, so "weight decay" claims its sentence before "decay" does.
-  const titleOnly = (k: string) => k.toLowerCase() !== t.toLowerCase() && k.toLowerCase().split(/\W+/).every((w) => t.toLowerCase().split(/\W+/).includes(w));
+  const titleWords = new Set(t.toLowerCase().split(/\W+/).map(stem));
+  const titleOnly = (k: string) => k.toLowerCase() !== t.toLowerCase() && k.toLowerCase().split(/\W+/).every((w) => titleWords.has(stem(w)));
   // The key terms the lesson is built around: the topic's keywords that the materials really use (a single
   // word must come up a few times), then the phrases the relevant material repeats most.
   const uses = (k: string) => relevant.filter((x) => mentions(x.text, k)).length;
-  const fromKeywords = [...new Set(info.keywords)].filter((k) => !GENERIC.test(k) && !titleOnly(k) && uses(k) >= (k.includes(" ") ? 1 : 3));
+  const fromKeywords = [...new Set(info.keywords)].filter((k) => !GENERIC.test(k) && !titleOnly(k) && uses(k) >= (k.includes(" ") ? 1 : 3) && (k.includes(" ") || !fragment(k, relevant.map((x) => x.text))));
   const fromText = topPhrases(relevant.map((x) => x.text.replace(/\$[^$]*\$/g, " ")).join(".\n"), 8)
     .filter((p) => p.count >= 2 && !GENERIC.test(p.phrase) && !titleOnly(p.phrase) && !fromKeywords.some((k) => mentions(k, p.phrase) || mentions(p.phrase, k)))
     .map((p) => p.phrase);
-  const candidates = [...fromKeywords, ...fromText].slice(0, 6);
+  const candidates = [...fromKeywords, ...fromText].slice(0, 6).map((k) => asWritten(k, relevant.map((x) => x.text)));
   for (const term of [t, ...[...candidates].sort((a, b) => b.split(/\s+/).length - a.split(/\s+/).length)]) {
     const def = definition(term, all);
     // A key term only gets a definition when the materials actually define it; a sentence that merely mentions it isn't one.
     // The same sentence defining two terms ("decay", "weight decay") is one definition.
-    if (!def || (term !== t && def.score < 2) || used.has(def.text)) continue;
+    if (!def || def.score < 2 || used.has(def.text)) continue;
     for (const x of def.text.split(/(?<=[.!?])\s+/)) used.add(x);
     if (term !== t) glossary.push({ term, meaning: def.meaning });
     if (defBlocks.length < (d === 1 ? 2 : 3)) defBlocks.push({ kind: "definition", title: term[0].toUpperCase() + term.slice(1), body: def.body, source: def.source });
@@ -273,7 +352,7 @@ export function offlineLesson(
     body: "1. List what is given and what is asked, with units; convert to SI.\n2. Pick the result from your formula sheet that links them, and say why it applies.\n3. Substitute, keeping units on every number.\n4. Check the answer: units, size, and a limiting case you know.",
   };
   const more: LessonBlock[] = byScore
-    .filter((s) => !used.has(s.text) && !s.lead && isStatement(s.text))
+    .filter((s) => !used.has(s.text) && !summary.includes(s.text) && !s.lead && isStatement(s.text))
     .slice(0, 3)
     .map((s) => ({ kind: "note" as const, title: "From your materials", body: s.text, source: s.source }));
 
@@ -299,6 +378,7 @@ export function offlineLesson(
     return g ? { kind: "definition", title: cap(term), body: /^\$/.test(g.meaning) ? `The **${term}** is ${g.meaning}.` : g.meaning, source: definition(term, all)?.source ?? null } : null;
   };
   const linked = new Set<string>();
+  const pairs = new Set<string>();
   const linkFor = (term: string, withMaths: boolean): LessonBlock | null => {
     const x = all.find(
       (y) =>
@@ -308,12 +388,14 @@ export function offlineLesson(
         isStatement(y.text) &&
         /\$/.test(y.text) === withMaths &&
         mentions(y.text, term) &&
-        keyTerms.some((o) => o !== term && mentions(y.text, o)),
+        keyTerms.some((o) => o !== term && !pairs.has(`${o}|${term}`) && mentions(y.text, o)),
     );
     if (!x) return null;
     linked.add(x.text);
-    const other = keyTerms.find((o) => o !== term && mentions(x.text, o))!;
-    return { kind: "keypoint", title: `How ${term} connects to ${other}`, body: x.text, source: x.source };
+    // One link per pair: "How A connects to B" makes "How B connects to A" a repeat.
+    const other = keyTerms.find((o) => o !== term && !pairs.has(`${o}|${term}`) && mentions(x.text, o))!;
+    pairs.add(`${term}|${other}`);
+    return { kind: "keypoint", title: `How ${term} and ${other} connect`, body: x.text, source: x.source };
   };
   const eqTaken = new Set<number>();
   const formulasFor = (term: string): LessonBlock[] => {
@@ -470,7 +552,7 @@ function definition(term: string, all: (Sentence & { score: number })[]): { text
   // The term must be what the sentence is about: "The damping ratio is ...", not "The properties of the
   // composites are given in Table 2", and "is given / shown / provided" reports where, not what.
   const verb = new RegExp(
-    `^(?:(?:the|a|an|this|these|such|each)\\s+)?(?:[\\w-]+\\s+){0,2}?${esc}\\s+(?:\\$[^$]+\\$\\s+|\\([^)]{1,20}\\)\\s+)?(?:is|are|means|refers to|denotes|is defined as|is called|describes)\\b(?!\\s+(?:also\\s+)?(?:given|shown|listed|provided|presented|plotted|summari[sz]ed|reported|illustrated|depicted|compared|used|obtained|calculated|computed|found|seen)\\b)`,
+    `^(?!(?:once|when|whenever|if|after|before|since|because|as|while|although|though|until|unless|where|whereas|in|on|at|for|with|by|from|to|of)\\b)(?:(?:the|a|an|this|these|such|each)\\s+)?(?:[\\w-]+\\s+){0,2}?${esc}\\s+(?:\\$[^$]+\\$\\s+|\\([^)]{1,20}\\)\\s+)?(?:is|are|means|refers to|denotes|is defined as|is called|describes)\\b(?!\\s+(?:also\\s+)?(?:given|shown|listed|provided|presented|plotted|summari[sz]ed|reported|illustrated|depicted|compared|used|obtained|calculated|computed|found|seen)\\b)`,
     "i",
   );
   const asked = new RegExp(`^what('s| is| are)\\s+(the\\s+)?${esc}\\b.*\\?$`, "i");

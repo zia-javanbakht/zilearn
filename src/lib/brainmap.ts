@@ -122,7 +122,7 @@ export function heuristicTopics(materials: Material[]): NewTopic[] {
       ref,
       parent_ref: null,
       title: own && !/\s/.test(m.title) ? clipWords(mend(own), 80) : m.title,
-      summary: digest?.summary || firstSentences(text, 2) || `${MATERIAL_KIND_LABELS[m.kind]} for this course.`,
+      summary: digest?.summary || firstSentences(abstractOf(text) ?? text, 2) || `${MATERIAL_KIND_LABELS[m.kind]} for this course.`,
       keywords: digest?.keywords.slice(0, 8) ?? topKeywords(text, 6),
       material_ids: [m.id],
       importance: m.kind === "sample_exam" ? 3 : 2,
@@ -170,10 +170,18 @@ function heuristicSummary(course: Course, materials: Material[]) {
   return `${course.name} draws on ${materials.length} item${materials.length === 1 ? "" : "s"}. Frequent themes: ${kw.join(", ")}.`;
 }
 
+/** A paper's abstract, which says what it is about better than its title and author lines do. */
+function abstractOf(text: string): string | null {
+  const m = text.slice(0, 8000).match(/^(?:#{1,6}\s*)?abstract[.:]?\s*$\n([\s\S]{80,}?)(?:\n\s*\n|\n#{1,6}\s|$)/im);
+  return m ? m[1] : null;
+}
+
 function firstSentences(text: string, n: number) {
   const s = text
     .replace(/--- Page \d+ ---/g, " ")
-    .replace(/^\s*(#{1,6}\s+|[-*]\s+|slide \d+:\s*)/gim, "")
+    // Headings (a title, the author line under it) aren't sentences of the text.
+    .replace(/^\s*#{1,6}\s+.*$/gm, "")
+    .replace(/^\s*([-*]\s+|slide \d+:\s*)/gim, "")
     .replace(/\s+/g, " ")
     .trim();
   const parts = s.match(/[^.!?]+[.!?]+/g) ?? (s ? [s] : []);
