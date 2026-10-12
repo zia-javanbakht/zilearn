@@ -273,7 +273,10 @@ export function framingProblems(doc: LessonDoc, o: FramingOptions = {}): string[
   const pitfalls = doc.sections.flatMap((s) => s.blocks.filter((b) => b.kind === "pitfall").map((b) => ({ title: b.title, words: content(b.body) })));
   // Nor should a question be answered by a pitfall, or its answer be a sentence copied from a block.
   const runs = new Set(doc.sections.flatMap((s) => s.blocks.flatMap((b) => [...ngrams(`${b.body} ${b.solution ?? ""}`, 8)])));
+  const examples = doc.sections.flatMap((s) => s.blocks.filter((b) => b.kind === "example").map((b) => ({ title: b.title, words: content(`${b.body} ${b.solution ?? ""}`) })));
   doc.check_yourself.forEach((q, i) => {
+    const ex = examples.find((x) => overlap(content(q.question), x.words) >= 0.7);
+    if (ex) out.push(`check_yourself.${i} repeats the worked example "${ex.title}" step for step: ask for a different quantity or a different kind of reasoning.`);
     const p = pitfalls.find((x) => overlap(content(`${q.question} ${q.answer}`), x.words) >= 0.6);
     if (p) out.push(`check_yourself.${i} is answered by the pitfall "${p.title}": test the idea in a new situation instead.`);
     else if ([...ngrams(q.answer, 8)].some((g) => runs.has(g))) out.push(`check_yourself.${i}'s answer copies a sentence of the lesson: ask it so the student has to apply the idea (a changed quantity or setting), not find the sentence.`);
@@ -286,7 +289,20 @@ export function framingProblems(doc: LessonDoc, o: FramingOptions = {}): string[
     const words = teachingWords(doc);
     if (words > o.budget * 1.05) out.push(`The lesson's teaching text is about ${words} words, over this level's ${o.budget}: cut repetition and restatement rather than ideas.`);
   }
-  if (o.earlier?.length) out.push(...repeats(doc, o.earlier));
+  if (o.earlier?.length) {
+    out.push(...repeats(doc, o.earlier));
+    // The map should show what this level adds, not redraw an earlier level's arrows (a new label on the same pair is fine).
+    const same = (a: string, b: string) => words(a).join(" ") === words(b).join(" ");
+    const similar = (a: string, b: string) => {
+      const [x, y] = [new Set(words(a)), new Set(words(b))];
+      const both = [...x].filter((w) => y.has(w)).length;
+      return both >= 0.5 * (x.size + y.size - both);
+    };
+    for (const l of doc.concept_links ?? []) {
+      const was = o.earlier.find((e) => (e.concept_links ?? []).some((x) => same(x.from, l.from) && same(x.to, l.to) && similar(x.label, l.label)));
+      if (was) out.push(`The link "${plainLabel(l.from)} ${l.label} ${plainLabel(l.to)}" is already on level ${was.depth}'s map: link what this level adds about these terms instead.`);
+    }
+  }
   return out;
 }
 

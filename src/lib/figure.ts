@@ -105,6 +105,7 @@ const GREEK: Record<string, string> = {
   omega: "ω", Gamma: "Γ", Delta: "Δ", Theta: "Θ", Lambda: "Λ", Pi: "Π", Sigma: "Σ", Phi: "Φ", Psi: "Ψ", Omega: "Ω",
   infty: "∞", cdot: "·", times: "×", le: "≤", leq: "≤", ge: "≥", geq: "≥", approx: "≈", ne: "≠", neq: "≠", pm: "±",
 };
+const ACCENT: Record<string, string> = { dot: "\u0307", ddot: "\u0308", hat: "\u0302", bar: "\u0304", tilde: "\u0303", vec: "\u20d7" };
 const SUB: Record<string, string> = { "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉", n: "ₙ", i: "ᵢ", j: "ⱼ", k: "ₖ", x: "ₓ", a: "ₐ", e: "ₑ", o: "ₒ", r: "ᵣ", t: "ₜ", "+": "₊", "-": "₋", "=": "₌" };
 const SUP: Record<string, string> = { "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "-": "⁻", "+": "⁺", n: "ⁿ" };
 
@@ -129,6 +130,8 @@ export function plainLabel(s: string, html = false): string {
       .replace(/\\sqrt\{([^{}]*)\}/g, (_, x: string) => (/^\\?\w+$/.test(x) ? `√${x}` : `√(${x})`))
       .replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, (_, a: string, b: string) => `${/^\w+$/.test(a) ? a : `(${a})`}/${/^([A-Za-z]|\d+(\.\d+)?)$/.test(b) ? b : `(${b})`}`)
       .replace(/\\(pm|mp|cdot|times|approx|leq|le|geq|ge|neq|ne|to|infty|partial|circ)(?![A-Za-z])/g, (_, op: string) => OPS[op])
+      // Accents as combining marks: \\dot u → u̇, \\hat x → x̂.
+      .replace(/\\(ddot|dot|hat|bar|tilde|vec)\s*(?:\{\s*([^{}]+?)\s*\}|([A-Za-z]))/g, (_, acc: string, a: string | undefined, b: string | undefined) => `${a ?? b}${ACCENT[acc]}`)
       .replace(/\\([A-Za-z]+)/g, (w, name) => GREEK[name] ?? (["mathrm", "text", "mathit", "mathbf", "operatorname"].includes(name) ? "" : w))
       .replace(/_\{([^{}]*)\}|_([0-9a-z])/gi, (w, a: string | undefined, b: string | undefined) => script(a ?? b!, SUB, "_", html))
       .replace(/\^\{([^{}]*)\}|\^([0-9n])/g, (w, a: string | undefined, b: string | undefined) => script(a ?? b!, SUP, "^", html))

@@ -174,4 +174,10 @@ describe("key terms", () => {
     expect(p).toMatch(/check_yourself.0 is answered by common_mistakes.0/);
     expect(p).toMatch(/common_mistakes.0 repeats the pitfall "Faster with more damping\?"/);
   });
+
+  it("writes accents in map labels as Unicode", async () => {
+    const { plainLabel } = await import("@/lib/figure");
+    expect(plainLabel("initial conditions $u(0), \\dot u(0)$")).toBe("initial conditions u(0), u\u0307(0)");
+    expect(plainLabel("$\\ddot{x}$")).toBe("x\u0308");
+  });
 });
