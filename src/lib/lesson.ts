@@ -199,6 +199,9 @@ const RULES = `How to write it:
 - Every equation you take from a source is written out as display maths ($$...$$ with the source's number as \\tag{n}), and its block's source names it ("Section 3, eq. (12)"). Source text can be damaged (letters run together, symbols missing, fractions flattened onto separate lines): where an equation or value you need can't be read with certainty, don't reconstruct it as the source's; say for the student that the source's form isn't reproduced here and point to where it is ("see Section 2, eq. (1)"), and give a standard form with source null if the lesson needs one. Never mention extraction, PDFs, OCR or text layers.
 - Where the sources disagree with each other (a value, a sign, a definition or a symbol that differs between two places), say so in the block: give both, cite both, and say which one the lesson follows and why.
 - When an example or question simplifies the sources' model (one dimension, small strain, linear material, no damping, a single element), say in it what the simplification leaves out and where the full model is in the sources.
+- When a source names a counted set ("the three conditions (18), (20) and (21)", "two assumptions"), list every member where the lesson mentions it.
+- Where a source has an evident slip (a sign, an index, a wrong equation number), use the correct form and say in the block that the source prints it differently; never correct it silently.
+- Quotations, history and attributions are reported only as the sources give them: don't add why one led to another.
 - A source must point to text that states that block's claim. Material from beyond the sources (standard textbook knowledge) has source null; the app marks it "Beyond your notes" so the student knows what their course said.
 - Figure captions say what the figure shows; they never state a quantity an example or question asks the student to find. A plot of an example's own numbers goes on a block after that example, never before it.
 - Each block teaches one idea. Titles name the idea. Don't repeat the same point across blocks, glossary, common_mistakes and takeaways: common_mistakes adds slips no pitfall block covers, and no check_yourself question is answered by a common mistake or pitfall in the lesson.
@@ -272,6 +275,15 @@ export function lessonRequest(topicId: string, depth: number) {
       .map((l, i) => (l ? `<level n="${i + 1}">\n${l.doc ? lessonOutline(normalizeDoc(l.doc)) : truncate(l.content, 3000)}\n</level>` : ""))
       .filter(Boolean)
       .join("\n") || null;
+  // Lessons already written on other topics from the same materials, which tend to reach for the same
+  // examples, calculations and caveats.
+  const neighbours = listTopics(topic.course_id)
+    .filter((t) => t.id !== topic.id && t.material_ids.some((id) => topic.material_ids.includes(id)))
+    .flatMap((t) => {
+      const l = [...Array(d).keys()].map((i) => getLesson(t.id, d - i)).find((x) => x?.doc);
+      return l?.doc ? [`<topic title="${t.title.replace(/"/g, "'")}">\n${truncate(lessonOutline(normalizeDoc(l.doc)), 900)}\n</topic>`] : [];
+    })
+    .slice(0, 4);
   const record = studentRecord(topicId);
   const mapText = [
     `Course: ${map.course}`,
@@ -296,6 +308,7 @@ Main key terms: ${topic.keywords.join(", ") || "(none listed)"}
 Student's self-assessment: ${map.mastery ? MASTERY_LABELS[map.mastery] : "not marked"}${record.goal ? `\n${record.goal}` : ""}
 </brainmap>
 ${record.text ? `\n<student_record>\n${record.text}\n</student_record>\nUse this record: put each mock exam slip and forgotten flashcard into common_mistakes (or a pitfall block) with the correction, unless an earlier level already corrected it (see "Mistakes covered" below), and make at least one check_yourself question retest it in a new form: one that needs the corrected idea applied in a new situation, not the correction restated. Don't name or shame; just fix the misunderstanding. Where a correction would answer one of the student's own tutorial or exam questions, correct the idea without the numbers.\n` : ""}${previous ? `\nThe student has done the earlier levels. What they used:\n<earlier_levels>\n${previous}\n</earlier_levels>\nBuild on them and add new material: never reuse their examples, numbers, questions, figures, comparisons or pitfalls. Only recall may come back to their ideas, asking in a new form; a point they already taught (see their titles and takeaways) is used or extended here, never taught again. Their key terms come back here one layer deeper (see "Main key terms" above and each level's "Depth given"); don't define them again from scratch, and where you need an earlier result, quote it in one line where you use it, phrased naturally and named by the idea it came from (vary the wording; no stock opener), instead of deriving it again.\n` : ""}
+${neighbours.length ? `\nLessons on neighbouring topics from the same materials already teach this:\n<neighbouring_lessons>\n${neighbours.join("\n")}\n</neighbouring_lessons>\nDon't repeat their examples, calculations, caveats or comparisons: where this topic needs one of their results, name the topic it comes from in a clause and use it.\n` : ""}
 Write the lesson on "${topic.title}" for pass ${d} of 4, the "${level.name}" level: ${level.goal}
 Earlier passes covered shallower levels and later ones go deeper, so teach exactly this depth.
 

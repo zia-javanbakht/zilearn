@@ -87,7 +87,7 @@ describe("headings from type sizes", () => {
     const { pages } = pagesFromLines([
       [l("Prediction of the failure", 16), l("behavior of composites", 16), ...body.slice(0, 5), l("2 Finite element model", 12), l("Generation of the RVE", 12), ...body],
     ]);
-    expect(pages[0]).toContain("## Prediction of the failure behavior of composites\n");
+    expect(pages[0]).toContain("# Prediction of the failure behavior of composites\n");
     expect(pages[0]).toContain("### 2 Finite element model\n### Generation of the RVE\n");
   });
 

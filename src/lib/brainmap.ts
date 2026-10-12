@@ -3,6 +3,7 @@ import { aiEnabled, generateStructured } from "./ai";
 import { offlineDigest } from "./digest";
 import { studySections, topKeywords, truncate } from "./text";
 import { checkKeywords, repairTerm } from "./textRepair";
+import { clipWords } from "./figure";
 import type { NewTopic } from "./store";
 import type { Course, Material } from "./types";
 import { MATERIAL_KIND_LABELS } from "./types";
@@ -107,10 +108,16 @@ export function heuristicTopics(materials: Material[]): NewTopic[] {
     const sections = studySections(text).filter((s) => s.heading);
     // Transcripts have no headings: their topics come from the material's digest instead.
     const digest = m.digest ?? (sections.length < 2 && text.trim() ? offlineDigest(text) : null);
+    // One "#" heading at the top is the document's title; several are its sections (notes in Markdown).
+    const tops = sections.filter((s) => s.level === 0).length;
+    const titled = tops === 1 && sections[0]?.level === 0;
+    const levelOf = (s: (typeof sections)[number]) => (titled ? (s.level ?? 1) : (s.level ?? 1) + (tops ? 1 : 0));
+    // A file name ("abs2024") says less than the document's own title.
+    const own = titled ? sections[0].heading : undefined;
     topics.push({
       ref,
       parent_ref: null,
-      title: m.title,
+      title: own && !/\s/.test(m.title) ? clipWords(own, 80) : m.title,
       summary: digest?.summary || firstSentences(text, 2) || `${MATERIAL_KIND_LABELS[m.kind]} for this course.`,
       keywords: digest?.keywords.slice(0, 8) ?? topKeywords(text, 6),
       material_ids: [m.id],
@@ -127,13 +134,21 @@ export function heuristicTopics(materials: Material[]): NewTopic[] {
       return;
     }
     const seen = new Set<string>();
+    // Subsections go under their section ("2.1" under "2", "###" under "##"), two levels at most.
+    const open: { level: number; ref: string }[] = [];
     for (const s of sections) {
       const key = s.heading.toLowerCase();
-      if (seen.has(key) || seen.size >= 15) continue;
+      // The document's own title is the branch, not a topic in it.
+      if ((titled && s === sections[0]) || seen.has(key) || seen.size >= 25) continue;
       seen.add(key);
+      const level = levelOf(s);
+      while (open.length && open[open.length - 1].level >= level) open.pop();
+      const parent = open.length && open.length < 2 ? open[open.length - 1].ref : open.length >= 2 ? open[1].ref : ref;
+      const tref = `${ref}.${seen.size}`;
+      if (open.length < 2) open.push({ level, ref: tref });
       topics.push({
-        ref: `${ref}.${seen.size}`,
-        parent_ref: ref,
+        ref: tref,
+        parent_ref: parent,
         title: truncate(s.heading, 60),
         summary: firstSentences(s.body, 2),
         keywords: checkKeywords(topKeywords(`${s.heading} ${s.body}`, 10), `${s.heading} ${s.body}`, { strict: true, max: 6 }),

@@ -132,6 +132,19 @@ export function sharedTerms(a: Vector, b: Vector, n = 4): string[] {
 export interface Section {
   heading: string;
   body: string;
+  /** How deep the heading sits: 0 for a document title ("# …"), 1 for a section, 2 for a subsection, … */
+  level?: number;
+}
+
+/** The depth of a heading line, from its Markdown hashes or its numbering ("2.1" is 2). */
+function headingLevel(line: string): number {
+  const md = line.match(/^(#{1,4})\s+(.*)$/);
+  if (md) {
+    const num = md[2].match(/^(\d+(?:\.\d+){0,3})\.?\s/);
+    return num ? num[1].split(".").length : md[1].length - 1;
+  }
+  const num = line.match(/^(\d+(?:\.\d+){0,3})[.)]?\s/);
+  return num ? num[1].split(".").length : 1;
 }
 
 export function splitSections(text: string): Section[] {
@@ -146,7 +159,7 @@ export function splitSections(text: string): Section[] {
       cur.heading += ` ${h}`;
     } else if (h) {
       if (cur) sections.push(cur);
-      cur = { heading: h, body: "" };
+      cur = { heading: h, body: "", level: headingLevel(line) };
     } else if (line) {
       if (!cur) cur = { heading: "", body: "" };
       cur.body += line + "\n";
@@ -157,9 +170,11 @@ export function splitSections(text: string): Section[] {
 }
 
 function headingOf(line: string): string | null {
-  if (!line || line.length > 90) return null;
-  let m = line.match(/^#{1,4}\s+(.+)$/);
+  if (!line) return null;
+  // Marked headings may be long (a paper's title); guessed ones may not.
+  let m = line.length <= 200 ? line.match(/^#{1,4}\s+(.+)$/) : null;
   if (m) return m[1].trim();
+  if (line.length > 90) return null;
   m = line.match(/^(?:slide\s+\d+\s*[:\-–]\s*)(.+)$/i);
   if (m) return m[1].trim();
   // "Section 2 is violated." ends a sentence that wrapped; only a title-like rest is a heading.
@@ -226,7 +241,8 @@ export function studySections(text: string): Section[] {
     if (BACK_MATTER.test(h)) return;
     // Front matter sits before the first few headings; a closing "Summary" is a real section.
     if (s.heading && i < 5 && (FRONT_LABELS.test(h) || isAuthorLine(s.heading))) out.push({ heading: "", body: s.body });
-    else out.push(s);
+    // Numbering is the paper's bookkeeping; the level keeps the structure it carried.
+    else out.push({ ...s, heading: h });
   });
   return out;
 }

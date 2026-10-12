@@ -47,6 +47,20 @@ describe("brainmap", () => {
     id, course_id: "c", kind: "lecture_notes", title, source_type: "text", filename: null, mime: null, path: null, url: null, text, status: "ready", note: null, created_at: "",
   });
 
+  it("nests a paper's subsections under their sections and names the branch by the paper's title", () => {
+    const text = "# Mixed assumed strain methods\n## 1 Introduction\nWhy.\n## 2 Model problem\nSetup.\n### 2.1 Mixed approximations\nSpaces.\n### 2.2 Stability\nInf-sup.\n#### 2.2.1 A detail\nMore.\n## References\n1. A.";
+    const topics = heuristicTopics([m("m1", "simo1990", text)]);
+    const by = new Map(topics.map((t) => [t.ref, t.title]));
+    expect(topics.map((t) => `${t.parent_ref ? by.get(t.parent_ref) : "-"} > ${t.title}`)).toEqual([
+      "- > Mixed assumed strain methods",
+      "Mixed assumed strain methods > Introduction",
+      "Mixed assumed strain methods > Model problem",
+      "Model problem > Mixed approximations",
+      "Model problem > Stability",
+      "Stability > A detail",
+    ]);
+  });
+
   it("builds an offline topic tree from headings", () => {
     const topics = heuristicTopics([m("m1", "Week 1", "# Supervised learning\nLabels are given.\n# Unsupervised learning\nNo labels.")]);
     expect(topics.map((t) => t.title)).toEqual(["Week 1", "Supervised learning", "Unsupervised learning"]);

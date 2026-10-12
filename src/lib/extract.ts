@@ -92,7 +92,10 @@ async function extractPdf(buf: Buffer): Promise<Extracted> {
   const maths = pages.flatMap((p, i) => (!scanned.has(i + 1) && mathsHeavy(raw[i]) ? [i + 1] : []));
   const fixes = [repairNote(report), glyphNote(glyphs, running)].filter(Boolean).join(" ");
   const info: ScanInfo = { pages: scan.pages, total: scan.total, ...(poor.length ? { poor } : {}), ...(maths.length ? { maths } : {}) };
-  const reread = [...new Set([...scan.pages, ...poor, ...maths])].sort((a, b) => a - b);
+  // Text guessed from a scan is never as good as reading the page itself: when the PDF came from scanning
+  // software, every page goes to the AI, otherwise every page that carries an OCR layer.
+  const ocred = pages.flatMap((_, i) => (!scanned.has(i + 1) && (scanner || layered.has(i + 1)) ? [i + 1] : []));
+  const reread = [...new Set([...scan.pages, ...poor, ...maths, ...(aiEnabled() ? ocred : [])])].sort((a, b) => a - b);
 
   if (aiEnabled() && reread.length && buf.length < 30 * 1024 * 1024) {
     const read = await transcribePages(buf, reread);
@@ -103,7 +106,7 @@ async function extractPdf(buf: Buffer): Promise<Extracted> {
       const by = providerName();
       const what = [
         scan.pages.length ? `${scan.pages.length} scanned` : "",
-        poor.length ? `${poor.length} with a poor text layer` : "",
+        ocred.length ? `${ocred.length} with a scanned text layer` : poor.length ? `${poor.length} with a poor text layer` : "",
         maths.length ? `${maths.length} with equations` : "",
       ].filter(Boolean);
       return {
