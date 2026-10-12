@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
 import { normalizeMath } from "./lessonCheck";
-import { framingProblems, mainTerms, type FramingOptions } from "./lessonTerms";
+import { framingProblems, mainTerms, teachingWords, type FramingOptions } from "./lessonTerms";
 import type { BlockKind, LessonBlock, LessonDoc } from "./lesson";
 
 /**
@@ -89,7 +89,7 @@ Make it deeper, not longer. Find the places where the lesson states something wi
 - a step missing from a derivation or worked solution;
 - how two key terms connect, where the text treats them separately (above all when the concept map falls apart into unconnected groups);
 - what this level adds to a main key term that the lesson leaves where an earlier level left it.
-A rewritten block keeps its idea and its kind, keeps everything that was correct, and grows by at most a third. Add at most 2 new blocks. Keep the student's notation; bold a key term at its first use; maths in KaTeX-compatible LaTeX ($...$ inline, $$...$$ display); no HTML, no headings. Never solve the student's own tutorial or exam questions, or copy their wording or setup. Never mention levels, passes or how the lesson is built. British spelling; avoid em dashes.${framing.length ? `\nAlso fix these problems with how the lesson uses its key terms, where an edit can:\n- ${framing.slice(0, 7).join("\n- ")}` : ""}${o.request ? `\nThe student asked for this; do it first: "${o.request.slice(0, 500)}"` : ""}
+A rewritten block keeps its idea and its kind, keeps everything that was correct, and grows by at most a third${o.framing?.budget ? `; the lesson has ${teachingWords(doc)} words of teaching text and must end within ${o.framing.budget}, so ${teachingWords(doc) > o.framing.budget * 0.85 ? "pay for what you add by cutting restatement elsewhere in the same block" : "spend the room on depth, not length"}` : ""}. Add at most 2 new blocks. Keep the student's notation; bold a key term at its first use; maths in KaTeX-compatible LaTeX ($...$ inline, $$...$$ display); no HTML, no headings. Never solve the student's own tutorial or exam questions, or copy their wording or setup. Never mention levels, passes or how the lesson is built. British spelling; avoid em dashes.${framing.length ? `\nAlso fix these problems with how the lesson uses its key terms, where an edit can:\n- ${framing.slice(0, 7).join("\n- ")}` : ""}${o.request ? `\nThe student asked for this; do it first: "${o.request.slice(0, 500)}"` : ""}
 
 <lesson title="${doc.title.replace(/"/g, "'")}">
 ${lessonText(doc)}
