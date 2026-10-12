@@ -164,3 +164,39 @@ describe("offline lessons from a paper", () => {
     expect(doc.glossary.find((g) => g.term === "fragmentation")?.meaning).toMatch(/^Fragmentation is the cracking/);
   });
 });
+
+describe("offline lessons skip a paper's layout", () => {
+  it("leaves out captions, table rows and fragment words, and links each pair of terms once", async () => {
+    const { offlineLesson } = await import("@/lib/lessonOffline");
+    const head = { title: "Hybrid laminates", depth: 1, level: "Remember", goal: "", map: { course: "Composites", path: [], before: [], after: [], children: [], related: [] } } as never;
+    const text = [
+      "# Hybrid laminates",
+      "Fragmentation of the low-strain ply spreads before the high-strain ply fails, and the low-strain ply carries",
+      "Figure 16. Delamination between low and high-strain plies in a thin-ply hybrid laminate under",
+      "tension at room temperature.",
+      "Table 2. The fibers and matrix used for the hybrid laminate.",
+      "Property T800 K63720 736LT epoxy",
+      "Elastic modulus (GPa) 294 620 3.15",
+      "",
+      "--- Page 9 ---",
+      "less load once its fibers break, i.e. Fragmentation of the low-strain ply is what makes the laminate yield gradually.",
+      "Delamination between the low-strain ply and the high-strain ply limits the pseudo-ductile strain of the laminate.",
+      "Once delamination is complete, the high-strain ply carries the whole load alone.",
+      "The low-strain ply and fragmentation together set the yield stress of the laminate in tension.",
+      "Fragmentation in the low-strain ply is the cracking of its fibers into many short pieces along the ply.",
+      "Delamination is the separation of the low-strain ply from the high-strain ply at their interface.",
+    ].join("\n");
+    const doc = offlineLesson(head, { summary: "", keywords: ["low", "high", "fragmentation", "delamination", "low-strain ply"], mastery: null }, [{ title: "abs2024", kind: "reading", text }]);
+    const blocks = doc.sections.flatMap((s) => s.blocks);
+    const all = blocks.map((b) => `${b.title}\n${b.body}`).join("\n");
+    expect(all).not.toMatch(/Figure 16|room temperature|T800|294 620|Page 9/);
+    expect(blocks.map((b) => b.title)).not.toContain("Low");
+    expect(blocks.map((b) => b.title)).not.toContain("High");
+    // "Once delamination is complete, ..." says when, not what delamination is.
+    expect(doc.glossary.find((g) => g.term === "delamination")?.meaning).toMatch(/^Delamination is the separation/);
+    // The sentence broken by the figure and the page break is whole again.
+    expect(all).not.toMatch(/^less load/m);
+    const pairs = blocks.filter((b) => / and .* connect$/.test(b.title)).map((b) => b.title.replace(/^How (.*) and (.*) connect$/, "$1|$2"));
+    for (const p of pairs) expect(pairs).not.toContain(p.split("|").reverse().join("|"));
+  });
+});
