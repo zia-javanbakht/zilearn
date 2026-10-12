@@ -1,4 +1,5 @@
 import { diagramTikz, plotTikz, type Figure } from "./figure";
+import { conceptDiagram, homes } from "./lessonTerms";
 import { markProvenance, normalizeDoc, type LessonBlock, type LessonDoc, type QA } from "./lesson";
 
 /**
@@ -292,9 +293,21 @@ export function lessonToTex(raw: LessonDoc): string {
   ];
 
   if (doc.objectives.length) s.push(`\\begin{chbox}[By the end of this pass you can]\n${items(doc.objectives)}\n\\end{chbox}\n`);
+  // The concept map: the key terms, each marked with the section that teaches it, and the links the text explains.
+  const concept = conceptDiagram(doc, (i) => `ZREF${i}ZREF`);
+  if (concept)
+    sec(
+      "Map of this lesson",
+      `${diagramTikz(concept, inline).replace(/ZREF(\d+)ZREF/g, (_, i) => `\\\\{\\scriptsize\\S\\ref{sec:lesson-${i}}}`)}\n{\\centering\\footnotesize\\itshape Each box is a key term, with the section that teaches it; the arrows are the links the lesson explains.\\par}`,
+    );
   sec("Where this fits", `${blockTex(doc.where_it_fits)}\n\n${mapTikz(doc)}`);
   if (doc.recall.length) sec("Warm-up", `\\begin{enbox}[Recall]\n${doc.recall.map((q) => `\\item ${ask(q)}`).join("\n")}\n\\end{enbox}`);
-  for (const x of doc.sections) sec(x.heading, x.blocks.map(blockToTex).join("\n\n"));
+  const home = homes(doc);
+  for (const [i, x] of doc.sections.entries()) {
+    const mine = [...home].filter(([, at]) => at === i).map(([t]) => `\\textbf{${inline(t)}}`);
+    const terms = mine.length ? `{\\small\\sffamily\\color{SteelBlue4}Key terms: ${mine.join(" \\textperiodcentered{} ")}\\par}\\medskip\n\n` : "";
+    sec(x.heading, `\\label{sec:lesson-${i}}\n${terms}${x.blocks.map(blockToTex).join("\n\n")}`);
+  }
   // A two-column table rather than Z's dsbox, whose description list breaks on \\item[...] labels.
   if (doc.glossary.length)
     sec(

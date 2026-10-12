@@ -4,7 +4,9 @@ import { sourcesFor } from "./kb";
 import { checkLesson, refereeLesson } from "./lessonCheck";
 import { studentRecord, type StudentRecord } from "./lessonRecord";
 import { offlineLesson, sourceQuestions } from "./lessonOffline";
-import { diagramMermaid, figureProblems, FigureSchema, type Figure } from "./figure";
+import { diagramMermaid, figureProblems, FigureSchema, plainLabel, type Figure } from "./figure";
+import { badge, conceptMermaid, framingProblems, homes, tidyTerms, type ConceptLink } from "./lessonTerms";
+import { enrichLesson } from "./lessonEnrich";
 import { buildTree, flattenTree, getCourse, getLesson, getTopic, getTopicsByIds, linksForTopic, listCourses, listMaterials, listTopics } from "./store";
 import { truncate } from "./text";
 import { DEPTH_LEVELS, MASTERY_LABELS, MATERIAL_KIND_LABELS, type MaterialKind, type Mastery } from "./types";
@@ -34,6 +36,8 @@ export interface LessonBlock {
 export interface LessonSection {
   heading: string;
   blocks: LessonBlock[];
+  /** The key terms (glossary spellings) this section teaches. */
+  terms?: string[];
 }
 
 export const QUESTION_KINDS = ["recall", "explain", "apply", "predict", "transfer"] as const;
@@ -78,6 +82,8 @@ export interface LessonDoc {
   check_yourself: QA[];
   takeaways: string[];
   read: { title: string; focus: string }[];
+  /** How the key terms connect, as the text explains it: drawn as the lesson's concept map. */
+  concept_links?: ConceptLink[];
   by: "claude" | "heuristic";
   /** Lessons saved before sections and the glossary: a flat block list and key points. */
   blocks?: LessonBlock[];
@@ -135,9 +141,26 @@ export const LessonSchema = z.object({
   where_it_fits: z.string().describe("2-3 sentences placing the topic in the course map: what it builds on, what it leads to"),
   recall: z.array(QASchema).describe("Warm-up questions on the previous level (empty for level 1)"),
   sections: z
-    .array(z.object({ heading: z.string().describe("A heading that says what the section teaches"), blocks: z.array(BlockSchema) }))
+    .array(
+      z.object({
+        heading: z.string().describe("A heading that says what the section teaches"),
+        terms: z.array(z.string()).describe("The 1-3 key terms this section develops, spelt exactly as in glossary; each key term belongs to one section"),
+        blocks: z.array(BlockSchema),
+      }),
+    )
     .describe("The lesson itself in teaching order, in 2-5 sections"),
-  glossary: z.array(z.object({ term: z.string(), meaning: z.string().describe("One line; the symbol and units if it has them") })).describe("The key terms and symbols used, 3-8"),
+  glossary: z
+    .array(z.object({ term: z.string().describe("The key term, with its symbol if it has one, e.g. 'damping ratio $\\zeta$'"), meaning: z.string().describe("One line; units if it has them") }))
+    .describe("The lesson's key terms in teaching order, starting from the topic's main key terms: 3-4 at level 1, 4-6 at level 2, 5-7 at level 3, 5-8 at level 4"),
+  concept_links: z
+    .array(
+      z.object({
+        from: z.string().describe("A key term, exactly as in glossary"),
+        to: z.string().describe("Another key term, exactly as in glossary"),
+        label: z.string().describe("A short verb phrase read from 'from' to 'to', e.g. 'sets the decay rate of'; at most 6 words"),
+      }),
+    )
+    .describe("How the key terms connect: 3-10 links, each one a relation that a block of the lesson states in words. Drawn as the lesson's concept map"),
   common_mistakes: z.array(z.object({ mistake: z.string(), correction: z.string().describe("What is right instead, and how to avoid the slip") })).describe("Typical misconceptions or errors (may be empty at level 1)"),
   connections: z.array(z.object({ topic: z.string().describe("Exact topic name from the brainmap"), relation: z.string() })).describe("How this topic relates to the named neighbouring, sub- and cross-course topics"),
   check_yourself: z.array(QASchema).describe("Questions at this level, with answers: 2-3 at level 1, 3-4 at level 2, 3-5 at level 3, 3-4 at level 4"),
@@ -145,15 +168,19 @@ export const LessonSchema = z.object({
   read: z.array(z.object({ title: z.string().describe("Exact source title"), focus: z.string().describe("What to look at there and why: a section, timestamp or question") })).describe("The student's materials worth going back to"),
 });
 
-/** What each level teaches, in terms of the block kinds. */
+/** What each level teaches, in terms of the block kinds, and how much deeper it goes than the one before. */
 const LEVEL_BLOCKS: Record<number, string> = {
-  1: `Big picture only, about 600-900 words. Start from the phenomenon or problem the topic solves, then the idea in plain words (intuition blocks with an analogy or a picture in words), 1-2 definition blocks stating the key terms simply, and one short example that needs no derivation. No derivations, no exam-style problems, no formula blocks; a glossary of 3-4 terms; at most one figure.`,
-  2: `How and why it works, about 1000-1500 words. Precise definitions; intuition for each step of the mechanism; a formula block for each key result, saying what every symbol means and when it applies; the reasoning or derivation in short steps; 1 fully worked example then 1 faded example; pitfall blocks for the misconceptions; and a comparison block with a neighbouring or related topic.`,
-  3: `Problem solving, about 1200-2000 words. A procedure block with the solution method as numbered steps; the formula blocks needed (with units); exam-style examples of increasing difficulty styled on the tutorial and exam questions in the sources: one fully worked, then one faded so the student finishes it; pitfall blocks for the errors students make in exams. check_yourself holds 3-4 practice problems (kind "apply") with worked answers.`,
-  4: `Mastery, about 1000-1800 words. Assumptions, limitations and edge cases (when the model breaks down), comparison blocks with related topics in this and other courses, one hard multi-step or 'explain why' exam question worked fully, and a teach-back note asking the student to explain it from memory. check_yourself mixes "explain" and "transfer" questions.`,
+  1: `Depth: what it is and why it matters. 3-4 key terms, the topic's main keywords a beginner needs first. Big picture only, about 600-900 words. Start from the phenomenon or problem the topic solves, then the idea in plain words (intuition blocks with an analogy or a picture in words), 1-2 definition blocks stating the key terms simply, and one short example that needs no derivation. No derivations, no exam-style problems, no formula blocks; a glossary of 3-4 terms; at most one figure.`,
+  2: `Depth: the mechanism. Take the level 1 key terms one layer deeper (how they act on each other, so the concept map gains cause-and-effect links) and add the 2-3 terms the mechanism needs. How and why it works, about 1000-1500 words. Precise definitions; intuition for each step of the mechanism; a formula block for each key result, saying what every symbol means and when it applies; the reasoning or derivation in short steps; 1 fully worked example then 1 faded example; pitfall blocks for the misconceptions; and a comparison block with a neighbouring or related topic.`,
+  3: `Depth: why it is true and how to use it. Derive the main result in full from first principles, justifying every step and naming each assumption where it enters; give a sense of size (orders of magnitude, and what happens to the result when a parameter doubles); add the terms for the quantities and conditions this needs. Problem solving, about 1200-2000 words. A procedure block with the solution method as numbered steps; the formula blocks needed (with units); exam-style examples of increasing difficulty styled on the tutorial and exam questions in the sources: one fully worked, then one faded so the student finishes it; pitfall blocks for the errors students make in exams. check_yourself holds 3-4 practice problems (kind "apply") with worked answers.`,
+  4: `Depth: limits, generalisation and judgement. For the main key terms: when the model breaks down and what replaces it, how the idea generalises (more degrees of freedom, non-linear behaviour, other courses), and how an expert chooses between methods and checks a result; add the terms for these. Mastery, about 1000-1800 words. Assumptions, limitations and edge cases (when the model breaks down), comparison blocks with related topics in this and other courses, one hard multi-step or 'explain why' exam question worked fully, and a teach-back note asking the student to explain it from memory. check_yourself mixes "explain" and "transfer" questions.`,
 };
 
 const RULES = `How to write it:
+- Deeper, not just longer: each level takes the same core key terms one layer further (level 1 what and why, level 2 how, level 3 why it is true and how to use it, level 4 where it stops and how it generalises). A paragraph that could sit in an earlier level doesn't belong in this one.
+- Frame the lesson around its key terms (glossary). Start from the topic's key terms in the brainmap above, keep the ones this level needs, and add the terms it introduces. Each section develops 1-3 key terms (its terms, spelt as in glossary): bold each term at its first use, and say how it connects to a term taught before it.
+- concept_links are the connections the text explains: each joins two key terms with a short verb phrase, and a block of the lesson states that relation in words. The app draws them as the lesson's concept map, grouped by section and numbered, so the map is a summary of the text, not a separate picture.
+- A diagram belongs to the block it sits in: label its boxes with the exact words that block uses (key terms where possible), and let the caption walk through it in the order the text explains it.
 - Teach, don't summarise. Concrete before abstract: motivate with the situation or phenomenon, then give the idea, then the formal statement.
 - Use the student's sources as the backbone: their notation, their symbols, their examples and their lecturer's advice. Where a block comes from a source, set source to its title plus a timestamp, section or question number. You may add standard textbook knowledge to fill gaps, but never contradict the sources.
 - The numbered questions in the student's tutorial, workshop and exam sources are theirs to attempt: never solve them or give their answers anywhere (examples, solutions, check_yourself), and don't settle them by stating the general rule or result that answers them directly. Write your own on the same pattern with different numbers and a different setting, and point to the originals in read ("then try Q2").
@@ -254,7 +281,7 @@ Topic summary: ${topic.summary}
 Key terms: ${topic.keywords.join(", ") || "(none listed)"}
 Student's self-assessment: ${map.mastery ? MASTERY_LABELS[map.mastery] : "not marked"}${record.goal ? `\n${record.goal}` : ""}
 </brainmap>
-${record.text ? `\n<student_record>\n${record.text}\n</student_record>\nUse this record: put each mock exam slip and forgotten flashcard into common_mistakes (or a pitfall block) with the correction, unless an earlier level already corrected it (see "Mistakes covered" below), and make at least one check_yourself question retest it in a new form. Don't name or shame; just fix the misunderstanding.\n` : ""}${previous ? `\nThe student has done the earlier levels. What they used:\n<earlier_levels>\n${previous}\n</earlier_levels>\nBuild on them and add new material: never reuse their examples, numbers, questions, figures, comparisons or pitfalls. Only recall may come back to their ideas, asking in a new form.\n` : ""}
+${record.text ? `\n<student_record>\n${record.text}\n</student_record>\nUse this record: put each mock exam slip and forgotten flashcard into common_mistakes (or a pitfall block) with the correction, unless an earlier level already corrected it (see "Mistakes covered" below), and make at least one check_yourself question retest it in a new form. Don't name or shame; just fix the misunderstanding.\n` : ""}${previous ? `\nThe student has done the earlier levels. What they used:\n<earlier_levels>\n${previous}\n</earlier_levels>\nBuild on them and add new material: never reuse their examples, numbers, questions, figures, comparisons or pitfalls. Only recall may come back to their ideas, asking in a new form. Their key terms come back here one layer deeper (see "Key terms" above); don't define them again from scratch.\n` : ""}
 Write the lesson on "${topic.title}" for pass ${d} of 4, the "${level.name}" level: ${level.goal}
 Earlier passes covered shallower levels and later ones go deeper, so teach exactly this depth.
 
@@ -266,19 +293,29 @@ ${RULES}`;
   return { topic, head, map, sources, materials, context, prompt, record };
 }
 
+/** What a level is for and how deep it goes, for passes that work on a finished lesson. */
+export function levelBrief(depth: number): { brief: string; next: string | null } {
+  const d = Math.min(4, Math.max(1, depth));
+  const next = DEPTH_LEVELS[d];
+  return { brief: `${DEPTH_LEVELS[d - 1].goal}. ${LEVEL_BLOCKS[d]}`, next: next ? `${next.name}: ${next.goal}` : null };
+}
+
 export async function generateLessonDoc(topicId: string, depth: number): Promise<LessonDoc> {
   const { head, map, sources, context, prompt, record } = lessonRequest(topicId, depth);
-  if (!aiEnabled()) return offlineLesson(head, { summary: map.summary, keywords: map.keywords, mastery: map.mastery, slips: record.slips }, sources);
+  if (!aiEnabled()) return tidyTerms(offlineLesson(head, { summary: map.summary, keywords: map.keywords, mastery: map.mastery, slips: record.slips }, sources));
   const out = await generateStructured({ schema: LessonSchema, effort: "medium", maxTokens: 20000, context, prompt });
   const doc = fromAi(head, out);
-  await refereeLesson(doc, context);
+  await refereeLesson(doc, context, framingProblems(doc));
+  // A final pass that deepens what the lesson states without explaining, at this level.
+  await enrichLesson(doc, context, levelBrief(head.depth));
+  tidyTerms(doc);
   return checkLesson(doc, sourceQuestions(sources));
 }
 
 /** The AI's answer, tidied, as a lesson document. */
 export function fromAi(head: Pick<LessonDoc, "title" | "depth" | "level" | "goal" | "map">, out: z.infer<typeof LessonSchema>): LessonDoc {
   let figures = 0;
-  return {
+  const doc: LessonDoc = {
     version: 2,
     ...head,
     by: "claude",
@@ -292,21 +329,25 @@ export function fromAi(head: Pick<LessonDoc, "title" | "depth" | "level" | "goal
       .filter((x) => x.blocks.length)
       .map((x) => ({
         ...x,
+        terms: x.terms ?? [],
         blocks: x.blocks.map((b) => {
           const figure = b.figure && !figureProblems(b.figure).length && figures++ < (head.depth === 1 ? 1 : 3) ? b.figure : null;
           return { ...b, solution: b.solution || null, try_steps: b.try_steps || null, try_answer: b.try_steps ? b.try_answer || null : null, source: b.source || null, figure };
         }),
       })),
   };
+  return tidyTerms(doc);
 }
 
 /** A short outline of a lesson, to tell the next level what was covered. */
 export function lessonOutline(doc: LessonDoc): string {
   const clip = (s: string, n: number) => truncate(s.replace(/\s+/g, " ").trim(), n);
   return [
+    doc.glossary.length ? `Key terms: ${doc.glossary.map((g) => g.term).join("; ")}` : "",
+    doc.concept_links?.length ? `Links shown: ${doc.concept_links.map((l) => `${l.from} ${l.label} ${l.to}`).join("; ")}` : "",
     ...doc.sections.map(
       (x) =>
-        `${x.heading}: ${x.blocks
+        `${x.heading}${x.terms?.length ? ` [${x.terms.join(", ")}]` : ""}: ${x.blocks
           .map((b) => {
             // Examples and figures by their content, since those are what tends to come back.
             const detail = b.kind === "example" ? `: ${clip(b.body, 320)}` : b.figure ? ` [figure: ${clip(b.figure.caption, 160)}]` : "";
@@ -381,12 +422,20 @@ export function lessonToMarkdown(raw: LessonDoc): string {
   const doc = markProvenance(normalizeDoc(raw));
   const out: string[] = [];
   if (doc.objectives.length) out.push(`<div class="lb lb-goal">\n\n**🎯 By the end of this pass you can**\n\n${doc.objectives.map((o) => `- ${o}`).join("\n")}\n\n</div>`);
+  const concept = conceptMermaid(doc);
+  if (concept)
+    out.push(
+      `### Map of this lesson\n\n${"```mermaid\n" + concept + "\n```"}\n\n<p class="lb-hint">Each box is a key term, inside the numbered section that teaches it; the arrows are the links the lesson explains. Tap a box to jump to its section.</p>`,
+    );
   out.push(`### Where this fits\n\n${doc.where_it_fits}`);
   if (doc.map.path.length || doc.map.children.length || doc.map.before.length || doc.map.after.length || doc.map.related.length)
     out.push("```mermaid\n" + lessonMermaid(doc) + "\n```");
   if (doc.recall.length) out.push(`### Warm-up\n\n${questions(doc.recall, "Answers")}`);
-  for (const sec of doc.sections) {
-    out.push(`### ${sec.heading}`);
+  const home = homes(doc);
+  for (const [i, sec] of doc.sections.entries()) {
+    const mine = [...home].filter(([, at]) => at === i).map(([t]) => t);
+    out.push(`### ${concept ? `${badge(i + 1)} ` : ""}${sec.heading}`);
+    if (mine.length) out.push(`<p class="lb-terms">🔑 ${mine.map((t) => `<strong>${escapeHtml(plainTerm(t))}</strong>`).join(" · ")}</p>`);
     for (const b of sec.blocks) {
       // A faded example shows its first steps openly, then the student's turn, with the rest on request.
       const sol = b.try_steps
@@ -400,7 +449,12 @@ export function lessonToMarkdown(raw: LessonDoc): string {
       out.push(`<div class="lb lb-${b.kind}">\n\n**${BLOCK_ICON[b.kind]} ${BLOCK_LABEL[b.kind]}: ${b.title}**\n\n${b.body}${fig}${sol}${src}\n\n</div>`);
     }
   }
-  if (doc.glossary.length) out.push(`### Key terms\n\n| Term | Meaning |\n|---|---|\n${doc.glossary.map((g) => `| **${cell(g.term)}** | ${cell(g.meaning)} |`).join("\n")}`);
+  if (doc.glossary.length)
+    out.push(
+      `### Key terms\n\n| Term | Meaning |${concept ? " Taught in |" : ""}\n|---|---|${concept ? "---|" : ""}\n${doc.glossary
+        .map((g) => `| **${cell(g.term)}** | ${cell(g.meaning)} |${concept ? ` ${home.has(g.term) ? badge(home.get(g.term)! + 1) : ""} |` : ""}`)
+        .join("\n")}`,
+    );
   if (doc.key_points?.length) out.push(`### Key points\n\n${doc.key_points.map((k) => `- ${k}`).join("\n")}`);
   if (doc.common_mistakes.length)
     out.push(`### Common mistakes\n\n${doc.common_mistakes.map((m) => `- ❌ ${m.mistake}${m.correction ? `\n  ✅ ${m.correction}` : ""}`).join("\n")}`);
@@ -415,6 +469,15 @@ export function lessonToMarkdown(raw: LessonDoc): string {
 export function figureMarkdown(f: Figure): string {
   const code = f.type === "plot" && f.plot ? "```plot\n" + JSON.stringify(f.plot) + "\n```" : f.diagram ? "```mermaid\n" + diagramMermaid(f.diagram) + "\n```" : "";
   return code ? `${code}\n\n*${f.caption}*` : "";
+}
+
+/** A key term as plain text (symbols in Unicode), for HTML that Markdown doesn't format. */
+function plainTerm(s: string) {
+  return plainLabel(s).replace(/[*`$\\]/g, "");
+}
+
+function escapeHtml(s: string) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 /** Text for a Markdown table cell: no pipes or line breaks. */

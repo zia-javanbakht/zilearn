@@ -1,5 +1,7 @@
 import type { Source } from "./kb";
 import type { LessonBlock, LessonDoc, LessonMap, QA } from "./lesson";
+import { mentions, type ConceptLink } from "./lessonTerms";
+import { topPhrases } from "./digest";
 import { stem, tokenize } from "./text";
 
 /**
@@ -194,7 +196,16 @@ export function offlineLesson(
   const defBlocks: LessonBlock[] = [];
   const used = new Set<string>();
   // Longer terms first, so "weight decay" claims its sentence before "decay" does.
-  for (const term of [t, ...[...info.keywords].sort((a, b) => b.split(/\s+/).length - a.split(/\s+/).length)]) {
+  const titleOnly = (k: string) => k.toLowerCase() !== t.toLowerCase() && k.toLowerCase().split(/\W+/).every((w) => t.toLowerCase().split(/\W+/).includes(w));
+  // The key terms the lesson is built around: the topic's keywords that the materials really use (a single
+  // word must come up a few times), then the phrases the relevant material repeats most.
+  const uses = (k: string) => relevant.filter((x) => mentions(x.text, k)).length;
+  const fromKeywords = [...new Set(info.keywords)].filter((k) => !titleOnly(k) && uses(k) >= (k.includes(" ") ? 1 : 3));
+  const fromText = topPhrases(relevant.map((x) => x.text.replace(/\$[^$]*\$/g, " ")).join(".\n"), 8)
+    .filter((p) => p.count >= 2 && !titleOnly(p.phrase) && !fromKeywords.some((k) => mentions(k, p.phrase) || mentions(p.phrase, k)))
+    .map((p) => p.phrase);
+  const candidates = [...fromKeywords, ...fromText].slice(0, 6);
+  for (const term of [t, ...[...candidates].sort((a, b) => b.split(/\s+/).length - a.split(/\s+/).length)]) {
     const def = definition(term, all);
     // A key term only gets a definition when the materials actually define it; a sentence that merely mentions it isn't one.
     // The same sentence defining two terms ("decay", "weight decay") is one definition.
@@ -259,13 +270,94 @@ export function offlineLesson(
     .slice(0, 3)
     .map((s) => ({ kind: "note" as const, title: "From your materials", body: s.text, source: s.source }));
 
+  // Key-term sections: the lesson is organised around the topic's main key terms, each with what the
+  // materials say about it and a sentence that links it to another key term.
+  // A keyword that is only a word of the topic's own name ("descent" in Gradient descent) isn't a term to teach on its own.
+  const keyTerms = candidates;
+  const cap = (x: string) => x[0].toUpperCase() + x.slice(1);
+  const defOf = new Map(defBlocks.map((b) => [b.title.toLowerCase(), b]));
+  // A term's symbol, from "$\zeta = c/c_{cr}$ (damping ratio)" or "critical damping $c_{cr} = ...$".
+  const symbolOf = (term: string): string | null => {
+    const g = glossary.find((x) => x.term === term)?.meaning.match(/^\$([^$=]+)=/)?.[1];
+    if (g) return g.trim();
+    const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    for (const x of all) {
+      const m = x.text.match(new RegExp(`${esc}\\s+\\$([^$=]+)=`, "i"));
+      if (m) return m[1].trim();
+    }
+    return null;
+  };
+  const glossDef = (term: string): LessonBlock | null => {
+    const g = glossary.find((x) => x.term === term);
+    return g ? { kind: "definition", title: cap(term), body: /^\$/.test(g.meaning) ? `The **${term}** is ${g.meaning}.` : g.meaning, source: definition(term, all)?.source ?? null } : null;
+  };
+  const linked = new Set<string>();
+  const linkFor = (term: string, withMaths: boolean): LessonBlock | null => {
+    const x = all.find(
+      (y) =>
+        !used.has(y.text) &&
+        !linked.has(y.text) &&
+        !y.lead &&
+        isStatement(y.text) &&
+        /\$/.test(y.text) === withMaths &&
+        mentions(y.text, term) &&
+        keyTerms.some((o) => o !== term && mentions(y.text, o)),
+    );
+    if (!x) return null;
+    linked.add(x.text);
+    const other = keyTerms.find((o) => o !== term && mentions(x.text, o))!;
+    return { kind: "keypoint", title: `How ${term} connects to ${other}`, body: x.text, source: x.source };
+  };
+  const eqTaken = new Set<number>();
+  const formulasFor = (term: string): LessonBlock[] => {
+    const sym = symbolOf(term);
+    const mine = eqs.map((e, i) => ({ e, i })).filter(({ e, i }) => !eqTaken.has(i) && (mentions(e.lead, term) || (sym && e.math.includes(sym))));
+    mine.slice(0, 2).forEach(({ i }) => eqTaken.add(i));
+    const out: LessonBlock[] = mine.slice(0, 2).map(({ e }) => ({ kind: "formula", title: `${cap(term)} in symbols`, body: `${e.lead ? `${e.lead}\n\n` : ""}${e.math}`, source: e.source }));
+    // Results stated inline in a sentence count too ("The logarithmic decrement $\delta = ...$").
+    if (out.length < 2) {
+      const line = inlineFormulas(byScore).find((x) => !inlineTaken.has(x.text) && (mentions(x.text, term) || (sym && x.text.includes(sym))));
+      if (line) {
+        inlineTaken.add(line.text);
+        out.push({ kind: "formula", title: `${cap(term)} in symbols`, body: line.text, source: line.source });
+      }
+    }
+    return out;
+  };
+  const termSections = (level: 1 | 2) =>
+    keyTerms.slice(0, level === 1 ? 3 : 4).flatMap((term) => {
+      const blocks: LessonBlock[] =
+        level === 1
+          ? [defOf.get(term.toLowerCase()) ?? glossDef(term), linkFor(term, false)].filter((b): b is LessonBlock => !!b)
+          : [...formulasFor(term), ...comparisons.filter((c) => mentions(c.body, term) && !compTaken.has(c.body)).slice(0, 1), linkFor(term, true)].filter((b): b is LessonBlock => !!b);
+      blocks.forEach((b) => b.kind === "comparison" && compTaken.add(b.body));
+      return blocks.length ? [{ heading: level === 1 ? cap(term) : `How ${term} works`, terms: [label(term)], blocks }] : [];
+    });
+  const compTaken = new Set<string>();
+  const inlineTaken = new Set<string>();
+  // Glossary names carry the symbol, so the concept map and the text agree on what each term looks like.
+  const label = (term: string) => {
+    const sym = symbolOf(term);
+    return sym && !term.includes("$") ? `${term} $${sym}$` : term;
+  };
+
   const slipSection = slipBlocks.length ? [{ heading: "Where you slipped", blocks: slipBlocks }] : [];
+  const l1Terms = d === 1 ? termSections(1) : [];
+  const l1Defs = new Set(l1Terms.flatMap((x) => x.blocks));
+  const l2Terms = d === 2 ? termSections(2) : [];
+  const l2Rest = d === 2 ? eqs.filter((_, i) => !eqTaken.has(i)).slice(0, 2) : [];
   const byLevel: Record<number, { heading: string; blocks: LessonBlock[] }[]> = {
-    1: [{ heading: "The big idea", blocks: idea }, ...slipSection],
-    2: [
-      { heading: "How it works", blocks: [...formulaBlock, ...comparisons.slice(0, 2), ...defBlocks.slice(2)] },
-      { heading: "Where students slip", blocks: [...slipBlocks, ...cautions.slice(0, 2)] },
-    ],
+    1: [{ heading: "The big idea", blocks: idea.filter((b) => !l1Defs.has(b)) }, ...l1Terms, ...slipSection],
+    2: l2Terms.length
+      ? [
+          ...l2Terms,
+          ...(l2Rest.length ? [{ heading: "The other results", blocks: [{ kind: "formula" as const, title: `More results for ${t}`, body: l2Rest.map((e) => `${e.lead ? `${e.lead}\n\n` : ""}${e.math}`).join("\n\n"), source: l2Rest[0].source }] }] : []),
+          { heading: "Where students slip", blocks: [...slipBlocks, ...cautions.slice(0, 2)] },
+        ]
+      : [
+          { heading: "How it works", blocks: [...formulaBlock, ...comparisons.slice(0, 2), ...defBlocks.slice(2)] },
+          { heading: "Where students slip", blocks: [...slipBlocks, ...cautions.slice(0, 2)] },
+        ],
     3: [
       { heading: "The results you need", blocks: formulaBlock },
       { heading: "Practise with your tutorial questions", blocks: worked.length ? [method, ...worked] : [] },
@@ -276,7 +368,7 @@ export function offlineLesson(
       { heading: "More from your materials", blocks: more },
     ],
   };
-  let sections = byLevel[d].filter((x) => x.blocks.length);
+  let sections: LessonDoc["sections"] = byLevel[d].filter((x) => x.blocks.length);
   // Thin materials: fall back to the big idea, then to anything at all, rather than an empty lesson.
   if (!sections.length) sections = [{ heading: "The idea", blocks: [...idea, ...more] }].filter((x) => x.blocks.length);
   if (!sections.length) sections.push({ heading: "From your materials", blocks: [{ kind: "definition", title: t, body: summary || `${t}, as covered in your materials.` }] });
@@ -296,7 +388,7 @@ export function offlineLesson(
     ...map.children.map((c) => ({ topic: c.title, relation: "a part of this topic, covered in its own lessons" })),
     ...map.related.map((r) => ({ topic: `${r.title} (${r.course})`, relation: r.relation ?? "a similar idea in another course" })),
   ];
-  const terms3 = info.keywords.slice(0, 3);
+  const terms3 = keyTerms.slice(0, 3);
   const qa = (question: string, answer: string, kind: QA["kind"], hint: string | null = null): QA => ({ question, answer, kind, hint });
 
   return {
@@ -312,7 +404,9 @@ export function offlineLesson(
     where_it_fits: `**${t}** is part of ${map.path.length ? `*${map.path.join(" › ")}*` : `*${map.course}*`}.${map.before.length ? ` It follows ${map.before.join(", ")}.` : ""}${map.after.length ? ` It leads to ${map.after.join(", ")}.` : ""}${map.related.length ? ` A similar idea appears in ${map.related.map((r) => `${r.title} (${r.course})`).join(", ")}.` : ""}`,
     recall: d === 1 ? [] : d === 2 ? glossary.slice(0, 1).map(meaningQ) : d === 3 ? (blanks[0] ? [blankQ(blanks[0])] : glossary.slice(0, 1).map(meaningQ)) : [qa(`In two sentences, what is ${t}?`, summary || "Compare with your notes.", "recall")],
     sections,
-    glossary,
+    // Only the terms the lesson actually teaches, so every glossary entry has a section to point to.
+    glossary: glossary.map((g) => ({ ...g, term: label(g.term) })).filter((g) => sections.some((x) => x.blocks.some((b) => mentions(`${b.title}\n${b.body}`, g.term)))),
+    concept_links: offlineLinks(sections, [...new Set([...glossary.map((g) => label(g.term)), ...keyTerms.map(label)])]),
     // The warnings are already pitfall blocks; without an AI there's no correction to add, so no separate list.
     common_mistakes: [],
     connections: neighbours,
@@ -334,6 +428,33 @@ export function offlineLesson(
   };
 }
 
+/**
+ * Links between key terms that the lesson's own blocks state: a formula that gives one term's symbol in
+ * terms of another's ("depends on"), or a block written to connect two terms.
+ */
+function offlineLinks(sections: LessonDoc["sections"], terms: string[]): ConceptLink[] {
+  const out: ConceptLink[] = [];
+  const seen = new Set<string>();
+  const sym = (t: string) => t.match(/\$([^$]+)\$/)?.[1]?.trim() ?? null;
+  for (const b of sections.flatMap((x) => x.blocks)) {
+    const text = `${b.title}\n${b.body}`;
+    const here = terms.filter((t) => mentions(text, t));
+    const maths = [...text.matchAll(/\$\$([\s\S]+?)\$\$|\$([^$]+)\$/g)].map((m) => m[1] ?? m[2]).filter((m) => m.includes("="));
+    for (const a of here)
+      for (const c of here) {
+        if (a === c || seen.has(`${a}|${c}`) || seen.has(`${c}|${a}`)) continue;
+        const sa = sym(a);
+        const sc = sym(c);
+        const formula = sa && sc && maths.some((m) => m.split("=")[0].includes(sa) && m.split("=").slice(1).join("=").includes(sc));
+        const written = b.title === `How ${a.replace(/\s*\$[^$]+\$/, "")} connects to ${c.replace(/\s*\$[^$]+\$/, "")}`;
+        if (!formula && !written) continue;
+        seen.add(`${a}|${c}`);
+        out.push({ from: a, to: c, label: formula ? "depends on" : "connects to" });
+      }
+  }
+  return out.slice(0, 10);
+}
+
 /** The best statement of what a term means, from the sentences of the sources. */
 function definition(term: string, all: (Sentence & { score: number })[]): { text: string; body: string; meaning: string; source: string; score: number } | null {
   const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").split(/\s+/).join("\\s+");
@@ -341,6 +462,8 @@ function definition(term: string, all: (Sentence & { score: number })[]): { text
   const verb = new RegExp(`\\b${esc}\\b[^.]{0,30}?\\b(is|are|means|refers to|is defined as|is called)\\b`, "i");
   const asked = new RegExp(`^what('s| is| are)\\s+(the\\s+)?${esc}\\b.*\\?$`, "i");
   const symbol = new RegExp(`(\\$[^$]+\\$)\\s*\\((the\\s+)?${esc}\\)`, "i");
+  const after = new RegExp(`\\b${esc}\\s+(\\$[^$]+\\$)`, "i");
+  const isThe = new RegExp(`(\\$[^$]+\\$)\\s+is\\s+the\\s+${esc}\\b`, "i");
   let best: { text: string; body: string; meaning: string; source: string; score: number } | null = null;
   const offer = (score: number, text: string, meaning: string, source: string, body = text) => {
     if (!best || score > best.score) best = { text, body, meaning, source, score };
@@ -357,6 +480,11 @@ function definition(term: string, all: (Sentence & { score: number })[]): { text
     if (verb.test(s.text) && !s.lead && !isPrompt(s.text)) offer(3 - s.text.length / 1000, s.text, s.text, s.source);
     const sym = s.text.match(symbol);
     if (sym) offer(2, s.text, sym[1], s.source, `The **${term}** is ${sym[1]}.`);
+    // "The logarithmic decrement $\delta = \ln(u_i/u_{i+1})$ ..." names the term with its formula.
+    const named2 = s.text.match(after);
+    if (named2 && named2[1].includes("=")) offer(2, s.text, named2[1], s.source, s.text);
+    const named3 = s.text.match(isThe);
+    if (named3) offer(2, s.text, named3[1], s.source, `The **${term}** is ${named3[1]}.`);
     if (!s.lead && s.text.length < 220 && isStatement(s.text)) offer(1 - s.text.length / 1000, s.text, s.text, s.source);
   }
   return best;

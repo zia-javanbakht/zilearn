@@ -49,7 +49,11 @@ describe("structured lessons", () => {
     const blocks = (doc: typeof l1) => doc.sections.flatMap((x) => x.blocks);
     expect(blocks(l1).find((b) => b.title === "Critical damping")).toMatchObject({ kind: "definition", source: "Lecture 3 recording [05:05]" });
     expect(blocks(l1).some((b) => b.kind === "intuition" && /door closer/.test(b.body))).toBe(true);
-    expect(l1.glossary.find((g) => g.term === "damping ratio")?.meaning).toBe("$\\zeta = c/c_{cr}$");
+    expect(l1.glossary.find((g) => g.term.startsWith("damping ratio"))).toEqual({ term: "damping ratio $\\zeta$", meaning: "$\\zeta = c/c_{cr}$" });
+    // Framed around the topic's key terms: a section for each, and links the formulas state.
+    expect(l1.sections.map((x) => x.heading)).toEqual(expect.arrayContaining(["Damping ratio", "Critical damping", "Logarithmic decrement"]));
+    expect(l1.concept_links).toContainEqual({ from: "damping ratio $\\zeta$", to: "critical damping $c_{cr}$", label: "depends on" });
+    expect(lessonToMarkdown(l1)).toMatch(/### Map of this lesson[\s\S]*%% jump k\d ②[\s\S]*### ② Damping ratio/);
     expect(l1.connections.map((c) => c.topic)).toContain("Second-order systems (Control Systems)");
 
     const l2 = await generateLessonDoc(topic.id, 2);

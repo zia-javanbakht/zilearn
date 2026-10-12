@@ -243,6 +243,7 @@ function refereeFields(doc: LessonDoc): [string, string][] {
     for (const [j, b] of x.blocks.entries()) {
       out.push([`sections.${i}.blocks.${j}.source`, b.source ?? ""]);
       if (b.figure) out.push([`sections.${i}.blocks.${j}.figure.caption`, b.figure.caption]);
+      b.figure?.diagram?.nodes.forEach((n, k) => out.push([`sections.${i}.blocks.${j}.figure.diagram.nodes.${k}.label`, n.label]));
     }
   return out;
 }
@@ -253,7 +254,7 @@ function refereeFields(doc: LessonDoc): [string, string][] {
  * citations that don't support their block, and captions that give an answer away. Fixes what it finds
  * in place and returns the problems, for the log. Skipped without an AI.
  */
-export async function refereeLesson(doc: LessonDoc, context: string): Promise<string[]> {
+export async function refereeLesson(doc: LessonDoc, context: string, framing: string[] = []): Promise<string[]> {
   if (!aiEnabled()) return [];
   const fields = refereeFields(doc);
   const paths = new Set(fields.map(([p]) => p));
@@ -270,7 +271,7 @@ export async function refereeLesson(doc: LessonDoc, context: string): Promise<st
 - Statements that contradict another part of the lesson or the student's sources.
 - Questions whose data don't agree with their answers or with each other; recompute every number you can.
 - Sources that don't state the block's claim: set the right title plus timestamp, section or question number, or an empty string if the claim isn't in the sources.
-- Figure captions that state a quantity an example or question asks the student to find.${untested.length && doc.check_yourself.length ? `\n- Objectives ${untested.join(", ")} have no check_yourself question. Rewrite the least useful check_yourself questions (question and answer) so each of these objectives is tested.` : ""}
+- Figure captions that state a quantity an example or question asks the student to find.${framing.length ? `\n- How the lesson uses its key terms and diagrams (fix by editing the fields named, e.g. a block body or a diagram box label):\n  - ${framing.slice(0, 6).join("\n  - ")}` : ""}${untested.length && doc.check_yourself.length ? `\n- Objectives ${untested.join(", ")} have no check_yourself question. Rewrite the least useful check_yourself questions (question and answer) so each of these objectives is tested.` : ""}
 Leave style alone, keep the student's notation, and keep maths KaTeX-compatible ($...$ and $$...$$). Return an empty list if nothing is wrong.
 
 ${fields.map(([path, text]) => `<field path="${path}">\n${text}\n</field>`).join("\n")}`,

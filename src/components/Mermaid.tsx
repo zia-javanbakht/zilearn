@@ -49,8 +49,8 @@ export function Mermaid({
   const scaleRef = useRef(scale);
   scaleRef.current = scale;
   useEffect(() => {
-    if (ref.current) applyScale(ref.current, scale);
-  }, [scale]);
+    if (ref.current && !(fit && !zoom)) applyScale(ref.current, scale);
+  }, [scale, fit, zoom]);
   const clickRef = useRef(onNodeClick);
   clickRef.current = onNodeClick;
   const toggleRef = useRef(onToggle);
@@ -158,7 +158,8 @@ export function Mermaid({
         const { svg } = await mermaid.render(`m${id}${Date.now()}`, code);
         if (cancelled || !ref.current) return;
         ref.current.innerHTML = svg;
-        applyScale(ref.current, scaleRef.current);
+        // A diagram that fits its column keeps the SVG's own max-width: 100%.
+        if (!(fit && !zoom)) applyScale(ref.current, scaleRef.current);
         setError(null);
         if (clickRef.current) wireNodes(ref.current);
         setRendered((r) => r + 1);

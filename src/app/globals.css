@@ -256,6 +256,11 @@ button.link:hover { text-decoration: underline; }
 .lb-goal { --lb: #1971c2; }
 .lb-takeaways { --lb: #495057; }
 .lb-source { font-size: 0.82em; color: var(--muted, #868e96); margin: 6px 0 10px; }
+.lb-terms { margin: -4px 0 10px; font-size: 0.88em; color: var(--muted); }
+.lb-terms strong { display: inline-block; padding: 1px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.lb-hint { font-size: 0.82em; color: var(--muted); margin-top: 4px; }
+.markdown h3.flash { animation: flash-heading 1.6s ease-out; border-radius: 6px; }
+@keyframes flash-heading { 0% { background: var(--accent-soft); box-shadow: 0 0 0 6px var(--accent-soft); } 100% { background: transparent; box-shadow: 0 0 0 6px transparent; } }
 
 /* Lesson plots */
 .plot { margin: 10px 0; }
@@ -338,3 +343,6 @@ a.ai-badge:hover { text-decoration: none; filter: brightness(1.05); }
   .settings input { font-size: 16px; }
   .settings-actions button { flex: 1; justify-content: center; }
 }
+.deepen-menu { width: min(320px, 86vw); }
+.deepen-menu textarea { width: 100%; font-size: 0.88rem; }
+.deepen-menu button.primary { text-align: center; border-color: var(--accent); }

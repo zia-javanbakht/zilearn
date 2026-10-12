@@ -45,6 +45,11 @@ export function LessonModal({
   const bodyRef = useRef<HTMLDivElement>(null);
   const articleRef = useRef<HTMLElement>(null);
   const exportRef = useRef<HTMLDetailsElement>(null);
+  const deepenRef = useRef<HTMLDetailsElement>(null);
+  const [ai, setAi] = useState<boolean | null>(null);
+  const [ask, setAsk] = useState("");
+  const [deepening, setDeepening] = useState(false);
+  const [added, setAdded] = useState<string[]>([]);
   // Ignore responses that arrive after the user switched level or regenerated again.
   const reqRef = useRef(0);
   const level = DEPTH_LEVELS[depth - 1];
@@ -108,6 +113,32 @@ export function LessonModal({
     }
   }
 
+  useEffect(() => {
+    api<{ ai: boolean }>("/api/status")
+      .then((r) => setAi(r.ai))
+      .catch(() => setAi(false));
+  }, []);
+
+  /** The AI tutor's final enrichment, on request: deepens what the lesson states without explaining. */
+  async function deepen() {
+    deepenRef.current?.removeAttribute("open");
+    const req = reqRef.current;
+    setDeepening(true);
+    setError(null);
+    try {
+      const r = await api<{ content: string; changes: string[] }>(`/api/topics/${topicId}/lesson/enrich`, { method: "POST", json: { depth, request: ask } });
+      if (req !== reqRef.current) return;
+      setContent(r.content);
+      setAdded(r.changes);
+      setAsk("");
+      flash(r.changes.length ? `Deepened in ${r.changes.length} place${r.changes.length === 1 ? "" : "s"}` : "Nothing to deepen at this level");
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setDeepening(false);
+    }
+  }
+
   async function finish() {
     try {
       await api(`/api/topics/${topicId}/progress`, { method: "POST", json: { depth } });
@@ -122,6 +153,7 @@ export function LessonModal({
   useEffect(() => {
     setContent(null);
     setToc([]);
+    setAdded([]);
     bodyRef.current?.scrollTo({ top: 0 });
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -237,6 +269,39 @@ export function LessonModal({
                 {note}
               </span>
             )}
+            <details className="menu" ref={deepenRef}>
+              <summary
+                className="btn sm"
+                aria-disabled={!content || busy || deepening || ai === false}
+                title={ai === false ? "Needs an AI provider: choose one in Settings" : "Ask the AI tutor to deepen this lesson at its level"}
+              >
+                {deepening ? <Busy label="Deepening…" /> : "✨ Deepen"}
+              </summary>
+              <div className="menu-list deepen-menu">
+                {ai === false ? (
+                  <p className="small muted" style={{ margin: 0 }}>
+                    Deepening needs an AI provider. <a href="/settings">Choose one in Settings</a>.
+                  </p>
+                ) : (
+                  <form
+                    className="stack"
+                    style={{ gap: 6 }}
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      deepen();
+                    }}
+                  >
+                    <label className="small muted" htmlFor="deepen-ask">
+                      What should go deeper? Leave empty and the tutor picks the places that explain least.
+                    </label>
+                    <textarea id="deepen-ask" value={ask} onChange={(e) => setAsk(e.target.value)} placeholder="e.g. why the decay is exponential" rows={3} maxLength={500} />
+                    <button className="sm primary" type="submit" disabled={!content || busy || deepening}>
+                      Deepen this lesson
+                    </button>
+                  </form>
+                )}
+              </div>
+            </details>
             <details className="menu" ref={exportRef}>
               <summary className="btn sm" aria-disabled={!content || busy}>
                 {printing === "pdf" ? "Making the PDF…" : printing === "tex" ? "Making the LaTeX…" : "Export ▾"}
@@ -305,6 +370,16 @@ export function LessonModal({
             ) : (
               content && (
                 <>
+                  {added.length > 0 && (
+                    <div className="alert info small" role="status">
+                      <strong>Deepened:</strong>
+                      <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                        {added.map((a, i) => (
+                          <li key={i}>{a}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                   <Markdown>{content}</Markdown>
                   <div className="reader-finish">
                     {done >= depth ? (
