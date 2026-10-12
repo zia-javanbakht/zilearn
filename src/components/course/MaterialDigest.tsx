@@ -5,6 +5,7 @@ import { api } from "../api";
 import { Markdown } from "../Markdown";
 import { Mermaid } from "../Mermaid";
 import { digestMindmap } from "@/lib/mermaid";
+import { digestPaths, digestTitle, insideAny, moveDigestItems, removeDigestItems, renameDigestItem } from "@/lib/digestEdit";
 import type { Digest, DigestTopic, Material } from "@/lib/types";
 
 /** Seconds from "mm:ss" or "h:mm:ss". */
@@ -131,8 +132,144 @@ export function MaterialDigest({
           ))}
         </ol>
       ) : (
-        mindmap && <Mermaid code={mindmap} zoom />
+        mindmap && <DigestMap m={m} d={d} code={mindmap} onSaved={onChanged} />
       )}
+    </div>
+  );
+}
+
+/**
+ * The material's topics as an editable mindmap: click to pick (Ctrl/Shift-click for several), drag a
+ * topic onto another to move it there (Alt to copy), and cut, copy, paste, rename or delete the picked
+ * ones. Plus and minus signs fold branches.
+ */
+function DigestMap({ m, d, code, onSaved }: { m: Material; d: Digest; code: string; onSaved: (m?: Material) => void }) {
+  const [picked, setPicked] = useState<string[]>([]);
+  const [clip, setClip] = useState<{ mode: "cut" | "copy"; names: string[] } | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const paths = useMemo(() => digestPaths(d), [d]);
+  const marks = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const n of picked) out[n] = "picked";
+    if (clip?.mode === "cut") for (const n of clip.names) out[n] = `${out[n] ?? ""} cut`;
+    return out;
+  }, [picked, clip]);
+
+  async function save(next: Digest, after?: () => void) {
+    if (next === d) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const r = await api<Material>(`/api/materials/${m.id}/digest`, { method: "PUT", json: { digest: next } });
+      setPicked([]);
+      after?.();
+      onSaved(r);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const paste = () => {
+    if (!clip) return;
+    const into = picked.length === 1 ? picked[0] : "root";
+    if (clip.mode === "cut" && insideAny(d, clip.names, into)) return setError("A topic can't go inside itself.");
+    save(moveDigestItems(d, clip.names, into, clip.mode === "copy"), () => clip.mode === "cut" && setClip(null));
+  };
+  const remove = () => picked.length && save(removeDigestItems(d, picked));
+
+  function onKey(e: React.KeyboardEvent) {
+    const t = e.target as HTMLElement;
+    if (["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)) return;
+    const k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && k === "x" && picked.length) (e.preventDefault(), setClip({ mode: "cut", names: picked }));
+    else if ((e.ctrlKey || e.metaKey) && k === "c" && picked.length) (e.preventDefault(), setClip({ mode: "copy", names: picked }));
+    else if ((e.ctrlKey || e.metaKey) && k === "v" && clip) (e.preventDefault(), paste());
+    else if ((e.key === "Delete" || e.key === "Backspace") && picked.length) (e.preventDefault(), remove());
+    else if (e.key === "F2" && picked.length === 1) (e.preventDefault(), setRenaming(picked[0]));
+    else if (e.key === "Escape") (setPicked([]), setClip(null));
+  }
+
+  const into = picked.length === 1 ? `into "${digestTitle(d, picked[0])}"` : "as main topics";
+  return (
+    <div className="stack" style={{ gap: 6 }} onKeyDown={onKey}>
+      <div className="selbar" role="toolbar" aria-label="Edit this item's topics">
+        {picked.length > 0 ? (
+          <>
+            <strong className="small">{picked.length === 1 ? `"${digestTitle(d, picked[0])}"` : `${picked.length} picked`}</strong>
+            <button className="sm" onClick={() => setClip({ mode: "cut", names: picked })} title="Cut, then paste somewhere else to move (Ctrl+X)">
+              ✂ Cut
+            </button>
+            <button className="sm" onClick={() => setClip({ mode: "copy", names: picked })} title="Copy, then paste to duplicate (Ctrl+C)">
+              ⧉ Copy
+            </button>
+            {picked.length === 1 && (
+              <button className="sm" onClick={() => setRenaming(picked[0])} title="Rename (F2)">
+                ✎ Rename
+              </button>
+            )}
+            <button className="sm danger" onClick={remove} title="Delete (Del)">
+              Delete
+            </button>
+            <button className="sm ghost" onClick={() => setPicked([])}>
+              Clear
+            </button>
+          </>
+        ) : (
+          <span className="small muted">Click a topic to pick it (Ctrl/Shift-click for more). Drag one onto another to move it there, hold Alt to copy.</span>
+        )}
+        {clip && (
+          <button className="sm primary" onClick={paste} title="Paste (Ctrl+V)">
+            Paste {clip.names.length} {into}
+          </button>
+        )}
+        {clip && (
+          <button className="sm ghost" onClick={() => setClip(null)}>
+            Cancel {clip.mode}
+          </button>
+        )}
+        {saving && <span className="small muted">Saving…</span>}
+      </div>
+      {renaming && (
+        <form
+          className="row"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const v = (new FormData(e.currentTarget).get("title") as string) ?? "";
+            save(renameDigestItem(d, renaming, v), () => setRenaming(null));
+          }}
+        >
+          <input name="title" defaultValue={digestTitle(d, renaming)} autoFocus aria-label="New name" style={{ flex: 1 }} onKeyDown={(e) => e.key === "Escape" && setRenaming(null)} />
+          <button className="sm primary" type="submit">
+            Save
+          </button>
+          <button className="sm" type="button" onClick={() => setRenaming(null)}>
+            Cancel
+          </button>
+        </form>
+      )}
+      {error && (
+        <div className="small" role="alert" style={{ color: "var(--dont)" }}>
+          {error}
+        </div>
+      )}
+      <Mermaid
+        code={code}
+        zoom
+        marks={marks}
+        onNodeClick={(nid, how) => {
+          if (nid === "root") return setPicked([]);
+          setPicked((p) => (how.extend ? (p.includes(nid) ? p.filter((x) => x !== nid) : [...p, nid]) : [nid]));
+        }}
+        dragLabel={(nid) => (picked.includes(nid) && picked.length > 1 ? `${picked.length} topics` : digestTitle(d, nid))}
+        onNodeDrop={{
+          canDrop: (from, to) => from !== to && !!paths[from] && (to === "root" || !!paths[to]) && !insideAny(d, picked.includes(from) ? picked : [from], to),
+          drop: (from, to, copy) => save(moveDigestItems(d, picked.includes(from) ? picked : [from], to, copy)),
+        }}
+      />
     </div>
   );
 }

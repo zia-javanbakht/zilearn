@@ -347,3 +347,5 @@ a.ai-badge:hover { text-decoration: none; filter: brightness(1.05); }
 .deepen-menu { width: min(320px, 86vw); }
 .deepen-menu textarea { width: 100%; font-size: 0.88rem; }
 .deepen-menu button.primary { text-align: center; border-color: var(--accent); }
+.mermaid-box g.node.moving { cursor: grabbing; opacity: 0.85; }
+input.changed { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }

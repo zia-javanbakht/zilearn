@@ -398,7 +398,7 @@ export function addTopic(
  * Rename, re-describe or move a topic. Edited topics are kept on rebuilds; a renamed topic's old name
  * is remembered as removed, so a rebuild doesn't bring it back next to the new one.
  */
-export function editTopic(id: string, patch: { title?: string; summary?: string; parent_id?: string | null }): Topic | null {
+export function editTopic(id: string, patch: { title?: string; summary?: string; parent_id?: string | null; importance?: number }): Topic | null {
   const t = getTopic(id);
   if (!t) return null;
   const d = db();
@@ -413,6 +413,7 @@ export function editTopic(id: string, patch: { title?: string; summary?: string;
   const summary = patch.summary ?? t.summary;
   d.transaction(() => {
     d.prepare("UPDATE topics SET title = ?, summary = ?, parent_id = ?, manual = 1 WHERE id = ?").run(title, summary, parent, id);
+    if (patch.importance === 1 || patch.importance === 2 || patch.importance === 3) d.prepare("UPDATE topics SET importance = ? WHERE id = ?").run(patch.importance, id);
     d.prepare("UPDATE topics_fts SET title = ?, summary = ? WHERE topic_id = ?").run(title, summary, id);
     if (normTitle(title) !== normTitle(t.title)) {
       const removed = removedTitles(t.course_id);
