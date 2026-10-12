@@ -87,6 +87,7 @@ function relevance(text: string, terms: Set<string>): number {
 
 const DEFINES = /\b(is|are|means|refers to|is defined as|is called|we call|we define)\b/i;
 const ANALOGY = /\b(think of|imagine|picture|like a|as if|analogy|for example, a)\b/i;
+const LIMIT = /\b(assum\w*|only (valid|works|holds|applies)|breaks? down|limitations?|does not hold|doesn't hold|approximat\w*|neglect\w*|ignor\w*|valid (only|for|when)|in practice|real (structures|systems|buildings))\b/i;
 const WARNING = /\b(mistakes?|mix(es|ed)? (this|it|them|these) up|confus\w*|be careful|common (error|slip)|watch out|wrong|trap|pitfall|don't (forget|waste|confuse|mix|use)|do not (forget|confuse|mix|use))\b/i;
 
 /** A question or an instruction to the student ("Compare ...", "Explain ..."), not a statement to teach from. */
@@ -121,6 +122,11 @@ function formulas(u: Unit): { lead: string; math: string }[] {
   return out;
 }
 
+/** Results stated inline: a sentence with an equation in $...$ (e.g. "The damped frequency is $\\omega_D = \\omega_n\\sqrt{1-\\zeta^2}$."). */
+function inlineFormulas(sentences: Sentence[]): Sentence[] {
+  return sentences.filter((s) => /\$[^$]*=[^$]*\$/.test(s.text) && !isPrompt(s.text));
+}
+
 /** Bullet lists and tables in a unit, as Markdown. */
 function listsAndTables(u: Unit): string[] {
   const out: string[] = [];
@@ -150,7 +156,8 @@ function questions(sources: Source[], terms: Set<string> | null): { text: string
       out.push({ text, source: `${s.title}, Q${m[1] ?? m[2]}`, score: terms ? relevance(text, terms) : 1 });
     }
   }
-  return out.filter((q) => q.score > 0).sort((a, b) => b.score - a.score);
+  // The sheets came in for this topic, so their other questions still belong, after the clearly relevant ones.
+  return out.sort((a, b) => b.score - a.score);
 }
 
 /** Every numbered question in the student's tutorial, workshop and exam sheets: theirs to attempt, not for a lesson to solve. */
@@ -192,7 +199,7 @@ export function offlineLesson(
     // A key term only gets a definition when the materials actually define it; a sentence that merely mentions it isn't one.
     // The same sentence defining two terms ("decay", "weight decay") is one definition.
     if (!def || (term !== t && def.score < 2) || used.has(def.text)) continue;
-    used.add(def.text);
+    for (const x of def.text.split(/(?<=[.!?])\s+/)) used.add(x);
     if (term !== t) glossary.push({ term, meaning: def.meaning });
     if (defBlocks.length < (d === 1 ? 2 : 3)) defBlocks.push({ kind: "definition", title: term[0].toUpperCase() + term.slice(1), body: def.body, source: def.source });
   }
@@ -212,16 +219,20 @@ export function offlineLesson(
   const practice = questions(sources, terms);
   const practiceTitles = new Set(sources.filter((x) => /tutorial|exam|workshop/.test(x.kind) || /tutorial|exam|problem|exercise|workshop/i.test(x.title)).map((x) => x.title));
 
-  const blocks = (n: number, xs: LessonBlock[]) => take(xs, n);
+  // Each level teaches its own material (as the AI lessons do), so passes add to each other instead of repeating.
+  const extraFormulas = inlineFormulas(byScore).filter((x) => !used.has(x.text)).slice(0, 3);
+  const formulaBody = [
+    ...take(eqs, 4).map((e) => `${e.lead ? `${e.lead}\n\n` : ""}${e.math}`),
+    ...extraFormulas.map((x) => x.text),
+  ].join("\n\n");
+  for (const x of extraFormulas) used.add(x.text);
+  const formulaBlock: LessonBlock[] = formulaBody ? [{ kind: "formula", title: `Key results for ${t}`, body: formulaBody, source: eqs[0]?.source ?? extraFormulas[0]?.source }] : [];
   const idea: LessonBlock[] = [
     ...(summary ? [{ kind: "keypoint" as const, title: `What ${t} is about`, body: summary }] : []),
-    ...defBlocks,
-    ...intuitions.map((s) => ({ kind: "intuition" as const, title: "A way to picture it", body: s.text, source: s.source })),
+    ...defBlocks.slice(0, 2),
+    ...intuitions.slice(0, 1).map((s) => ({ kind: "intuition" as const, title: "A way to picture it", body: s.text, source: s.source })),
   ];
-  const mechanism: LessonBlock[] = [
-    ...(eqs.length ? [{ kind: "formula" as const, title: `Key results for ${t}`, body: take(eqs, d === 2 ? 4 : 6).map((e) => `${e.lead ? `${e.lead}\n\n` : ""}${e.math}`).join("\n\n"), source: eqs[0].source }] : []),
-    ...lists.slice(0, d === 2 ? 2 : 3).map((l) => ({ kind: "comparison" as const, title: l.section ?? "Side by side", body: l.md, source: l.source })),
-  ];
+  const comparisons: LessonBlock[] = lists.map((l) => ({ kind: "comparison" as const, title: l.section ?? "Side by side", body: l.md, source: l.source }));
   // The student's own mock exam slips come first: they are the mistakes this student actually makes.
   const slipBlocks: LessonBlock[] = (info.slips ?? []).slice(0, 2).map((x) => ({
     kind: "pitfall" as const,
@@ -229,22 +240,55 @@ export function offlineLesson(
     body: `You lost marks on: *${x.question.replace(/\s+/g, " ").trim()}*\n\n${x.feedback}`,
     source: "Your mock exam",
   }));
-  const cautions: LessonBlock[] = warnings.slice(0, 3).map((s) => ({ kind: "pitfall" as const, title: s.stamp ? "Your lecturer's warning" : "Watch out", body: s.text, source: s.source }));
-  for (const b of [...intuitions, ...warnings.slice(0, 3)]) used.add(b.text);
+  // Assumptions and limits, for the mastery level: where the model stops describing reality.
+  const limits: LessonBlock[] = all
+    .filter((s) => LIMIT.test(s.text) && !s.lead && !WARNING.test(s.text) && isStatement(s.text))
+    .slice(0, 3)
+    .map((s) => ({ kind: "keypoint" as const, title: "An assumption to keep in mind", body: s.text, source: s.source }));
+  for (const b of limits) used.add(b.body);
+  const cautions: LessonBlock[] = warnings.map((s) => ({ kind: "pitfall" as const, title: s.stamp ? "Your lecturer's warning" : "Watch out", body: s.text, source: s.source }));
+  for (const b of [...intuitions, ...warnings]) used.add(b.text);
   const worked: LessonBlock[] = practice.slice(0, 2).map((q) => ({ kind: "example" as const, title: q.source, body: `${q.text}\n\nTry it before looking at your solutions. Write down the formula you use and the units at each step.`, source: q.source }));
+  const method: LessonBlock = {
+    kind: "procedure",
+    title: "A method for these questions",
+    body: "1. List what is given and what is asked, with units; convert to SI.\n2. Pick the result from your formula sheet that links them, and say why it applies.\n3. Substitute, keeping units on every number.\n4. Check the answer: units, size, and a limiting case you know.",
+  };
   const more: LessonBlock[] = byScore
     .filter((s) => !used.has(s.text) && !s.lead && isStatement(s.text))
     .slice(0, 3)
     .map((s) => ({ kind: "note" as const, title: "From your materials", body: s.text, source: s.source }));
 
-  const sections = [
-    { heading: d === 1 ? "The big idea" : "The idea", blocks: blocks(d === 1 ? 4 : 5, idea) },
-    ...(d >= 2 ? [{ heading: "How it works", blocks: mechanism }] : []),
-    ...(d >= 3 ? [{ heading: "Practise with your tutorial questions", blocks: worked }] : []),
-    ...(d >= 2 || slipBlocks.length ? [{ heading: "Where students slip", blocks: [...slipBlocks, ...(d >= 2 ? cautions : [])] }] : []),
-    ...(d >= 4 || !mechanism.length ? [{ heading: "More from your materials", blocks: more }] : []),
-  ].filter((s) => s.blocks.length);
+  const slipSection = slipBlocks.length ? [{ heading: "Where you slipped", blocks: slipBlocks }] : [];
+  const byLevel: Record<number, { heading: string; blocks: LessonBlock[] }[]> = {
+    1: [{ heading: "The big idea", blocks: idea }, ...slipSection],
+    2: [
+      { heading: "How it works", blocks: [...formulaBlock, ...comparisons.slice(0, 2), ...defBlocks.slice(2)] },
+      { heading: "Where students slip", blocks: [...slipBlocks, ...cautions.slice(0, 2)] },
+    ],
+    3: [
+      { heading: "The results you need", blocks: formulaBlock },
+      { heading: "Practise with your tutorial questions", blocks: worked.length ? [method, ...worked] : [] },
+      ...slipSection,
+    ],
+    4: [
+      { heading: "Where it stops applying", blocks: [...slipBlocks, ...limits, ...cautions.slice(2, 5), ...comparisons.slice(2, 4)] },
+      { heading: "More from your materials", blocks: more },
+    ],
+  };
+  let sections = byLevel[d].filter((x) => x.blocks.length);
+  // Thin materials: fall back to the big idea, then to anything at all, rather than an empty lesson.
+  if (!sections.length) sections = [{ heading: "The idea", blocks: [...idea, ...more] }].filter((x) => x.blocks.length);
   if (!sections.length) sections.push({ heading: "From your materials", blocks: [{ kind: "definition", title: t, body: summary || `${t}, as covered in your materials.` }] });
+
+  // Questions with real answers: terms from the glossary, formulas to complete, the lecturer's warnings.
+  const blanks = eqs
+    .map((e) => e.math.replace(/^\$\$|\$\$$/g, "").trim())
+    .filter((m) => m.includes("=") && !m.includes("\n"))
+    .map((m) => ({ lhs: m.slice(0, m.indexOf("=")).trim(), math: m }))
+    .filter((x) => x.lhs && x.lhs.length < 40);
+  const blankQ = (x: { lhs: string; math: string }) => qa(`Complete from memory: $${x.lhs} = \\;?$`, `$${x.math}$`, "recall");
+  const meaningQ = (g: { term: string; meaning: string }) => qa(`What does "${g.term}" mean?`, g.meaning, "recall");
 
   const neighbours = [
     ...map.before.map((x) => ({ topic: x, relation: "comes before it; make sure you can explain it first" })),
@@ -266,21 +310,26 @@ export function offlineLesson(
       ...(d >= 4 ? ["Spot where it stops applying and teach it back from memory."] : []),
     ],
     where_it_fits: `**${t}** is part of ${map.path.length ? `*${map.path.join(" › ")}*` : `*${map.course}*`}.${map.before.length ? ` It follows ${map.before.join(", ")}.` : ""}${map.after.length ? ` It leads to ${map.after.join(", ")}.` : ""}${map.related.length ? ` A similar idea appears in ${map.related.map((r) => `${r.title} (${r.course})`).join(", ")}.` : ""}`,
-    recall: d > 1 ? [qa(`In two sentences, what is ${t}?`, summary || "Compare with your notes.", "recall")] : [],
+    recall: d === 1 ? [] : d === 2 ? glossary.slice(0, 1).map(meaningQ) : d === 3 ? (blanks[0] ? [blankQ(blanks[0])] : glossary.slice(0, 1).map(meaningQ)) : [qa(`In two sentences, what is ${t}?`, summary || "Compare with your notes.", "recall")],
     sections,
     glossary,
     // The warnings are already pitfall blocks; without an AI there's no correction to add, so no separate list.
     common_mistakes: [],
     connections: neighbours,
-    check_yourself: [
-      qa(`Explain ${t} to a classmate in two sentences, without notes.`, summary || "Compare with your sources.", "explain"),
-      ...glossary.slice(0, d === 1 ? 2 : 3).map((g) => qa(`What does "${g.term}" mean?`, g.meaning, "recall")),
-      ...(d >= 2 && map.after[0] ? [qa(`Why do you need ${t} before ${map.after[0]}?`, `Look at how ${map.after[0]} uses the results above.`, "explain")] : []),
-      ...(d >= 3 ? practice.slice(2, 5).map((q) => qa(q.text, `Check against your worked solutions (${q.source}).`, "apply", "Start from the formula block above.")) : []),
-      ...(d >= 4 && map.related[0] ? [qa(`How is ${t} like ${map.related[0].title} in ${map.related[0].course}, and how is it different?`, map.related[0].relation ?? "Compare the equations and what each symbol means.", "transfer")] : []),
-    ],
+    check_yourself: (
+      {
+        1: [qa(`Explain ${t} to a classmate in two sentences, without notes.`, summary || "Compare with your sources.", "explain"), ...glossary.slice(0, 3).map(meaningQ)],
+        2: [...blanks.slice(0, 2).map(blankQ), ...glossary.slice(3, 5).map(meaningQ), ...cautions.slice(0, 1).map((c) => qa("Your materials warn about one slip here. What is it, and how do you avoid it?", c.body, "explain"))],
+        3: practice.slice(2, 5).map((q) => qa(q.text, `Check against your worked solutions (${q.source}).`, "apply", "Use the method and the results above.")),
+        4: [
+          qa(`Teach ${t} back from memory in five sentences: what it is, why it matters, how it works, and when it stops applying.`, [summary, ...defBlocks.slice(0, 2).map((b) => b.body)].filter(Boolean).join(" ") || "Compare with your sources.", "explain"),
+          ...[...limits, ...cautions.slice(2)].slice(0, 1).map((c) => qa("Where does this stop working, according to your materials?", c.body, "explain")),
+          ...(map.related[0] ? [qa(`How is ${t} like ${map.related[0].title} in ${map.related[0].course}, and how is it different?`, map.related[0].relation ?? "Compare the equations and what each symbol means.", "transfer")] : []),
+        ],
+      } as Record<number, QA[]>
+    )[d],
     // Statements from notes and readings (not questions, not the lecturer's spoken asides).
-    takeaways: dedupe([...(summary ? [{ text: summary }] : []), ...byScore.filter((s) => !s.lead && !s.stamp && !used.has(s.text) && isStatement(s.text) && !practiceTitles.has(s.source.split(",")[0]))].slice(0, 3)).map((x) => x.text).slice(0, 4),
+    takeaways: dedupe([...(summary && d > 1 ? [{ text: summary }] : []), ...byScore.filter((s) => !s.lead && !s.stamp && !used.has(s.text) && isStatement(s.text) && !practiceTitles.has(s.source.split(",")[0]))].slice(0, 3)).map((x) => x.text).slice(0, 4),
     read: sources.slice(0, 4).map((s) => ({ title: s.title, focus: focusIn(s.title, relevant, rankedUnits.map((x) => x.u)) })),
   };
 }
@@ -299,8 +348,11 @@ function definition(term: string, all: (Sentence & { score: number })[]): { text
   for (const [i, s] of all.entries()) {
     if (!named.test(s.text)) continue;
     if (asked.test(s.text) && all[i + 1]) {
-      const ans = all[i + 1].text.replace(/^it'?s\s+/i, "");
-      offer(4, `${s.text} ${all[i + 1].text}`, ans[0].toUpperCase() + ans.slice(1), s.source);
+      const next = all[i + 1].text;
+      const ans = next.replace(/^it'?s\s+|^it is\s+/i, "");
+      // "What's critical damping? It's the smallest ..." reads better as "Critical damping is the smallest ...".
+      const body = ans !== next ? `**${term[0].toUpperCase() + term.slice(1)}** is ${ans[0].toLowerCase() + ans.slice(1)}` : `${s.text} ${next}`;
+      offer(4, `${s.text} ${next}`, ans[0].toUpperCase() + ans.slice(1), s.source, body);
     }
     if (verb.test(s.text) && !s.lead && !isPrompt(s.text)) offer(3 - s.text.length / 1000, s.text, s.text, s.source);
     const sym = s.text.match(symbol);
@@ -311,9 +363,12 @@ function definition(term: string, all: (Sentence & { score: number })[]): { text
 }
 
 /** What to look at in a source: its timestamps or sections that are about the topic. */
-function focusIn(title: string, relevant: Sentence[], us: Unit[]): string {
-  const stamps = [...new Set(relevant.filter((s) => s.source.startsWith(title) && s.stamp).map((s) => s.stamp!))];
-  if (stamps.length) return `around ${stamps.slice(0, 4).map((x) => `[${x}]`).join(", ")}`;
+function focusIn(title: string, relevant: (Sentence & { score: number })[], us: Unit[]): string {
+  // The moments most about the topic, then in the order they were said.
+  const stamps = [...new Set([...relevant].filter((s) => s.source.startsWith(title) && s.stamp).sort((a, b) => b.score - a.score).map((s) => s.stamp!))]
+    .slice(0, 4)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  if (stamps.length) return `around ${stamps.map((x) => `[${x}]`).join(", ")}`;
   const secs = [...new Set(us.filter((u) => u.title === title && u.section).map((u) => u.section!))];
   return secs.slice(0, 3).join("; ");
 }

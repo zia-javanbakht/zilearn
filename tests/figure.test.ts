@@ -74,7 +74,8 @@ describe("labels", () => {
   it("turns simple maths into Unicode for SVG and Mermaid", async () => {
     const { plainLabel } = await import("@/lib/figure");
     expect(plainLabel("$\\zeta = 0.05$")).toBe("ζ = 0.05");
-    expect(plainLabel("$c_{cr}$ and $e^{-st}$")).toBe("c_(cr) and e^(-st)");
+    expect(plainLabel("$c_{cr}$ and $e^{-st}$")).toBe("c_cr and e^(-st)");
+    expect(plainLabel("$\\omega_n\\sqrt{\\zeta^2-1}$, $\\sqrt{k/m}$, $\\frac{c}{2m}$, $\\pm 1$")).toBe("ωₙ√(ζ²-1), √(k/m), c/(2m), ± 1");
     expect(plainLabel("time $t$ (s), $\\omega_n$, $u_{i+1}$, $x^2$")).toBe("time t (s), ωₙ, uᵢ₊₁, x²");
   });
 });

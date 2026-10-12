@@ -52,16 +52,23 @@ describe("structured lessons", () => {
     expect(l1.glossary.find((g) => g.term === "damping ratio")?.meaning).toBe("$\\zeta = c/c_{cr}$");
     expect(l1.connections.map((c) => c.topic)).toContain("Second-order systems (Control Systems)");
 
+    const l2 = await generateLessonDoc(topic.id, 2);
+    expect(blocks(l2).find((b) => b.kind === "pitfall")).toMatchObject({ source: "Lecture 3 recording [07:40]" });
+    // Each level teaches its own material, and asks questions with real answers.
+    const bodies1 = new Set(blocks(l1).map((b) => b.body));
+    expect(blocks(l2).filter((b) => bodies1.has(b.body))).toEqual([]);
+    expect(l2.check_yourself.some((q) => q.question.startsWith("Complete from memory"))).toBe(true);
+
     const l3 = await generateLessonDoc(topic.id, 3);
     expect(blocks(l3).find((b) => b.kind === "formula")?.body).toContain("$$\\ddot{u} + 2\\zeta\\omega_n\\dot{u} + \\omega_n^2 u = 0.$$");
-    expect(blocks(l3).find((b) => b.kind === "pitfall")).toMatchObject({ source: "Lecture 3 recording [07:40]" });
     expect(blocks(l3).find((b) => b.kind === "example")?.body).toMatch(/^A one-storey frame/);
     expect(l3.read.find((r) => r.title === "Lecture 3 recording")?.focus).toMatch(/^around \[/);
 
-    const md = lessonToMarkdown(l3);
-    expect(md).toContain('<div class="lb lb-definition">');
+    const md = lessonToMarkdown(l2);
+    expect(md).toContain('<div class="lb lb-pitfall">');
     expect(md).toContain("📎 Lecture 3 recording [07:40]");
-    const tex = lessonToTex(l3);
+    expect(lessonToMarkdown(l1)).toContain('<div class="lb lb-definition">');
+    const tex = lessonToTex(l1);
     expect(tex).toContain("\\begin{definition}[Critical damping]");
     expect(tex).toContain("Structural Dynamics \\textperiodcentered{} SDOF systems");
   });

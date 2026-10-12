@@ -108,14 +108,20 @@ const SUP: Record<string, string> = { "0": "⁰", "1": "¹", "2": "²", "3": "³
 
 /** Sub- or superscript characters when all exist, else the plain form (x_(ab)). */
 function script(x: string, map: Record<string, string>, mark: string): string {
-  return [...x].every((c) => map[c]) ? [...x].map((c) => map[c]).join("") : `${mark}${x.length > 1 ? `(${x})` : x}`;
+  return [...x].every((c) => map[c]) ? [...x].map((c) => map[c]).join("") : `${mark}${x.length > 1 && !/^\w+$/.test(x) ? `(${x})` : x}`;
 }
 
 /** A label with simple $...$ maths as Unicode text, for SVG and Mermaid (ζ = 0.05, ω_n → ωₙ). */
+const OPS: Record<string, string> = { pm: "±", mp: "∓", cdot: "·", times: "×", approx: "≈", leq: "≤", le: "≤", geq: "≥", ge: "≥", neq: "≠", ne: "≠", to: "→", infty: "∞", partial: "∂", circ: "°" };
+
 export function plainLabel(s: string): string {
   return s.replace(/\$([^$]+)\$/g, (_, m: string) =>
     m
-      .replace(/\\([A-Za-z]+)/g, (w, name) => GREEK[name] ?? (["mathrm", "text", "mathit", "mathbf"].includes(name) ? "" : w))
+      // Roots, fractions and common operators first, while their braces still mark what they apply to.
+      .replace(/\\sqrt\{([^{}]*)\}/g, (_, x: string) => (/^\\?\w+$/.test(x) ? `√${x}` : `√(${x})`))
+      .replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, (_, a: string, b: string) => `${/^\w+$/.test(a) ? a : `(${a})`}/${/^([A-Za-z]|\d+(\.\d+)?)$/.test(b) ? b : `(${b})`}`)
+      .replace(/\\(pm|mp|cdot|times|approx|leq|le|geq|ge|neq|ne|to|infty|partial|circ)(?![A-Za-z])/g, (_, op: string) => OPS[op])
+      .replace(/\\([A-Za-z]+)/g, (w, name) => GREEK[name] ?? (["mathrm", "text", "mathit", "mathbf", "operatorname"].includes(name) ? "" : w))
       .replace(/_\{([^{}]*)\}|_([0-9a-z])/gi, (w, a: string | undefined, b: string | undefined) => script(a ?? b!, SUB, "_"))
       .replace(/\^\{([^{}]*)\}|\^([0-9n])/g, (w, a: string | undefined, b: string | undefined) => script(a ?? b!, SUP, "^"))
       .replace(/[{}]/g, "")
@@ -221,7 +227,7 @@ export function plotTikz(p: PlotSpec, tex: (s: string) => string): string {
   return [
     "\\begin{center}",
     "\\begin{tikzpicture}",
-    `\\begin{axis}[width=0.8\\linewidth, height=5.2cm, trig format plots=rad, grid=major, grid style={gray!25}, axis lines=left, xlabel={${tex(p.x_label)}}, ylabel={${tex(p.y_label)}}, legend pos=north east, legend style={font=\\scriptsize, fill opacity=0.85, text opacity=1}, tick label style={font=\\footnotesize}, label style={font=\\footnotesize}, unbounded coords=jump, restrict y to domain=-1e4:1e4${ylim ? `, ${ylim}` : ""}]`,
+    `\\begin{axis}[width=0.8\\linewidth, height=5.2cm, trig format plots=rad, grid=major, grid style={gray!25}, axis lines=left, xlabel={${tex(p.x_label)}}, ylabel={${tex(p.y_label)}}, legend style={at={(0.5,-0.28)}, anchor=north, legend columns=-1, font=\\scriptsize, draw=none, /tikz/every even column/.append style={column sep=8pt}}, tick label style={font=\\footnotesize}, label style={font=\\footnotesize}, unbounded coords=jump, restrict y to domain=-1e4:1e4${ylim ? `, ${ylim}` : ""}]`,
     ...curves,
     "\\end{axis}",
     "\\end{tikzpicture}",

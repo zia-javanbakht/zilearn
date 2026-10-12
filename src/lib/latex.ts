@@ -296,7 +296,7 @@ export function lessonToTex(raw: LessonDoc): string {
   if (doc.connections.length) sec("Connections", `\\begin{itbox}[Connections]\n${items(doc.connections.map((c) => `**${c.topic}**: ${c.relation}`))}\n\\end{itbox}`);
   if (doc.check_yourself.length) sec("Check yourself", `\\begin{enbox}[Questions]\n${doc.check_yourself.map((q) => `\\item ${ask(q)}`).join("\n")}\n\\end{enbox}`);
   if (doc.takeaways.length) sec("Takeaways", `\\begin{subox}[Critical Takeaways]\n\\begin{itemize}\n${items(doc.takeaways)}\n\\end{itemize}\n\\end{subox}`);
-  if (doc.read.length) s.push(`\\paragraph{Go back to} ${doc.read.map((r) => `\\textbf{${inline(r.title)}}${r.focus ? ` (${inline(r.focus)})` : ""}`).join("; ")}.\n`);
+  if (doc.read.length) s.push(`\\paragraph{Go back to} ${doc.read.map((r) => `\\textbf{${inline(r.title)}}${r.focus ? ` (${inline(r.focus.trim().replace(/[.;:,]+$/, ""))})` : ""}`).join("; ")}.\n`);
   if (answers.length) s.push(`\\clearpage\n\\section{Answers}\n${answers.join("\n\n")}\n`);
 
   return zDocument(doc, s.join("\n"));
