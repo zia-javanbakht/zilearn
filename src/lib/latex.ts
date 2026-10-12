@@ -118,9 +118,14 @@ export function blockTex(md: string): string {
         if (!cells.every((c) => /^:?-+:?$/.test(c))) rows.push(cells);
       }
       const n = Math.max(...rows.map((r) => r.length));
-      out.push(`\\begin{center}\\begin{tabular}{${"l".repeat(n)}}`, "\\toprule");
+      // Short tables keep natural widths; wide ones wrap their long columns to the line width.
+      const widths = [...Array(n).keys()].map((c) => Math.max(...rows.map((r) => (r[c] ?? "").length)));
+      const wide = widths.reduce((a, b) => a + b, 0) > 70;
+      const cut = Math.min(18, Math.max(...widths) - 1);
+      const spec = widths.map((w) => (wide && w > cut ? ">{\\raggedright\\arraybackslash}X" : "l")).join("");
+      out.push(wide ? `\\begin{tabularx}{\\linewidth}{${spec}}` : `\\begin{center}\\begin{tabular}{${spec}}`, "\\toprule");
       rows.forEach((r, k) => out.push(r.map(inline).join(" & ") + " \\\\", k === 0 ? "\\midrule" : ""));
-      out.push("\\bottomrule", "\\end{tabular}\\end{center}");
+      out.push("\\bottomrule", wide ? "\\end{tabularx}" : "\\end{tabular}\\end{center}");
       continue;
     }
     if (t.startsWith(">")) {
@@ -321,6 +326,7 @@ function zDocument(doc: Head, body: string): string {
 \\usepackage{cancel}
 \\usepackage{needspace}
 \\raggedbottom
+\\setlength{\\emergencystretch}{2em}
 \\pgfplotsset{compat=1.18}
 
 \\title{${tex(doc.title)}}
