@@ -53,12 +53,17 @@ describe("brainmap", () => {
     const by = new Map(topics.map((t) => [t.ref, t.title]));
     expect(topics.map((t) => `${t.parent_ref ? by.get(t.parent_ref) : "-"} > ${t.title}`)).toEqual([
       "- > Mixed assumed strain methods",
-      "Mixed assumed strain methods > Introduction",
       "Mixed assumed strain methods > Model problem",
       "Model problem > Mixed approximations",
       "Model problem > Stability",
       "Stability > A detail",
     ]);
+  });
+
+  it("leaves the introduction and conclusions out of a paper's topics and mends OCR slips in its headings", () => {
+    const text = "# Mixed Jinite element methods\n## 1 Introduction\nWhy.\n## 2 Axis ymmetric problems\nThe axisymmetric case is axisymmetric. Finite elements are finite.\n## 3 Model Problem 11\nModel Problem I and Model Problem II.\n## 4 Conclusions\nDone.";
+    const titles = heuristicTopics([m("m1", "simo1990", text)]).map((t) => t.title);
+    expect(titles).toEqual(["Mixed finite element methods", "Axisymmetric problems", "Model Problem II"]);
   });
 
   it("builds an offline topic tree from headings", () => {

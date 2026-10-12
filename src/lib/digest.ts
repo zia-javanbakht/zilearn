@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
 import { studySections, stem, topKeywords, truncate } from "./text";
+import { headingRepairer } from "./headingRepair";
 import { stripTimestamps } from "./transcript";
 import { addTopic, getMaterial, listTopics, normTitle, setDigest, updateMaterial } from "./store";
 import { checkKeywords, isGarbled, isWord, repairTerm, repairText } from "./textRepair";
@@ -229,8 +230,9 @@ export function offlineDigest(raw: string): Digest {
   const sections = studySections(text).filter((s) => s.heading);
   let topics: DigestTopic[];
   if (sections.length >= 2) {
+    const mend = headingRepairer(text);
     topics = sections.slice(0, 15).map((s) => ({
-      title: truncate(stripTimestamps(s.heading), 60),
+      title: truncate(mend(stripTimestamps(s.heading)), 60),
       start: s.heading.match(STAMP)?.[1] ?? s.body.match(STAMP)?.[1] ?? null,
       summary: keySentences(stripTimestamps(s.body), 1),
     }));
