@@ -5,7 +5,7 @@ import { checkLesson, equationGaps, metaProblems, refereeLesson, spoilerNotes } 
 import { studentRecord, type StudentRecord } from "./lessonRecord";
 import { offlineLesson, sourceQuestions } from "./lessonOffline";
 import { diagramMermaid, figureProblems, FigureSchema, type Figure } from "./figure";
-import { badge, conceptMermaid, echoesList, framingProblems, homes, mainTerms, mentions, tidyTerms, type ConceptLink } from "./lessonTerms";
+import { badge, conceptMermaid, echoesList, framingProblems, homes, mainTerms, mentions, summaryGaps, tidyTerms, type ConceptLink } from "./lessonTerms";
 import { enrichLesson } from "./lessonEnrich";
 import { buildTree, flattenTree, getCourse, getLesson, getTopic, getTopicsByIds, linksForTopic, listCourses, listMaterials, listTopics } from "./store";
 import { truncate } from "./text";
@@ -324,7 +324,7 @@ export async function generateLessonDoc(topicId: string, depth: number): Promise
   const doc = fromAi(head, out, keywords);
   const practice = sourceQuestions(sources);
   const framing = { earlier, budget: WORD_BUDGET[head.depth] };
-  await refereeLesson(doc, context, [...equationGaps(doc, map.summary), ...metaProblems(doc), ...spoilerNotes(doc, practice), ...framingProblems(doc, framing)], practice);
+  await refereeLesson(doc, context, [...equationGaps(doc, map.summary), ...summaryGaps(doc, map.summary), ...metaProblems(doc), ...spoilerNotes(doc, practice), ...framingProblems(doc, framing)], practice);
   // A final pass that deepens what the lesson states without explaining, at this level.
   await enrichLesson(doc, context, { ...levelBrief(head.depth), framing });
   tidyTerms(doc);

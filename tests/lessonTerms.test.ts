@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { badge, cleanLabel, conceptMermaid, echoesList, framingProblems, homes, linksFromText, mainTerms, mapGroups, mentions, repeats, shortHeading, tidyTerms } from "@/lib/lessonTerms";
+import { badge, cleanLabel, conceptMermaid, echoesList, framingProblems, homes, linksFromText, mainTerms, mapGroups, mentions, repeats, shortHeading, summaryGaps, tidyTerms } from "@/lib/lessonTerms";
 import { spoilers } from "@/lib/lessonCheck";
 import type { LessonDoc } from "@/lib/lesson";
 
@@ -149,6 +149,22 @@ describe("key terms", () => {
     const ex = (title: string, body: string) => ({ kind: "example" as const, title, body, solution: "Divide the force by the area to get the stress, then the strain from the modulus." });
     d.sections[0].blocks.push(ex("A steel bar in tension", "A steel bar of area 100 mm² carries 20 kN; find the stress and the strain."), ex("Another bar", "A steel bar of area 200 mm² carries 30 kN; find the stress and the strain."));
     expect(framingProblems(d).join("\n")).toMatch(/"A steel bar in tension" and "Another bar" work largely the same problem/);
+  });
+
+  it("lists what the topic summary promises and the first level never covers", () => {
+    const d = doc({ depth: 1 });
+    const summary = "The damping ratio compares the damping with critical damping. Its increment is linear: $\\Delta F = \\mathrm{Grad}\\,\\Delta u$. A unit Jacobian does not imply a rigid motion of the body.";
+    const gaps = summaryGaps(d, summary).join("\n");
+    expect(gaps).not.toMatch(/compares the damping/);
+    expect(gaps).toMatch(/Its increment is linear/);
+    expect(gaps).toMatch(/rigid motion/);
+    expect(summaryGaps(doc({ depth: 2 }), summary)).toEqual([]);
+  });
+
+  it("catches level names in the text", () => {
+    const d = doc();
+    d.sections[0].blocks[0].body += " As we saw in the survey, it decays.";
+    expect(framingProblems(d).join("\n")).toMatch(/"in the survey" is the app's own word/);
   });
 
   it("shortens a long heading at a word for the map", () => {
