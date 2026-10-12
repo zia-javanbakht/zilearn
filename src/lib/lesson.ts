@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
 import { sourcesFor } from "./kb";
-import { checkLesson, refereeLesson, spoilerNotes } from "./lessonCheck";
+import { checkLesson, equationGaps, metaProblems, refereeLesson, spoilerNotes } from "./lessonCheck";
 import { studentRecord, type StudentRecord } from "./lessonRecord";
 import { offlineLesson, sourceQuestions } from "./lessonOffline";
 import { diagramMermaid, figureProblems, FigureSchema, type Figure } from "./figure";
@@ -161,7 +161,7 @@ export const LessonSchema = z.object({
     .describe("The lesson itself in teaching order, in 2-5 sections"),
   glossary: z
     .array(z.object({ term: z.string().describe("The key term, with its symbol if it has one, e.g. 'damping ratio $\\zeta$'"), meaning: z.string().describe("One line; units if it has them") }))
-    .describe("The lesson's key terms in the order the sections teach them (the topic's main key terms always among them): 3-4 at level 1, 4-6 at level 2, 5-7 at level 3, 5-8 at level 4"),
+    .describe("The lesson's key terms in the order the sections teach them (the topic's main key terms always among them): 3-4 at level 1 (or as many as the main key terms), 4-6 at level 2, 5-7 at level 3, 5-8 at level 4"),
   concept_links: z
     .array(
       z.object({
@@ -180,7 +180,7 @@ export const LessonSchema = z.object({
 
 /** What each level teaches, in terms of the block kinds, and how much deeper it goes than the one before. */
 const LEVEL_BLOCKS: Record<number, string> = {
-  1: `Depth: what it is and why it matters. 3-4 key terms, the topic's main keywords a beginner needs first. Big picture only, about 500-800 words. Start from the phenomenon or problem the topic solves, then the idea in plain words (intuition blocks with an analogy or a picture in words), 1-2 definition blocks stating the key terms simply, and one short example with numbers that needs no derivation (2-3 steps). No derivations, no exam-style problems, no formula blocks; a glossary of 3-4 terms; at most one figure.`,
+  1: `Depth: what it is and why it matters. 3-5 key terms: the topic's main keywords, which a beginner needs first. Big picture only, about 500-800 words. Start from the phenomenon or problem the topic solves, then the idea in plain words (intuition blocks with an analogy or a picture in words), 1-2 definition blocks stating the key terms simply, and one short example with numbers that needs no derivation (2-3 steps). No derivations and no exam-style problems. No formula blocks, except when the topic is defined by one or two equations of the sources (the topic summary or key terms name them, e.g. "the Euler equations (5)" or "the strain split (7)"): then one formula block shows them as display maths with the source's number as \\tag{n}, without derivation, and reads each symbol in words. A glossary of 3-5 terms (every main key term among them); at most one figure.`,
   2: `Depth: the mechanism. Take the level 1 key terms one layer deeper (how they act on each other, so the concept map gains cause-and-effect links) and add the 2-3 terms the mechanism needs. How and why it works, about 900-1300 words. Precise definitions; intuition for each step of the mechanism; a formula block for each key result, saying what every symbol means and when it applies; the reasoning or derivation in short steps; 1 fully worked example then 1 faded example; pitfall blocks for the misconceptions; and a comparison block with a neighbouring or related topic. Leave exact error analysis, full derivations from first principles and exam-style problems to level 3.`,
   3: `Depth: why it is true and how to use it. Derive what the earlier levels stated without proof (see their outlines: for example constants they quoted from the notes, cases they only named, exact forms of their approximations; never what they already derived), justifying every step and naming each assumption where it enters; quote what they already derived in one line, naming the concept ("from the roots of the characteristic equation, ..."), and never redo it; give a sense of size (orders of magnitude, and what happens to the result when a parameter doubles); add the terms for the quantities and conditions this needs. Problem solving, about 1200-1800 words. A procedure block with the solution method as numbered steps; the formula blocks needed (with units); exam-style examples of increasing difficulty at the standard of the tutorial and exam questions in the sources, but never their pattern: change what is given and what is asked (e.g. given the damping ratio, find the cycles to halve; given the damped period, find the stiffness), the setting and the wording: one fully worked, then one faded so the student finishes it; pitfall blocks for the errors students make in exams. check_yourself holds 3-4 practice problems (kind "apply") with worked answers, and one "predict" or "explain" question.`,
   4: `Depth: limits, generalisation and judgement. For each main key term (each in a block of its own): where it stops being valid and what replaces it, how it is measured or checked in practice, how the idea generalises (more degrees of freedom, non-linear behaviour, other courses), and how an expert chooses between methods and checks a result; add the terms for these. Mastery, about 1000-1600 words. Assumptions, limitations and edge cases (when the model breaks down), comparison blocks with related topics in this and other courses, one hard multi-step or 'explain why' exam question worked fully, and a teach-back note asking the student to explain this lesson's new ideas from memory (not the earlier levels'). check_yourself mixes "explain" and "transfer" questions.`,
@@ -196,7 +196,7 @@ const RULES = `How to write it:
 - Use the student's sources as the backbone: their notation, their symbols, their examples and their lecturer's advice. Where a block comes from a source, set source to its title plus a timestamp, section or question number. You may add standard textbook knowledge to fill gaps, but never contradict the sources.
 - The numbered questions in the student's tutorial, workshop and exam sources are theirs to attempt: never solve them or give their answers anywhere (examples, solutions, check_yourself), and don't settle them by stating the general rule or result that answers them directly. Write your own at the same standard but change what is given and asked, the setting and the wording; your lessons use the same combination of given and asked quantities as one of their questions at most once in total across all the levels (see the earlier levels' questions); the skill behind it can be practised in other forms. Point to an original in read ("then try Q2") only once this lesson or an earlier one teaches everything it needs, and never name the method or rule it needs there.
 - Prefer the sources' own worked examples, figures and tables (in lecture notes, papers and textbooks, not the student's tutorial or exam questions): teach from them and cite them, and write your own only where the sources have none for the idea.
-- Every equation you take from a source is written out as display maths ($$...$$ with the source's number as \\tag{n}), and its block's source names it ("Section 3, eq. (12)"). Source text can be damaged by PDF extraction (letters run together, symbols missing, fractions flattened onto separate lines): where an equation or value you need can't be read with certainty, say in the block that the source's form isn't legible here and point to where it is, instead of reconstructing it; a standard form you give instead has source null.
+- Every equation you take from a source is written out as display maths ($$...$$ with the source's number as \\tag{n}), and its block's source names it ("Section 3, eq. (12)"). Source text can be damaged (letters run together, symbols missing, fractions flattened onto separate lines): where an equation or value you need can't be read with certainty, don't reconstruct it as the source's; say for the student that the source's form isn't reproduced here and point to where it is ("see Section 2, eq. (1)"), and give a standard form with source null if the lesson needs one. Never mention extraction, PDFs, OCR or text layers.
 - Where the sources disagree with each other (a value, a sign, a definition or a symbol that differs between two places), say so in the block: give both, cite both, and say which one the lesson follows and why.
 - When an example or question simplifies the sources' model (one dimension, small strain, linear material, no damping, a single element), say in it what the simplification leaves out and where the full model is in the sources.
 - A source must point to text that states that block's claim. Material from beyond the sources (standard textbook knowledge) has source null; the app marks it "Beyond your notes" so the student knows what their course said.
@@ -324,7 +324,7 @@ export async function generateLessonDoc(topicId: string, depth: number): Promise
   const doc = fromAi(head, out, keywords);
   const practice = sourceQuestions(sources);
   const framing = { earlier, budget: WORD_BUDGET[head.depth] };
-  await refereeLesson(doc, context, [...spoilerNotes(doc, practice), ...framingProblems(doc, framing)], practice);
+  await refereeLesson(doc, context, [...equationGaps(doc, map.summary), ...metaProblems(doc), ...spoilerNotes(doc, practice), ...framingProblems(doc, framing)], practice);
   // A final pass that deepens what the lesson states without explaining, at this level.
   await enrichLesson(doc, context, { ...levelBrief(head.depth), framing });
   tidyTerms(doc);
@@ -341,8 +341,9 @@ export function fromAi(head: Pick<LessonDoc, "title" | "depth" | "level" | "goal
     ...out,
     keywords,
     recall: out.recall.slice(0, 4),
-    // Caps that keep the entry level light and every level within reach, whatever the model wrote.
-    glossary: out.glossary.slice(0, head.depth === 1 ? 4 : 8),
+    // Caps that keep the entry level light and every level within reach, whatever the model wrote; the
+    // topic's main key terms are never the ones cut.
+    glossary: capGlossary(out.glossary, Math.max(head.depth === 1 ? 4 : 8, keywords.length), keywords),
     check_yourself: out.check_yourself.slice(0, [0, 3, 4, 5, 4][head.depth]),
     // The lesson's own key terms are taught here, not connections to elsewhere.
     connections: out.connections.filter((c) => !out.glossary.some((g) => mentions(g.term, c.topic) || mentions(c.topic, g.term))).slice(0, head.depth === 2 || head.depth === 3 ? 3 : 6),
@@ -358,6 +359,13 @@ export function fromAi(head: Pick<LessonDoc, "title" | "depth" | "level" | "goal
       })),
   };
   return tidyTerms(doc);
+}
+
+/** The first `cap` glossary entries, keeping every entry for a main key term, in the model's order. */
+export function capGlossary<T extends { term: string }>(glossary: T[], cap: number, keywords: string[]): T[] {
+  const main = (g: T) => keywords.some((k) => mentions(g.term, k) || mentions(k, g.term));
+  const keep = new Set([...glossary.filter(main), ...glossary.filter((g) => !main(g))].slice(0, cap));
+  return glossary.filter((g) => keep.has(g));
 }
 
 /** A short outline of a lesson, to tell the next level what was covered. */

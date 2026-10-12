@@ -70,6 +70,17 @@ describe("figures", () => {
   });
 });
 
+describe("plots", () => {
+  const plot = (expr: string, x_min: number, x_max: number) => ({ type: "plot" as const, caption: "", diagram: null, plot: { x_label: "x", y_label: "y", x_min, x_max, y_min: null, y_max: null, curves: [{ expr, label: "f" }] } });
+
+  it("rejects a curve with a pole or a negative root inside its range", () => {
+    expect(figureProblems(plot("1/(x - 0.4537)", 0, 1))[0]).toMatch(/undefined or infinite near x = 0\.45/);
+    expect(figureProblems(plot("sqrt(x - 2)", 0, 4))[0]).toMatch(/near x = 0 /);
+    expect(figureProblems(plot("1/(x - 0.4537)", 0.5, 1))).toEqual([]);
+    expect(figureProblems(plot("exp(-0.1*x)*cos(2*x)", 0, 30))).toEqual([]);
+  });
+});
+
 describe("labels", () => {
   it("turns simple maths into Unicode for SVG and Mermaid", async () => {
     const { plainLabel } = await import("@/lib/figure");
@@ -87,6 +98,7 @@ describe("labels", () => {
     expect(plainLabel("$\\nabla_X \\cdot \\mathbf{P}$, $\\partial \\Psi / \\partial \\mathbf{E}$")).toBe("∇_X · P, ∂ Ψ / ∂ E");
     expect(plainLabel("$\\operatorname{Div}\\mathbf{P} + \\mathbf{f}_0 = \\mathbf{0}$, $\\det \\mathbf F > 0$")).toBe("DivP + f₀ = 0, det F > 0");
     expect(plainLabel("$\\left( \\int_{\\Omega} \\delta W \\right)$, $\\left\\{ a \\right\\}$, $\\mathsf{K}\\unknowncmd{x}$")).toBe("( ∫_Ω δ W ), { a }, Kx");
-    expect(mq("$\\mathbb{R}$".repeat(40), 5)).toBe('"ℝℝℝℝℝ"');
+    expect(mq("$\\mathbb{R}$".repeat(40), 5)).toBe('"ℝℝℝℝ…"');
+    expect(mq("load shared between the high-strain plies", 36)).toBe('"load shared between the high-strain…"');
   });
 });

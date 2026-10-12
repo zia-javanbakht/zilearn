@@ -271,18 +271,34 @@ export function isPoor(q: PageQuality, ocrLayer: boolean): boolean {
 export const OCR_PRODUCER = /paper capture|capture|scan|abbyy|finereader|omnipage|readiris|tesseract|ocr|kofax|xerox|canon|ricoh|kodak|fujitsu|digital sender|imagerunner|hp digital/i;
 
 /**
- * A page whose maths the text layer can't carry: numbered display equations, or lines that are mostly
- * symbols and single letters (fractions and sub/superscripts split onto lines of their own).
+ * A page whose maths the text layer can't carry: a numbered display equation, unnumbered display
+ * equations (short lines of symbols with a relation), lines that are mostly symbols and single letters
+ * (fractions and sub/superscripts split onto lines of their own), or, where an OCR layer left the
+ * equations out altogether, sentences that stop short where a display followed ("More precisely, let").
  */
 export function mathsHeavy(text: string): boolean {
   const lines = text.split("\n").filter((l) => l.trim());
   if (!lines.length) return false;
-  const numbered = lines.filter((l) => /\S\s*\(\d{1,3}[a-z]?\)\s*$/.test(l) && !/[a-z]{4,}[.,]?\s*\(\d{1,3}\)\s*$/.test(l)).length;
+  // The number may end the equation's line or sit on a line of its own after it.
+  const numbered = lines.filter((l) => /(?:\S\s*|^\s*)\(\d{1,3}[a-z]?\)\s*$/.test(l) && !/[a-z]{4,}[.,]?\s*\(\d{1,3}\)\s*$/.test(l)).length;
   const scraps = lines.filter((l) => {
     const t = l.trim();
     if (t.length > 25) return false;
     const letters = (t.match(/[A-Za-z]{3,}/g) ?? []).length;
     return letters <= 1 && /[=+−\-−∫∑∂∇·×/^_()[\]{}|0-9α-ωΑ-Ω]/.test(t);
   }).length;
-  return numbered >= 2 || scraps >= 6 || (numbered >= 1 && scraps >= 3);
+  const displays = lines.filter((l) => {
+    const t = l.trim();
+    return t.length <= 70 && /[=≤≥<>→∈⊂∪∩≈]/.test(t) && (t.match(/\b[a-z]{3,}\b/g) ?? []).length <= 2 && !/^#/.test(t);
+  }).length;
+  const long = lines.map((l) => l.trim().length).filter((n) => n >= 30).sort((a, b) => a - b);
+  const width = long.length >= 5 ? long[Math.floor(long.length / 2)] : 0;
+  const dangling = width
+    ? lines.slice(0, -1).filter((l) => {
+        const t = l.trim();
+        return t.length < width * 0.6 && t.split(/\s+/).length >= 2 && /[a-z,:;]$/.test(t) && /[a-z]{3}/.test(t) && !/^(#|\d|[A-Z0-9 .:-]+$)/.test(t);
+      }).length
+    : 0;
+  // One numbered equation is enough: its sub- and superscripts, bars and fractions are lost all the same.
+  return numbered >= 1 || scraps >= 6 || displays >= 3 || displays + scraps >= 6 || dangling >= 2;
 }

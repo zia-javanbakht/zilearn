@@ -165,6 +165,9 @@ function headingOf(line: string): string | null {
   // "Section 2 is violated." ends a sentence that wrapped; only a title-like rest is a heading.
   m = line.match(/^(?:chapter|section|part|topic|week|lecture)\s+\d+[.:)\-–]?\s+(.+)$/i);
   if (m && titleLike(m[1], 12)) return unshout(m[1].trim());
+  // Appendices keep their label: "Appendix II: Stability proof" is how the paper refers to it.
+  m = line.match(/^(appendix\s+(?:\d+|[IVX]+|[A-Z]))[.:)\-–]?\s+(.+)$/i);
+  if (m && titleLike(m[2], 12)) return `${unshout(m[1])}: ${unshout(m[2].trim())}`;
   m = line.match(/^(\d+(?:\.\d+){0,2})[.)]?\s+([A-Z][^.!?]{2,80})$/);
   // Numbered list items in running prose ("2. Equations (9)-(10) are the Euler equations of") and
   // wrapped maths ("2 KE2, E = 1") aren't headings.

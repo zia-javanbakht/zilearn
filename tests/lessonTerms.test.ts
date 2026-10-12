@@ -144,6 +144,13 @@ describe("key terms", () => {
     expect(repeats(now, [early]).join("\n")).not.toMatch(/same ground/);
   });
 
+  it("flags two worked examples of the same problem", () => {
+    const d = doc();
+    const ex = (title: string, body: string) => ({ kind: "example" as const, title, body, solution: "Divide the force by the area to get the stress, then the strain from the modulus." });
+    d.sections[0].blocks.push(ex("A steel bar in tension", "A steel bar of area 100 mm² carries 20 kN; find the stress and the strain."), ex("Another bar", "A steel bar of area 200 mm² carries 30 kN; find the stress and the strain."));
+    expect(framingProblems(d).join("\n")).toMatch(/"A steel bar in tension" and "Another bar" work largely the same problem/);
+  });
+
   it("shortens a long heading at a word for the map", () => {
     expect(shortHeading("Measuring damping from a free-vibration record in the lab")).toBe("Measuring damping from a…");
     expect(shortHeading("Short one")).toBe("Short one");

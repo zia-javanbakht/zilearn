@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { parseExpr, toPgf } from "./expr";
+import { parseExpr, sample, toPgf } from "./expr";
 
 /**
  * Figures in lessons, described as data rather than drawn: a plot of functions of x, or a diagram of
@@ -81,12 +81,30 @@ export function figureProblems(f: Figure): string[] {
     if (!(p.x_max > p.x_min)) out.push("x_max must be greater than x_min");
     if (p.y_min !== null && p.y_max !== null && !(p.y_max > p.y_min)) out.push("y_max must be greater than y_min");
     if (!p.curves.length) out.push("a plot needs at least one curve");
-    for (const c of p.curves)
+    for (const c of p.curves) {
+      let e: ReturnType<typeof parseExpr>;
       try {
-        parseExpr(c.expr);
-      } catch (e) {
-        out.push(`curve "${c.label}": ${(e as Error).message} in "${c.expr}"`);
+        e = parseExpr(c.expr);
+      } catch (err) {
+        out.push(`curve "${c.label}": ${(err as Error).message} in "${c.expr}"`);
+        continue;
       }
+      if (!(p.x_max > p.x_min)) continue;
+      // A curve must be defined across the whole plotted range: a pole or a root of a negative number
+      // inside it draws as a gap or a spike.
+      const pts = sample(e, p.x_min, p.x_max, 400);
+      const bad = pts.find((q) => q.y === null);
+      const sizes = pts.flatMap((q) => (q.y === null ? [] : [Math.abs(q.y)])).sort((a, b) => a - b);
+      const typical = sizes[Math.floor(sizes.length / 2)] ?? 0;
+      // A pole between two samples shows as a jump from large positive to large negative values.
+      const big = (y: number | null) => y !== null && Math.abs(y) > typical * 20;
+      const spike =
+        typical > 0
+          ? pts.find((q, i) => (q.y !== null && Math.abs(q.y) > typical * 1e4) || (i > 0 && big(q.y) && big(pts[i - 1].y) && Math.sign(q.y!) !== Math.sign(pts[i - 1].y!)))
+          : undefined;
+      const at = bad ?? spike;
+      if (at) out.push(`curve "${c.label}" is undefined or infinite near x = ${+at.x.toPrecision(4)} in "${c.expr}": plot it only where it is defined (change x_min or x_max)`);
+    }
   } else {
     const d = f.diagram;
     if (!d) return ["a diagram figure needs diagram"];
@@ -182,14 +200,29 @@ export function plainLabel(s: string, html = false): string {
 }
 
 
+/**
+ * At most max characters (code points, so a maths letter isn't cut in half), cut at a word with an
+ * ellipsis rather than mid-word ("high-strain plie").
+ */
+export function clipWords(s: string, max: number): string {
+  const chars = [...s];
+  if (chars.length <= max) return s;
+  const cut = chars.slice(0, max - 1).join("");
+  // The cut ends a word when the next character is a space; otherwise back up to the last whole word.
+  const at = /\s/.test(chars[max - 1]) ? cut.length : cut.search(/\s\S*$/);
+  return `${(at > max / 2 ? cut.slice(0, at) : cut).replace(/[\s,;:.-]+$/, "")}…`;
+}
+
 // Mermaid labels: quoted, with < > " as Mermaid entity codes and its syntax characters dropped.
 export const mq = (s: string, max = 60) =>
   `"${htmlScripts(
-    plainLabel(s, true)
-      .replace(/[#;`[\]{}|$\\]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .replace(new RegExp(`^((?:[\\s\\S]){${max}})[\\s\\S]+$`, "u"), "$1")
+    clipWords(
+      plainLabel(s, true)
+        .replace(/[#;`[\]{}|$\\]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim(),
+      max,
+    )
       .replace(/"/g, "#quot;")
       .replace(/</g, "#lt;")
       .replace(/>/g, "#gt;"),

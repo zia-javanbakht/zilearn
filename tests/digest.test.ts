@@ -91,3 +91,15 @@ describe("key sentences", () => {
     expect(out).toBe("Linear regression fits a line minimising squared error. Gradient descent minimises the loss by stepping against the gradient.");
   });
 });
+
+describe("long documents for the AI digest", () => {
+  it("keeps the headings of the part that doesn't fit", async () => {
+    const { docExcerpt } = await import("@/lib/digest");
+    const para = "The element passes the patch test for every distorted mesh we tried. ".repeat(20);
+    const text = ["1 Introduction", para, "2 Model problem", para, "6.3 Circular plate", para, "Appendix II Stability proof", para].join("\n");
+    const out = docExcerpt(text, 2000);
+    expect(out.length).toBeLessThan(2200);
+    expect(out).toMatch(/Its sections, in order: Circular plate; Appendix II: Stability proof\]$/);
+    expect(docExcerpt("short", 3500)).toBe("short");
+  });
+});

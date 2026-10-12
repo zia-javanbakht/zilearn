@@ -107,7 +107,7 @@ export function cleanLabel(s: string): string {
     .trim()
     .replace(/(^|[^$\\\w])([A-Za-z\u0370-\u03ff])_\{?([A-Za-z0-9]{1,3})\}?(?![\w$])/g, (_, pre: string, x: string, sub: string) => `${pre}$${x}_{${sub}}$`)
     .replace(/\s+(the|a|an)$/i, "")
-    .slice(0, 48);
+    .replace(/^([\s\S]{48})[\s\S]+$/, (_, x: string) => x.replace(/\s+\S*$/, ""));
 }
 
 /** Whether a block's diagram only redraws the list its own text gives (most boxes are list items). */
@@ -274,6 +274,11 @@ export function framingProblems(doc: LessonDoc, o: FramingOptions = {}): string[
   // Nor should a question be answered by a pitfall, or its answer be a sentence copied from a block.
   const runs = new Set(doc.sections.flatMap((s) => s.blocks.flatMap((b) => [...ngrams(`${b.body} ${b.solution ?? ""}`, 8)])));
   const examples = doc.sections.flatMap((s) => s.blocks.filter((b) => b.kind === "example").map((b) => ({ title: b.title, words: content(`${b.body} ${b.solution ?? ""}`) })));
+  // Two worked examples of the same setting teach one thing twice.
+  examples.forEach((a, i) => {
+    const b = examples.slice(0, i).find((x) => overlap(a.words, x.words) >= 0.6);
+    if (b) out.push(`The examples "${b.title}" and "${a.title}" work largely the same problem: change the second one's setting, what is given or what is asked, or cut it.`);
+  });
   doc.check_yourself.forEach((q, i) => {
     const ex = examples.find((x) => overlap(content(q.question), x.words) >= 0.7);
     if (ex) out.push(`check_yourself.${i} repeats the worked example "${ex.title}" step for step: ask for a different quantity or a different kind of reasoning.`);

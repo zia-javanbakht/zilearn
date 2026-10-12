@@ -14,10 +14,22 @@ import type { Digest, DigestTopic, Material } from "./types";
  */
 
 const RECORDING_KINDS = new Set(["youtube", "video", "audio_memo"]);
-// A recording is summarised whole (its topics run its full length); a document's opening pages are
-// enough to name its terms and catch the extraction's misspellings, and keep the cost down.
+// A recording is summarised whole (its topics run its full length); a document up to the length of a
+// long paper too, and past that its opening pages plus the headings of the rest, so every section
+// still gets a topic while the cost stays down.
 const MAX_AI_CHARS = 200_000;
-const MAX_AI_DOC_CHARS = 60_000;
+const MAX_AI_DOC_CHARS = 120_000;
+
+/** A long document cut to fit, with the headings of what was cut, so its later sections aren't lost. */
+export function docExcerpt(text: string, max = MAX_AI_DOC_CHARS): string {
+  if (text.length <= max) return text;
+  const cut = text.lastIndexOf("\n", max);
+  const head = text.slice(0, cut > max * 0.9 ? cut : max);
+  const rest = studySections(text.slice(head.length))
+    .map((x) => x.heading)
+    .filter(Boolean);
+  return `${head}\n\n[The rest of the document is not shown. Its sections, in order: ${rest.length ? rest.join("; ") : "(no headings found)"}]`;
+}
 
 /** With an AI provider every material gets an AI digest after import: it reads the text in context. */
 export function wantsAiDigest(): boolean {
@@ -63,8 +75,8 @@ export async function digestWithFixes(m: Pick<Material, "title" | "kind" | "text
         schema: DigestSchema,
         effort: "low",
         maxTokens: 8000,
-        context: `<material title="${m.title.replace(/"/g, "'")}" kind="${m.kind}">\n${truncate(text, recording ? MAX_AI_CHARS : MAX_AI_DOC_CHARS)}\n</material>`,
-        prompt: `Summarise this course material for a student's study map: an overview, the key terms, and the topics it covers in order with their subtopics. Keep only subject content (no greetings, logistics or small talk). Use the [mm:ss] markers, when present, for where each topic starts.
+        context: `<material title="${m.title.replace(/"/g, "'")}" kind="${m.kind}">\n${recording ? truncate(text, MAX_AI_CHARS) : docExcerpt(text)}\n</material>`,
+        prompt: `Summarise this course material for a student's study map: an overview, the key terms, and the topics it covers in order with their subtopics. Keep only subject content (no greetings, logistics or small talk). Use the [mm:ss] markers, when present, for where each topic starts. Cover every numbered section and appendix with a topic or subtopic, and write each topic's summary only from its own section: results belong to the case they were found for (don't carry one case's result to another).
 
 The text came from ${recording ? "speech recognition" : "PDF or document extraction, sometimes OCR"} and can be damaged: letters lost where a font joined ff/fi/fl ("e ect", "di erent", "rst" for "first"), words split or run together, misread letters ("rn" for "m", "1" for "l"), misheard technical terms. Read it in context:
 - Write every key term, title and summary with correct spelling, as the subject spells it. Key terms must be terms the material actually uses (in the reader's words, not invented ones).
