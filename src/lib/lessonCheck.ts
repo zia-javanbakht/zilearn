@@ -192,6 +192,15 @@ export function spoilers(doc: LessonDoc, questions: { text: string; source: stri
   return out;
 }
 
+/** Spoilers as messages for the referee, which sees the whole lesson and can rewrite them first. */
+export function spoilerNotes(doc: LessonDoc, questions: { text: string; source: string }[]): string[] {
+  return spoilers(doc, questions).map((sp) =>
+    sp.kind === "data"
+      ? `${sp.paths.join(" and ")} reuse the numbers of the student's own question (${sp.source}): make it a new problem with different numbers and setting, and recompute it.`
+      : `${sp.paths.join(" and ")} follow the setup and wording of the student's own question (${sp.source}): change what is given and what is asked, the setting and the wording, and recompute it.`,
+  );
+}
+
 /** Removes the blocks and questions behind spoilers that couldn't be rewritten. */
 function dropSpoilers(doc: LessonDoc, sp: Spoiler[]) {
   const gone = new Set(sp.filter((x) => x.kind === "data").map((x) => x.paths[0].split(".").slice(0, -1).join(".")));
@@ -266,6 +275,7 @@ function refereeFields(doc: LessonDoc): [string, string][] {
       if (b.figure) out.push([`sections.${i}.blocks.${j}.figure.caption`, b.figure.caption]);
       b.figure?.diagram?.nodes.forEach((n, k) => out.push([`sections.${i}.blocks.${j}.figure.diagram.nodes.${k}.label`, n.label]));
     }
+  doc.concept_links?.forEach((l, i) => out.push([`concept_links.${i}.label`, l.label]));
   return out;
 }
 
@@ -280,7 +290,7 @@ export function refereePrompt(doc: LessonDoc, framing: string[] = []): string {
 - Questions whose data don't agree with their answers or with each other; recompute every number you can.
 - Sources that don't state the block's claim: set the right title plus timestamp, section or question number, or an empty string if the claim isn't in the sources.
 - Section headings that promise something their section doesn't teach.
-- Figure captions that state a quantity an example or question asks the student to find.${framing.length ? `\n- How the lesson uses its key terms, diagrams and words (fix by editing the fields named, e.g. a block body or a diagram box label):\n  - ${framing.slice(0, 8).join("\n  - ")}` : ""}${untested.length && doc.check_yourself.length ? `\n- Objectives ${untested.join(", ")} have no check_yourself question. Rewrite the least useful check_yourself questions (question and answer) so each of these objectives is tested.` : ""}
+- Figure captions that state a quantity an example or question asks the student to find.${doc.concept_links?.length ? `\n- Concept-map links that don't read as a true sentence "from label to" (backwards, wrong or clumsy); correct the label field:\n  ${doc.concept_links.map((l, i) => `concept_links.${i}: ${l.from} | ${l.label} | ${l.to}`).join("\n  ")}` : ""}${framing.length ? `\n- How the lesson uses its key terms, diagrams and words (fix by editing the fields named, e.g. a block body or a diagram box label):\n  - ${framing.slice(0, 8).join("\n  - ")}` : ""}${untested.length && doc.check_yourself.length ? `\n- Objectives ${untested.join(", ")} have no check_yourself question. Rewrite the least useful check_yourself questions (question and answer) so each of these objectives is tested.` : ""}
 Leave style alone, keep the student's notation, and keep maths KaTeX-compatible ($...$ and $$...$$). Return an empty list if nothing is wrong.
 
 ${fields.map(([path, text]) => `<field path="${path}">\n${text}\n</field>`).join("\n")}`;

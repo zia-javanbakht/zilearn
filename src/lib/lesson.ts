@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
 import { sourcesFor } from "./kb";
-import { checkLesson, refereeLesson } from "./lessonCheck";
+import { checkLesson, refereeLesson, spoilerNotes } from "./lessonCheck";
 import { studentRecord, type StudentRecord } from "./lessonRecord";
 import { offlineLesson, sourceQuestions } from "./lessonOffline";
 import { diagramMermaid, figureProblems, FigureSchema, type Figure } from "./figure";
@@ -38,6 +38,8 @@ export interface LessonSection {
   blocks: LessonBlock[];
   /** The key terms (glossary spellings) this section teaches. */
   terms?: string[];
+  /** A short name for the section on the concept map. */
+  map_title?: string | null;
 }
 
 export const QUESTION_KINDS = ["recall", "explain", "apply", "predict", "transfer"] as const;
@@ -151,6 +153,7 @@ export const LessonSchema = z.object({
     .array(
       z.object({
         heading: z.string().describe("A heading that says what the section teaches"),
+        map_title: z.string().describe("The section's name on the concept map: 2-4 words, at most 28 characters, e.g. 'Measuring damping'"),
         terms: z.array(z.string()).describe("The 1-3 key terms this section develops, spelt exactly as in glossary; each key term belongs to one section"),
         blocks: z.array(BlockSchema),
       }),
@@ -179,15 +182,15 @@ export const LessonSchema = z.object({
 const LEVEL_BLOCKS: Record<number, string> = {
   1: `Depth: what it is and why it matters. 3-4 key terms, the topic's main keywords a beginner needs first. Big picture only, about 500-800 words. Start from the phenomenon or problem the topic solves, then the idea in plain words (intuition blocks with an analogy or a picture in words), 1-2 definition blocks stating the key terms simply, and one short example with numbers that needs no derivation (2-3 steps). No derivations, no exam-style problems, no formula blocks; a glossary of 3-4 terms; at most one figure.`,
   2: `Depth: the mechanism. Take the level 1 key terms one layer deeper (how they act on each other, so the concept map gains cause-and-effect links) and add the 2-3 terms the mechanism needs. How and why it works, about 900-1300 words. Precise definitions; intuition for each step of the mechanism; a formula block for each key result, saying what every symbol means and when it applies; the reasoning or derivation in short steps; 1 fully worked example then 1 faded example; pitfall blocks for the misconceptions; and a comparison block with a neighbouring or related topic. Leave exact error analysis, full derivations from first principles and exam-style problems to level 3.`,
-  3: `Depth: why it is true and how to use it. Derive the main result in full, justifying every step and naming each assumption where it enters: start from the equation the earlier levels reached (quote it in one line, don't redo their steps) and add the steps they skipped, so the derivation is new work, not a repeat; give a sense of size (orders of magnitude, and what happens to the result when a parameter doubles); add the terms for the quantities and conditions this needs. Problem solving, about 1200-1800 words. A procedure block with the solution method as numbered steps; the formula blocks needed (with units); exam-style examples of increasing difficulty, of the same type as the tutorial and exam questions in the sources but in a different setting, with different given and asked quantities and in your own words (never the same sentence pattern or list of parts): one fully worked, then one faded so the student finishes it; pitfall blocks for the errors students make in exams. check_yourself holds 3-4 practice problems (kind "apply") with worked answers.`,
-  4: `Depth: limits, generalisation and judgement. For the main key terms: when the model breaks down and what replaces it, how the idea generalises (more degrees of freedom, non-linear behaviour, other courses), and how an expert chooses between methods and checks a result; add the terms for these. Mastery, about 1000-1600 words. Assumptions, limitations and edge cases (when the model breaks down), comparison blocks with related topics in this and other courses, one hard multi-step or 'explain why' exam question worked fully, and a teach-back note asking the student to explain it from memory. check_yourself mixes "explain" and "transfer" questions.`,
+  3: `Depth: why it is true and how to use it. Derive what the earlier levels stated without proof (for example the constants from the initial conditions, the cases they only named, exact forms of their approximations), justifying every step and naming each assumption where it enters; quote what they already derived in one line, naming the concept ("from the roots of the characteristic equation, ..."), and never redo it; give a sense of size (orders of magnitude, and what happens to the result when a parameter doubles); add the terms for the quantities and conditions this needs. Problem solving, about 1200-1800 words. A procedure block with the solution method as numbered steps; the formula blocks needed (with units); exam-style examples of increasing difficulty at the standard of the tutorial and exam questions in the sources, but never their pattern: change what is given and what is asked (e.g. given the damping ratio, find the cycles to halve; given the damped period, find the stiffness), the setting and the wording: one fully worked, then one faded so the student finishes it; pitfall blocks for the errors students make in exams. check_yourself holds 3-4 practice problems (kind "apply") with worked answers, and one "predict" or "explain" question.`,
+  4: `Depth: limits, generalisation and judgement. For each main key term: where it stops being valid and what replaces it, how it is measured or checked in practice, how the idea generalises (more degrees of freedom, non-linear behaviour, other courses), and how an expert chooses between methods and checks a result; add the terms for these. Mastery, about 1000-1600 words. Assumptions, limitations and edge cases (when the model breaks down), comparison blocks with related topics in this and other courses, one hard multi-step or 'explain why' exam question worked fully, and a teach-back note asking the student to explain this lesson's new ideas from memory (not the earlier levels'). check_yourself mixes "explain" and "transfer" questions.`,
 };
 
 const RULES = `How to write it:
 - Deeper, not just longer: each level takes the same core key terms one layer further (level 1 what and why, level 2 how, level 3 why it is true and how to use it, level 4 where it stops and how it generalises). A paragraph that could sit in an earlier level doesn't belong in this one.
 - Frame the lesson around its key terms (glossary). Start from the topic's key terms in the brainmap above, keep the ones this level needs, and add the terms it introduces. Each section develops 1-3 key terms (its terms, spelt as in glossary): bold each term at its first use, and say how it connects to a term taught before it.
 - The topic's main key terms (listed above) are in every level's glossary, and each gains something new at every level (depth_plan): level 1 what it means, level 2 how it works, level 3 the derivation and every case a problem can need (for the student's own tutorial questions, the method, never their result), level 4 where it stops, how it generalises and how it is measured. An earlier result comes back as a one-line reference, never re-derived or restated.
-- concept_links are the connections the text explains: each joins two key terms with a short verb phrase saying how one acts on the other ("sets the decay rate of"), never a negative ("does not change"), and one block states that relation in words naming both terms (or their symbols); a link no single block states that way is dropped from the map. Together they join every key term into one connected map with the main key terms at its centre. The app draws them as the lesson's concept map, grouped by section and numbered, so the map is a summary of the text, not a separate picture.
+- concept_links are the connections the text explains: each joins two key terms with a short verb phrase saying how one acts on the other ("sets the decay rate of"), never a negative ("does not change"), and one block states that relation in words naming both terms (or their symbols); a link no single block states that way is dropped from the map. "from label to" must read as a true sentence ("damping ratio | sets the decay rate of | decay envelope"). Together they join every key term into one connected map with the main key terms at its centre. The app draws them as the lesson's concept map, grouped by section and numbered, so the map is a summary of the text, not a separate picture.
 - A diagram belongs to the block it sits in: label its boxes with the exact words that block uses (key terms where possible), and let the caption walk through it in the order the text explains it.
 - Teach, don't summarise. Concrete before abstract: motivate with the situation or phenomenon, then give the idea, then the formal statement.
 - Use the student's sources as the backbone: their notation, their symbols, their examples and their lecturer's advice. Where a block comes from a source, set source to its title plus a timestamp, section or question number. You may add standard textbook knowledge to fill gaps, but never contradict the sources.
@@ -199,7 +202,7 @@ const RULES = `How to write it:
 - Faded examples: solution holds only the given first steps (one with a "Why?"), try_steps the remaining steps as numbered prompts continuing that numbering, and try_answer their working and result.
 - Assessment matches the objectives: every part of every objective is tested by at least one check_yourself question (set objective to its number), and questions only test what the lesson teaches (not ideas that appear only in the glossary or connections). Use "predict" questions (sketch or predict the behaviour before any calculation) where the topic has a behaviour to picture.
 - Stay within the level's word budget (the sections' text; keep the warm-up, glossary and questions short on top of it). Never mention levels, passes, faded examples or how the lesson is built: write for the student about the subject.
-- In a plot, set a curve's style to dashed or dotted when the caption or text tells it apart that way. A figure must show something no table or text in the lesson already shows.
+- In a plot, set a curve's style to dashed or dotted when the caption or text tells it apart that way. A figure must show something no table, list or text in the lesson already shows.
 - Maths: KaTeX-compatible LaTeX only. $...$ inline and $$...$$ display on their own lines; for multi-line working use $$\\begin{aligned} ... \\end{aligned}$$. No \\( \\), no \\[ \\], no equation/align environments, no \\label or \\eqref, no custom macros.
 - Markdown only: bold, italics, lists and pipe tables. No HTML, no headings inside blocks, no Mermaid or ASCII diagrams: draw with figure instead.
 - Figures: give a block a figure when a picture teaches better than words: a plot of the response or relationship (substitute realistic numbers so it can be drawn), or a diagram of a process, classification or cause and effect. About 1-3 per lesson; never decorative.
@@ -288,7 +291,7 @@ Topic summary: ${topic.summary}
 Main key terms: ${topic.keywords.join(", ") || "(none listed)"}
 Student's self-assessment: ${map.mastery ? MASTERY_LABELS[map.mastery] : "not marked"}${record.goal ? `\n${record.goal}` : ""}
 </brainmap>
-${record.text ? `\n<student_record>\n${record.text}\n</student_record>\nUse this record: put each mock exam slip and forgotten flashcard into common_mistakes (or a pitfall block) with the correction, unless an earlier level already corrected it (see "Mistakes covered" below), and make at least one check_yourself question retest it in a new form. Don't name or shame; just fix the misunderstanding. Where a correction would answer one of the student's own tutorial or exam questions, correct the idea without the numbers.\n` : ""}${previous ? `\nThe student has done the earlier levels. What they used:\n<earlier_levels>\n${previous}\n</earlier_levels>\nBuild on them and add new material: never reuse their examples, numbers, questions, figures, comparisons or pitfalls. Only recall may come back to their ideas, asking in a new form. Their key terms come back here one layer deeper (see "Main key terms" above and each level's "Depth given"); don't define them again from scratch, and where you need an earlier result, quote it in one line ("as we found, $\\delta \\approx 2\\pi\\zeta$") instead of deriving it again.\n` : ""}
+${record.text ? `\n<student_record>\n${record.text}\n</student_record>\nUse this record: put each mock exam slip and forgotten flashcard into common_mistakes (or a pitfall block) with the correction, unless an earlier level already corrected it (see "Mistakes covered" below), and make at least one check_yourself question retest it in a new form. Don't name or shame; just fix the misunderstanding. Where a correction would answer one of the student's own tutorial or exam questions, correct the idea without the numbers.\n` : ""}${previous ? `\nThe student has done the earlier levels. What they used:\n<earlier_levels>\n${previous}\n</earlier_levels>\nBuild on them and add new material: never reuse their examples, numbers, questions, figures, comparisons or pitfalls. Only recall may come back to their ideas, asking in a new form. Their key terms come back here one layer deeper (see "Main key terms" above and each level's "Depth given"); don't define them again from scratch, and where you need an earlier result, quote it in one line, naming the concept it came from ("from the decay envelope, $\\delta \\approx 2\\pi\\zeta$"), instead of deriving it again.\n` : ""}
 Write the lesson on "${topic.title}" for pass ${d} of 4, the "${level.name}" level: ${level.goal}
 Earlier passes covered shallower levels and later ones go deeper, so teach exactly this depth.
 
@@ -317,7 +320,7 @@ export async function generateLessonDoc(topicId: string, depth: number): Promise
   const doc = fromAi(head, out, keywords);
   const practice = sourceQuestions(sources);
   const framing = { earlier, budget: WORD_BUDGET[head.depth] };
-  await refereeLesson(doc, context, framingProblems(doc, framing));
+  await refereeLesson(doc, context, [...spoilerNotes(doc, practice), ...framingProblems(doc, framing)]);
   // A final pass that deepens what the lesson states without explaining, at this level.
   await enrichLesson(doc, context, { ...levelBrief(head.depth), framing });
   tidyTerms(doc);
@@ -418,7 +421,7 @@ function questions(qs: QA[], answerLabel: string): string {
 export function lessonToMarkdown(raw: LessonDoc): string {
   const doc = markProvenance(normalizeDoc(raw));
   const out: string[] = [];
-  if (doc.objectives.length) out.push(`<div class="lb lb-goal">\n\n**🎯 By the end of this pass you can**\n\n${doc.objectives.map((o) => `- ${o}`).join("\n")}\n\n</div>`);
+  if (doc.objectives.length) out.push(`<div class="lb lb-goal">\n\n**🎯 By the end of this lesson you can**\n\n${doc.objectives.map((o) => `- ${o}`).join("\n")}\n\n</div>`);
   const concept = conceptMermaid(doc);
   if (concept)
     out.push(

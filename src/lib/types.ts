@@ -39,7 +39,7 @@ export const DEPTH_LEVELS = [
   {
     level: 1,
     name: "Survey",
-    goal: "Get the big picture: what it is, why it matters, the 3-5 key terms, and one intuitive example.",
+    goal: "Get the big picture: what it is, why it matters, its key terms, and one intuitive example.",
     lesson: "A short orientation (no derivations): a plain-language explanation, the key terms with one-line definitions, one intuitive example or analogy, and why it matters for the course.",
   },
   {
@@ -51,7 +51,7 @@ export const DEPTH_LEVELS = [
   {
     level: 3,
     name: "Apply",
-    goal: "Solve exam-style problems with it: two worked examples, then problems on your own.",
+    goal: "Solve exam-style problems with it: a worked example, one you finish yourself, then problems on your own.",
     lesson: "Open with 2 recall questions on the level 2 ideas. Then give 2 fully worked exam-style examples with reasoning shown, a checklist of steps/pitfalls, and 2-3 unsolved practice problems (answers in a <details> block).",
   },
   {

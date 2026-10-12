@@ -226,7 +226,7 @@ export function framingProblems(doc: LessonDoc, o: FramingOptions = {}): string[
   });
   if (o.budget) {
     const words = teachingWords(doc);
-    if (words > o.budget * 1.15) out.push(`The lesson's teaching text is about ${words} words, over this level's ${o.budget}: cut repetition and restatement rather than ideas.`);
+    if (words > o.budget * 1.05) out.push(`The lesson's teaching text is about ${words} words, over this level's ${o.budget}: cut repetition and restatement rather than ideas.`);
   }
   if (o.earlier?.length) out.push(...repeats(doc, o.earlier));
   return out;
@@ -317,7 +317,7 @@ export function conceptMermaid(doc: LessonDoc): string {
   doc.sections.forEach((s, i) => {
     const mine = terms.filter((t) => home.get(t) === i);
     if (!mine.length) return;
-    lines.push(`  subgraph s${i}[${mq(`${badge(i + 1)} ${shortHeading(s.heading)}`)}]`, "    direction TB", ...mine.map((t) => `    ${id(t)}[${mq(t, 48)}]`), "  end");
+    lines.push(`  subgraph s${i}[${mq(`${badge(i + 1)} ${shortHeading(s.map_title?.trim() || s.heading)}`)}]`, "    direction TB", ...mine.map((t) => `    ${id(t)}[${mq(t, 48)}]`), "  end");
   });
   for (const l of doc.concept_links ?? []) if (home.has(l.from) && home.has(l.to)) lines.push(`  ${id(l.from)} -->|${mq(l.label, 48)}| ${id(l.to)}`);
   lines.push(
@@ -344,7 +344,7 @@ export function conceptLayout(doc: LessonDoc): ConceptLayout | null {
   const id = (t: string) => `k${terms.indexOf(t)}`;
   return {
     groups: doc.sections
-      .map((s, i) => ({ section: i, heading: shortHeading(s.heading, 56), terms: terms.filter((t) => home.get(t) === i).map((t) => ({ id: id(t), term: t, main: main.has(t) })) }))
+      .map((s, i) => ({ section: i, heading: s.map_title?.trim() ? shortHeading(s.map_title, 40) : shortHeading(s.heading, 56), terms: terms.filter((t) => home.get(t) === i).map((t) => ({ id: id(t), term: t, main: main.has(t) })) }))
       .filter((g) => g.terms.length),
     links: (doc.concept_links ?? []).filter((l) => home.has(l.from) && home.has(l.to)).map((l) => ({ from: id(l.from), to: id(l.to), label: l.label })),
   };

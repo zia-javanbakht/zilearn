@@ -209,7 +209,8 @@ const BOX: Record<string, [env: string, label: string]> = {
 
 function figureTex(f: Figure): string {
   const art = f.type === "plot" && f.plot ? plotTikz(f.plot, inline) : f.diagram ? diagramTikz(f.diagram, inline) : "";
-  return art ? `\n\n${art}\n{\\centering\\footnotesize\\itshape ${inline(f.caption)}\\par}` : "";
+  // In a minipage so the figure and its caption stay on one page.
+  return art ? `\n\n\\par\\noindent\\begin{minipage}{\\linewidth}\n${art}\n{\\centering\\footnotesize\\itshape ${inline(f.caption)}\\par}\n\\end{minipage}\\par` : "";
 }
 
 function blockToTex(b: LessonBlock): string {
@@ -257,11 +258,24 @@ export function conceptTikz(doc: LessonDoc): string {
   const col = new Map<string, number>();
   const term = new Map<string, string>();
   const lines: string[] = [];
+  const GAP = 4.6;
+  // Order each section's terms by where their links lead (a few barycentre sweeps), so arrows cross less.
+  const row = new Map(m.groups.flatMap((g) => g.terms.map((t, k) => [t.id, k] as const)));
+  const colOf = new Map(m.groups.flatMap((g, c) => g.terms.map((t) => [t.id, c] as const)));
+  for (let sweep = 0; sweep < 4; sweep++)
+    for (const g of m.groups) {
+      const at = (id: string) => {
+        const ys = m.links.flatMap((l) => (l.from === id ? [l.to] : l.to === id ? [l.from] : [])).filter((o) => colOf.get(o) !== colOf.get(id)).map((o) => row.get(o)!);
+        return ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : row.get(id)!;
+      };
+      g.terms = [...g.terms].sort((a, b) => at(a.id) - at(b.id) || row.get(a.id)! - row.get(b.id)!);
+      g.terms.forEach((t, k) => row.set(t.id, k));
+    }
   m.groups.forEach((g, c) => {
     g.terms.forEach((t, k) => {
       col.set(t.id, c);
       term.set(t.id, t.term);
-      lines.push(`  \\node[${t.main ? "zmain" : "zterm"}] (${t.id}) at (${(c * 4).toFixed(1)},${(-k * 1.5).toFixed(2)}) {${inline(t.term)}};`);
+      lines.push(`  \\node[${t.main ? "zmain" : "zterm"}] (${t.id}) at (${(c * GAP).toFixed(1)},${(-k * 1.5).toFixed(2)}) {${inline(t.term)}};`);
     });
     lines.push(
       `  \\node[zgroup, fit=${g.terms.map((t) => `(${t.id})`).join("")}] (g${c}) {};`,
@@ -269,13 +283,13 @@ export function conceptTikz(doc: LessonDoc): string {
     );
   });
   const letter = (i: number) => String.fromCharCode(97 + i);
-  const row = new Map(m.groups.flatMap((g) => g.terms.map((t, k) => [t.id, k] as const)));
   const rows = Math.max(...m.groups.map((g) => g.terms.length));
   let lane = 0;
   m.links.forEach((l, i) => {
     const a = col.get(l.from)!;
     const b = col.get(l.to)!;
-    const tag = `node[zletter] {${letter(i)}}`;
+    // Letters sit off-centre, alternating, so two arrows meeting at a box don't stack theirs.
+    const tag = `node[zletter, pos=${[0.5, 0.32, 0.68][i % 3]}] {${letter(i)}}`;
     let draw: string;
     // Within a section the arrow loops out to the left, clear of the boxes between.
     if (a === b) draw = `(${l.from}.west) to[out=180, in=180, looseness=1.4] ${tag} (${l.to}.west)`;
@@ -283,8 +297,8 @@ export function conceptTikz(doc: LessonDoc): string {
     else {
       // Across a section: down the gap beside the start, along a lane under the map, and up beside the end.
       const dir = Math.sign(b - a);
-      const x1 = (a * 4 + dir * 2).toFixed(1);
-      const x2 = (b * 4 - dir * 2).toFixed(1);
+      const x1 = (a * GAP + (dir * GAP) / 2).toFixed(2);
+      const x2 = (b * GAP - (dir * GAP) / 2).toFixed(2);
       const y = (-(rows - 1) * 1.5 - 1.1 - 0.3 * lane++).toFixed(2);
       draw = `(${l.from}.${dir > 0 ? "east" : "west"}) -| (${x1},${y}) -- ${tag} (${x2},${y}) |- (${l.to}.${dir > 0 ? "west" : "east"})`;
     }
@@ -295,7 +309,7 @@ export function conceptTikz(doc: LessonDoc): string {
     "\\begin{center}",
     "\\begin{adjustbox}{max width=\\linewidth, max totalheight=0.4\\textheight}",
     "\\begin{tikzpicture}[font=\\sffamily\\footnotesize,",
-    "  zterm/.style={draw=SteelBlue4, fill=SteelBlue1!12, rounded corners=2pt, align=center, text width=2.6cm, minimum height=0.8cm, inner sep=3pt},",
+    "  zterm/.style={draw=SteelBlue4, fill=SteelBlue1!12, rounded corners=2pt, align=center, text width=2.6cm, minimum height=0.8cm, inner sep=3pt, execute at begin node=\\hyphenpenalty10000\\relax},",
     "  zmain/.style={zterm, line width=1.2pt, fill=SteelBlue1!30, font=\\sffamily\\footnotesize\\bfseries},",
     "  zgroup/.style={draw=gray!60, dashed, rounded corners=4pt, inner xsep=6pt, inner ysep=8pt},",
     "  zgtitle/.style={font=\\sffamily\\scriptsize, text=gray!70!black, inner sep=1pt, text width=3.2cm, align=left, execute at begin node=\\hyphenpenalty10000\\relax},",
@@ -324,7 +338,7 @@ export function lessonToTex(raw: LessonDoc): string {
     ...(doc.check_yourself.length ? [`\\subsection*{Check yourself}\n\\begin{enumerate}\n${doc.check_yourself.map((r) => `\\item ${blockTex(r.answer)}`).join("\n")}\n\\end{enumerate}`] : []),
   ];
 
-  if (doc.objectives.length) s.push(`\\begin{chbox}[By the end of this pass you can]\n${items(doc.objectives)}\n\\end{chbox}\n`);
+  if (doc.objectives.length) s.push(`\\begin{chbox}[By the end of this lesson you can]\n${items(doc.objectives)}\n\\end{chbox}\n`);
   // The concept map: the key terms, each marked with the section that teaches it, and the links the text explains.
   const concept = conceptTikz(doc);
   if (concept) sec("Map of this lesson", concept);
@@ -390,7 +404,7 @@ function zDocument(doc: Head, body: string): string {
 \\rule{\\linewidth}{1.5pt}
 \\end{center}
 
-\\begin{blbox}[Goal of this pass]
+\\begin{blbox}[Goal of this lesson]
 ${inline(doc.goal)}
 \\end{blbox}
 
