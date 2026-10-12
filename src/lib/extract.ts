@@ -88,7 +88,7 @@ async function extractPdf(buf: Buffer): Promise<Extracted> {
       ? { text: md, status: "partial", note: `Scanned PDF transcribed by ${providerName()}, but it was too long to finish. Split the PDF for the rest.` }
       : { text: md, status: "ready", note: `Scanned PDF transcribed by ${providerName()}.` };
   }
-  return { text: joined, status: "partial", note: "This PDF has little selectable text (likely scanned). Add a Claude or Gemini API key to transcribe it, or paste notes." };
+  return { text: joined, status: "partial", note: "This PDF has little selectable text (likely scanned). Choose an AI provider in Settings to transcribe it, or paste notes." };
 }
 
 async function extractDocx(buf: Buffer): Promise<Extracted> {
@@ -125,7 +125,7 @@ async function extractPptx(buf: Buffer): Promise<Extracted> {
 }
 
 async function extractImage(buf: Buffer, mime: string): Promise<Extracted> {
-  if (!aiEnabled()) return { text: "", status: "partial", note: "Image saved. Add a Claude or Gemini API key to read text from images, or type notes." };
+  if (!aiEnabled()) return { text: "", status: "partial", note: "Image saved. Choose an AI provider in Settings to read text from images, or type notes." };
   const media = (["image/png", "image/jpeg", "image/gif", "image/webp"].includes(mime) ? mime : "image/png") as
     | "image/png"
     | "image/jpeg"

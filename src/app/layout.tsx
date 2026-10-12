@@ -20,6 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <nav>
             <Link href="/">Courses</Link>
             <Link href="/knowledge">Knowledge base</Link>
+            <Link href="/settings">Settings</Link>
           </nav>
           <AiBadge />
         </header>

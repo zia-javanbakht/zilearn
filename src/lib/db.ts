@@ -14,6 +14,12 @@ export function newId(): string {
 }
 
 const SCHEMA = `
+-- App settings (AI provider, keys, models), one row per setting. See src/lib/settings.ts.
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS courses (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

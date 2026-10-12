@@ -20,9 +20,11 @@ vi.mock("@google/genai", async (orig) => {
 });
 
 const ai = await import("@/lib/ai");
+const { openDb, setDb } = await import("@/lib/db");
 const env = { ...process.env };
 
 beforeEach(() => {
+  setDb(openDb(":memory:")); // provider() reads saved settings; keep tests off the real database
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.ANTHROPIC_AUTH_TOKEN;
   delete process.env.ZILEARN_PROVIDER;
