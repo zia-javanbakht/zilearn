@@ -236,11 +236,17 @@ export function isAuthorLine(s: string): boolean {
  */
 export function studySections(text: string): Section[] {
   const out: Section[] = [];
-  splitSections(text).forEach((s, i) => {
+  const sections = splitSections(text);
+  const numbered = (h: string) => /^(appendix\s+)?[\dIVX]+(\.\d+)*\.?\s+\p{L}/u.test(h);
+  // In numbered notes, what comes between the title and the first numbered section is the title page:
+  // a subtitle, the author ("Zia Javanbakht"), the affiliation.
+  const firstNumbered = sections.filter((s) => numbered(s.heading)).length >= 3 ? sections.findIndex((s) => numbered(s.heading)) : -1;
+  sections.forEach((s, i) => {
     const h = s.heading.replace(/^(appendix\s+)?[\dIVX]+(\.\d+)*\.?\s+(?=\p{L})/u, "").trim();
-    if (BACK_MATTER.test(h)) return;
+    // "References I": a slide deck numbers the frames of a long list.
+    if (BACK_MATTER.test(h.replace(/\s+(I{1,3}|IV|\d)$/, ""))) return;
     // Front matter sits before the first few headings; a closing "Summary" is a real section.
-    if (s.heading && i < 5 && (FRONT_LABELS.test(h) || isAuthorLine(s.heading))) out.push({ heading: "", body: s.body });
+    if (s.heading && i < 5 && (FRONT_LABELS.test(h) || isAuthorLine(s.heading) || (i > 0 && i < firstNumbered && (s.level ?? 0) > 1))) out.push({ heading: "", body: s.body });
     // Numbering is the paper's bookkeeping; the level keeps the structure it carried.
     else out.push({ ...s, heading: h });
   });

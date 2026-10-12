@@ -70,6 +70,9 @@ Build a brainmap of the course content:
 - Cite source material ids for each topic.
 - Cover every numbered section and appendix of a paper or set of notes somewhere in the map.
 - Write each summary only from what its own section says: a result found for one case (one test, geometry or example) is not stated for the others, and a comparison says which method came out better where.
+- Each idea belongs to one topic: when two sections treat the same criteria or result (e.g. the Jacobian determinant test under both the Jacobian and element quality), give it to the topic that defines it, and let the other's summary point to that topic by name instead of repeating it.
+- Where a source uses one symbol for two things (e.g. J for an area ratio in a figure and J = det F later), say so in the summaries that use it.
+- Slide navigation, title slides and section dividers ("Part I", a lone section name) aren't topics; a part title from a divider names the course's wider part, not this material's content.
 - Do not create topics for administrative content (assessment dates, course logistics).
 - The text came from PDF extraction, OCR or speech recognition and may be damaged ("e ect" for "effect", "rst" for "first", misread or misheard terms). Read it in context and spell every title, summary and key term correctly; key terms must be terms the materials actually use.`;
 
@@ -122,7 +125,7 @@ export function heuristicTopics(materials: Material[]): NewTopic[] {
       ref,
       parent_ref: null,
       title: own && !/\s/.test(m.title) ? clipWords(mend(own), 80) : m.title,
-      summary: digest?.summary || firstSentences(abstractOf(text) ?? text, 2) || `${MATERIAL_KIND_LABELS[m.kind]} for this course.`,
+      summary: digest?.summary || firstSentences(abstractOf(text) ?? afterTitlePage(text), 2) || `${MATERIAL_KIND_LABELS[m.kind]} for this course.`,
       keywords: digest?.keywords.slice(0, 8) ?? topKeywords(text, 6),
       material_ids: [m.id],
       importance: m.kind === "sample_exam" ? 3 : 2,
@@ -172,20 +175,36 @@ function heuristicSummary(course: Course, materials: Material[]) {
 
 /** A paper's abstract, which says what it is about better than its title and author lines do. */
 function abstractOf(text: string): string | null {
-  const m = text.slice(0, 8000).match(/^(?:#{1,6}\s*)?abstract[.:]?\s*$\n([\s\S]{80,}?)(?:\n\s*\n|\n#{1,6}\s|$)/im);
+  // Older journals call it the summary ("SUMMARY"); it ends at a blank line, a heading or the numbered introduction.
+  const m = text.slice(0, 8000).match(/^(?:#{1,6}\s*)?(?:abstract|summary)[.:]?\s*$\n([\s\S]{80,}?)(?:\n\s*\n|\n#{1,6}\s|\n1\.?\s+\p{Lu}|$)/imu);
   return m ? m[1] : null;
+}
+
+/** Numbered notes without an abstract: their text from the first numbered section, past the title page. */
+function afterTitlePage(text: string): string {
+  const first = text.search(/^#{1,6}\s+1\.?\s+\p{L}/mu);
+  return first > 0 ? text.slice(first) : text;
 }
 
 function firstSentences(text: string, n: number) {
   const s = proseLines(text.split("\n"))
+    // A figure's labels ("1 2", "Natural / Parent") and a line of symbols say nothing on their own:
+    // keep lines of words, list items and headings.
+    .filter((l) => (l.match(/(?:^|\s)[A-Za-z][a-z]{2,}[,.;:)]?(?=\s|$)/g) ?? []).length >= 3 || /^\s*-\s+\S/.test(l) || /^#/.test(l.trim()))
+    // A box's label ("Definition 3.1 — Mass of the Cuts (Smith 2002).") names it; its text says what it is.
+    .map((l) => l.replace(/^\s*(definition|theorem|lemma|corollary|proposition|keypoint|key point|example|remark)\s+[\d.]+\s*[—–-]\s*.{1,120}?\.(?=\s+\p{Lu})\s*/iu, ""))
     .join("\n")
     .replace(/--- Page \d+ ---/g, " ")
-    // Headings (a title, the author line under it) aren't sentences of the text.
-    .replace(/^\s*#{1,6}\s+.*$/gm, "")
-    .replace(/^\s*([-*]\s+|slide \d+:\s*)/gim, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  const parts = s.match(/[^.!?]+[.!?]+/g) ?? (s ? [s] : []);
+    // Headings (a title, the author line under it) aren't sentences of the text, but they end one.
+    .replace(/^\s*#{1,6}\s+.*$/gm, "\u0000")
+    .replace(/^\s*([-*]\s+|slide \d+:\s*)/gim, "");
+  // A sentence ends at a stop followed by a space, not at the dot of "3.1" or "e.g.,".
+  const parts = s
+    .split("\u0000")
+    .map((x) => x.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .flatMap((x) => x.match(/(?:[^.!?]|[.!?](?=\S))+[.!?]+(?=\s|$)|(?:[^.!?]|[.!?](?=\S))+$/g) ?? [])
+    .filter((x) => /\p{L}{3}/u.test(x));
   return truncate(parts.slice(0, n).map((x) => x.trim()).join(" "), 300);
 }
 

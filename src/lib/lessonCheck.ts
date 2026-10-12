@@ -315,8 +315,11 @@ export function refereePrompt(doc: LessonDoc, framing: string[] = [], practice: 
 - Questions whose data don't agree with their answers or with each other; recompute every number you can.
 - Sources that don't state the block's main claim: check it against the cited passage, then set the right title plus timestamp, section or question number, or an empty string if the claim (or most of the block) isn't in the sources.
 - References to the sources by number anywhere in the lesson ("Section 4", "eq. (12)", "Table 2", "Figure 3", "Example 1.2"): check that the numbered item exists in the source named and says what the lesson claims it says; correct the number, or the claim.
-- Equations quoted from the sources: each must match the source and be written as display maths with its number (\\tag{n}). Where the source text around it is garbled (extraction damage), the lesson must say the source's form can't be read there rather than present a reconstruction as the source's.
-- Disagreements within the sources (a value, sign or definition that differs between two places) that the lesson passes over or settles silently: say so in the block, citing both.
+- Equations quoted from the sources: each must match the source and be written as display maths with its number (\\tag{n}) when the source numbers it; one the source doesn't number (inside a definition, theorem or slide) has no tag and cites its box or slide, and the lesson never comments on numbering. Where the source text around it is garbled (extraction damage), the lesson must say the source's form can't be read there rather than present a reconstruction as the source's.
+- Disagreements within the sources (a value, sign, definition or symbol that differs between two places, in one source or two) that the lesson passes over or settles silently: say so in the block, citing both.
+- Citations of a numbered box, slide or section ("Definition 1.2", "Theorem 2.1", "slide 4"): open it in the sources and check it states what the block attributes to it (a box that defines only the cuts and the normal doesn't define traction); otherwise cite the place that does.
+- Claims about all or every member of a set ("all the local balance laws", "always", "every element"): test the claim against each case the sources list, including cases treated under neighbouring topics; where one fails or is reached another way, narrow the claim and name the exception.
+- Sentences that send the student to a figure or table the lesson doesn't show ("look at the arrow in Figure 1"): say what it shows instead.
 - Examples and questions that simplify the sources' model without saying so: add a sentence saying what is left out.
 - Blocks with an empty source whose formula or claim the sources do state (perhaps in another form, or as one step of a longer equation): set the source.
 - Causal claims credited to the sources ("because", "explains why", "therefore", "leads to"): the cited passage must state the cause; otherwise state what the source does say, or present the explanation as the lesson's own reasoning with no source.
@@ -352,14 +355,26 @@ export function equationGaps(doc: LessonDoc, summary = ""): string[] {
     : [];
 }
 
-const META = /\b(extracted text|text extraction|extraction|PDF|OCR|text layer|transcription|transcribed)\b/i;
+const META = /\b(extracted text|text extraction|extraction|PDF|OCR|text layer|transcription|transcribed|(?:is|are)(?: not|n't)(?: numbered| given a number)|unnumbered|no equation number)\b/i;
 
-/** Sentences about how the sources were turned into text, which mean nothing to the student. */
+/** Sentences about how the sources were turned into text, or about their numbering, which mean nothing to the student. */
 export function metaProblems(doc: LessonDoc): string[] {
   return [...texts(doc)].flatMap(([path, t]) => {
     const m = META.exec(t);
-    return m ? [`${path} talks about "${m[0]}", how the sources were processed: say it for the student instead (e.g. "the paper's form of this equation isn't reproduced here; see Section 2, eq. (1)").`] : [];
+    if (!m) return [];
+    return /number/i.test(m[0])
+      ? [`${path} remarks that something "${m[0]}" in the sources: drop the remark; an unnumbered equation is cited by the box, slide or section it is in ("Definition 1.2").`]
+      : [`${path} talks about "${m[0]}", how the sources were processed: say it for the student instead (e.g. "the paper's form of this equation isn't reproduced here; see Section 2, eq. (1)").`];
   });
+}
+
+/** Lessons that drift from the student's notes: more than half the blocks from beyond the sources. */
+export function beyondShare(doc: LessonDoc): string[] {
+  const blocks = doc.sections.flatMap((s) => s.blocks);
+  const beyond = blocks.filter((b) => !b.source?.trim()).length;
+  return blocks.length >= 4 && beyond > blocks.length / 2
+    ? [`${beyond} of ${blocks.length} blocks have no source ("Beyond your notes"). Where the sources do state a block's claim, set its source; then rewrite the least needed of the rest from what the sources say on this topic, so at most half are from beyond them.`]
+    : [];
 }
 
 /**

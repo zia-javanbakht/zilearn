@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { PDFDocument, StandardFonts } from "pdf-lib";
-import { fixMathGlyphs, isPoor, isPublisherLine, mathsHeavy, pageQuality, pagesFromLines, runningLines, wordCounts, type PdfLine } from "@/lib/pdfText";
+import { fixMathGlyphs, isPoor, isPublisherLine, mathsHeavy, pageQuality, pagesFromLines, pdfLines, runningLines, shatteredMatrices, wordCounts, type PdfLine } from "@/lib/pdfText";
 import { isAuthorLine, splitSections, studySections } from "@/lib/text";
 
 const generateText = vi.fn();
@@ -50,6 +50,13 @@ describe("maths glyphs", () => {
   });
 });
 
+describe("maths from a TeX text layer", () => {
+  it("puts accents on the letter after them, joins d/dt and an integral's domain to its integrand", () => {
+    const { text } = fixMathGlyphs("∫𝑆𝑝\n𝜌̇ 𝜙 d𝑣 and Since\u0307 𝑭 𝑭 with (𝜌𝐽 ) =̇ 𝜌𝐽 + 𝜌̇𝐽 = 0, so d\nd𝑡 𝑀 = 0. The café stays.");
+    expect(text).toBe("∫𝑆𝑝 𝜌 𝜙̇ d𝑣 and Since 𝑭̇ 𝑭 with (𝜌𝐽 ) = 𝜌̇𝐽 + 𝜌𝐽̇ = 0, so d/d𝑡 𝑀 = 0. The café stays.");
+  });
+});
+
 describe("page quality", () => {
   const good = "The stiffness matrix of the element follows from the strain energy of the deformed body. ".repeat(4);
   const ocr = "Thc stiffncss rnatrix o f t h e elernent follows frorn thc slrain cncrgy of the dcforrned body. ".repeat(4);
@@ -93,6 +100,63 @@ describe("headings from type sizes", () => {
 
   it("doesn't take sizes from an OCR layer", () => {
     expect(pagesFromLines([[l("Big scanned words", 16), ...body]], { ocrPages: new Set([1]) }).pages[0]).not.toContain("#");
+  });
+});
+
+describe("slides and book furniture", () => {
+  const l = (text: string, size = 5): PdfLine => ({ text, size });
+  const sidebar = ["Natural and Physical", "(Local/Global) Coordinates", "Definition of Jacobian Matrix", "Mesh", "Element Quality", "References"].map((t) => l(t, 4));
+  const frame = (n: number, title: string) => [...sidebar, l(`${n}/6`), l(title, 9), l(`The body of frame ${n} explains ${title.toLowerCase()} in a full sentence.`), l(`A second line closes the frame on ${title}.`)];
+
+  it("drops a navigation sidebar anywhere on the page, frame counters, the title slide's furniture and divider slides", () => {
+    const { pages } = pagesFromLines([
+      [l("Isoparametric Elements", 12), l("Computational Statics (7252ENG)", 9), l("Dr Zia Javanbakht", 9), l("v2026.09.10")],
+      [...sidebar, l("Part I", 9), l("Complexity and Verification", 9)],
+      frame(1, "Isoparametric Mapping"),
+      frame(2, "Definition of Jacobian Matrix"),
+      [...sidebar, l("Mesh", 9)],
+      frame(3, "Element Quality"),
+      frame(4, "Refinement Strategies"),
+    ]);
+    expect(pages[0]).toBe("# Isoparametric Elements");
+    expect(pages[1]).toBe("");
+    expect(pages[4]).toBe("");
+    expect(pages[3]).toBe("### Definition of Jacobian Matrix\nThe body of frame 2 explains definition of jacobian matrix in a full sentence.\nA second line closes the frame on Definition of Jacobian Matrix.");
+    expect(pages.join("\n")).not.toMatch(/Natural and Physical|\d\/6/);
+  });
+
+  it("drops a table of contents and a running head naming the section and page", () => {
+    const body = Array.from({ length: 8 }, (_, i) => l(`Sentence ${i} of the notes, set in the body size of the text.`, 10));
+    const { pages } = pagesFromLines([
+      [l("Contents", 14), l("1 Overview . . . . . . . . . . 1", 10), l("2 Tools . . . . . . . . . . 1", 10), l("3 Conservation of Mass . . . . . . . 2", 10)],
+      [l("3 Conservation of Mass", 14), ...body],
+      [l("3 Conservation of Mass 2", 10), ...body],
+    ]);
+    expect(pages[0]).toBe("");
+    expect(pages[2]).not.toContain("Conservation of Mass");
+  });
+
+  it("points to a matrix shattered into bracket pieces", () => {
+    expect(shatteredMatrices(["J =", "⎡", "⎢", "⎣", "∂x", "∂ξ", "⎤", "⎥", "⎦", "i.e. local."], 5)).toEqual(["J =", "[matrix, see PDF page 5]", "i.e. local."]);
+  });
+
+  it("reads bullets, exponents and a title run into a figure's labels from the items' positions", async () => {
+    const it = (str: string, x: number, y: number, size = 5, hasEOL = false) => ({ str, transform: [size, 0, 0, size, x, y], hasEOL });
+    const pdf = {
+      numPages: 1,
+      getPage: async () => ({
+        getTextContent: async () => ({
+          items: [
+            it("Isoparametric Mapping", 5, 244, 9), it("Global", 267, 100, 4.5, true),
+            it("K", 10, 86, 6), it(" ", 16, 86, 6), it("Skew: large off-diagonal terms", 20, 86, 5, true),
+            it("so 𝑩 = 𝑱", 10, 70), it("−1", 30, 71.9), it("∇𝑵 and study,", 36, 70), it("8", 60, 71.9, 5, true),
+          ],
+        }),
+      }),
+    };
+    const [lines] = await pdfLines(pdf);
+    expect(lines.map((x) => x.text)).toEqual(["Isoparametric Mapping", "Global", "- Skew: large off-diagonal terms", "so 𝑩 = 𝑱^{−1}∇𝑵 and study,8"]);
+    expect(lines[2].size).toBe(5);
   });
 });
 
