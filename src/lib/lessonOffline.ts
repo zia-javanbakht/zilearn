@@ -2,7 +2,7 @@ import type { Source } from "./kb";
 import type { LessonBlock, LessonDoc, LessonMap, QA } from "./lesson";
 import { mentions, type ConceptLink } from "./lessonTerms";
 import { topPhrases } from "./digest";
-import { BACK_MATTER, isAuthorLine, stem, tokenize } from "./text";
+import { BACK_MATTER, isAuthorLine, proseLines, stem, tokenize } from "./text";
 
 /**
  * A lesson built without an AI, by pulling the teaching moves out of the student's own materials:
@@ -49,22 +49,6 @@ function units(sources: Source[]): Unit[] {
 /** Publishing boilerplate that can sit in a paper's text: funding and conflict statements, licences, ORCID. */
 const BOILERPLATE = /^(funding|declaration of conflicting interests|the author\(s\) (received|declared|disclosed)|the authors? (declare|received|disclosed)|orcid|this article is distributed under|open access|data availability|conflicts? of interest)/i;
 
-const CAPTION = /^(figure|fig\.|table|scheme)\s*[\dIVX]+[.:]\s/i;
-const SENTENCE_END = /[.!?]["')\]]?(\d+(,\d+)*)?$/;
-const PAGE_MARK = /^-{2,}\s*page\s+\d+\s*-{2,}$/i;
-/** A flattened table row: mostly numbers ("Elastic modulus (GPa) 294 620 3.15"). */
-function tableRow(line: string): boolean {
-  const toks = line.split(/\s+/).filter(Boolean);
-  const nums = toks.filter((x) => /^[-+±~≈]?\d[\d.,]*%?$/.test(x)).length;
-  return nums >= 3 && nums / toks.length >= 0.4;
-}
-/** A line of running text rather than a table's header or cells. */
-function prose(line: string): boolean {
-  const toks = line.split(/\s+/).filter(Boolean);
-  const nums = toks.filter((x) => /\d/.test(x)).length;
-  return toks.filter((x) => /^[a-z][a-z'’-]+[,.;:]?$/.test(x)).length >= 5 && nums / toks.length < 0.25;
-}
-
 /** Pieces split after "i.e." or "et al." belong to one sentence. */
 function joinAbbreviations(pieces: string[]): string[] {
   const out: string[] = [];
@@ -81,27 +65,12 @@ function sentences(u: Unit): Sentence[] {
   // Paragraphs end at blank lines and at anything that isn't prose, so lead-ins don't run into the next line.
   const paras: string[] = [];
   let cur: string[] = [];
-  let inCaption = false;
-  let inTable = false;
-  for (const l of u.lines) {
-    const line = l.trim();
-    // Captions (with the lines they wrap onto), the table rows under a table's caption, and page
-    // markers describe the layout, not the subject; a paragraph they interrupt carries on after them.
-    if (CAPTION.test(line) || (inCaption && line)) {
-      inCaption = !SENTENCE_END.test(line);
-      inTable = /^table/i.test(line) || inTable;
-      continue;
-    }
-    if (PAGE_MARK.test(line) || tableRow(line) || (inTable && line && !prose(line))) continue;
-    inTable = false;
-    if (!line || /^\s*([-*+]|\d+[.)]|\||\$\$)/.test(l)) {
+  // Captions, table rows and page markers are dropped first (see proseLines).
+  for (const l of proseLines(u.lines)) {
+    if (!l.trim() || /^\s*([-*+]|\d+[.)]|\||\$\$)/.test(l)) {
       if (cur.length) paras.push(cur.join(" "));
       cur = [];
-    } else {
-      // A page break or figure between two halves of a sentence: the lower-case half joins the first.
-      if (!cur.length && /^[a-z]/.test(line) && paras.length && !/[.!?:]$/.test(paras[paras.length - 1])) cur.push(paras.pop()!);
-      cur.push(line);
-    }
+    } else cur.push(l.trim());
   }
   if (cur.length) paras.push(cur.join(" "));
   for (const para of paras)
@@ -163,10 +132,16 @@ const STOPWORD = /^(the|a|an|of|in|on|at|to|for|and|or|is|are|was|were|be|by|wit
 
 /** A term as the materials spell it, when they write it as an acronym ("rves" → "RVEs"). */
 function asWritten(term: string, texts: string[]): string {
-  const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const forms = texts.join(" ").match(new RegExp(`\\b${esc}\\b`, "gi")) ?? [];
-  const caps = forms.filter((f) => (f.match(/[A-Z]/g) ?? []).length >= 2);
-  return caps.length > forms.length / 2 ? caps[0] : term;
+  // "piola kirchhoff" is written "Piola–Kirchhoff".
+  const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/[\s\-–]+/g, "[\\s\\-–]+");
+  const re = new RegExp(`\\b${esc}\\b`, "gi");
+  const forms = texts.flatMap((text) => [...text.matchAll(re)].map((f) => ({ form: f[0], start: f.index === 0 || /[.!?:]\s*$/.test(text.slice(Math.max(0, f.index - 3), f.index)) })));
+  const caps = forms.filter((f) => (f.form.match(/[A-Z]/g) ?? []).length >= 2);
+  if (caps.length > forms.length / 2) return caps[0].form;
+  // A name ("Cauchy stress", "Weibull") is capitalised mid-sentence too; a capital starting a sentence proves nothing.
+  const midSentence = forms.filter((f) => !f.start);
+  const named = midSentence.filter((f) => /^[A-Z]/.test(f.form));
+  return midSentence.length && named.length > midSentence.length / 2 ? named[0].form : term;
 }
 
 /** Words every paper uses about itself: no use as key terms on their own. */
@@ -282,7 +257,8 @@ export function offlineLesson(
   const used = new Set<string>();
   // Longer terms first, so "weight decay" claims its sentence before "decay" does.
   const titleWords = new Set(t.toLowerCase().split(/\W+/).map(stem));
-  const titleOnly = (k: string) => k.toLowerCase() !== t.toLowerCase() && k.toLowerCase().split(/\W+/).every((w) => titleWords.has(stem(w)));
+  // The topic's own name, or words of it ("descent" in Gradient descent), isn't a key term of its own.
+  const titleOnly = (k: string) => k.toLowerCase().split(/\W+/).every((w) => titleWords.has(stem(w)));
   // The key terms the lesson is built around: the topic's keywords that the materials really use (a single
   // word must come up a few times), then the phrases the relevant material repeats most.
   const uses = (k: string) => relevant.filter((x) => mentions(x.text, k)).length;

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
 import { offlineDigest } from "./digest";
-import { studySections, topKeywords, truncate } from "./text";
+import { proseLines, studySections, topKeywords, truncate } from "./text";
 import { checkKeywords, repairTerm } from "./textRepair";
 import { clipWords } from "./figure";
 import { headingRepairer } from "./headingRepair";
@@ -177,7 +177,8 @@ function abstractOf(text: string): string | null {
 }
 
 function firstSentences(text: string, n: number) {
-  const s = text
+  const s = proseLines(text.split("\n"))
+    .join("\n")
     .replace(/--- Page \d+ ---/g, " ")
     // Headings (a title, the author line under it) aren't sentences of the text.
     .replace(/^\s*#{1,6}\s+.*$/gm, "")
@@ -185,7 +186,7 @@ function firstSentences(text: string, n: number) {
     .replace(/\s+/g, " ")
     .trim();
   const parts = s.match(/[^.!?]+[.!?]+/g) ?? (s ? [s] : []);
-  return truncate(parts.slice(0, n).join(" ").trim(), 300);
+  return truncate(parts.slice(0, n).map((x) => x.trim()).join(" "), 300);
 }
 
 export { toFlowchart, toMindmap } from "./mermaid";

@@ -200,3 +200,20 @@ describe("offline lessons skip a paper's layout", () => {
     for (const p of pairs) expect(pairs).not.toContain(p.split("|").reverse().join("|"));
   });
 });
+
+describe("offline key terms keep names", () => {
+  it("spells names as the materials do and drops 'per unit' phrases", async () => {
+    const { offlineLesson } = await import("@/lib/lessonOffline");
+    const head = { title: "Stress measures", depth: 1, level: "Remember", goal: "", map: { course: "Mechanics", path: [], before: [], after: [], children: [], related: [] } } as never;
+    const text =
+      "# Stress measures\nThe Cauchy stress is the force per unit deformed area acting on a surface. " +
+      "The first Piola–Kirchhoff stress is the force per unit reference area. " +
+      "The Cauchy stress and the first Piola–Kirchhoff stress differ when the body deforms. " +
+      "Energy per unit volume is stored when the Cauchy stress does work. The Piola–Kirchhoff stress is not symmetric in general.";
+    const doc = offlineLesson(head, { summary: "", keywords: ["cauchy", "piola kirchhoff"], mastery: null }, [{ title: "notes", kind: "notes", text }]);
+    const titles = doc.sections.flatMap((s) => s.blocks.map((b) => b.title)).join(" | ");
+    expect(titles).toMatch(/Cauchy/);
+    expect(titles).not.toMatch(/cauchy|piola kirchhoff/);
+    expect(titles).not.toMatch(/per unit/i);
+  });
+});
