@@ -276,8 +276,12 @@ function refereeFields(doc: LessonDoc): [string, string][] {
       b.figure?.diagram?.nodes.forEach((n, k) => out.push([`sections.${i}.blocks.${j}.figure.diagram.nodes.${k}.label`, n.label]));
     }
   doc.concept_links?.forEach((l, i) => out.push([`concept_links.${i}.label`, l.label]));
+  doc.check_yourself.forEach((q, i) => out.push([`check_yourself.${i}.objective`, q.objective ? String(q.objective) : ""]));
   return out;
 }
+
+/** A new check_yourself question or common mistake, at the next free number. */
+const APPEND = /^(check_yourself|common_mistakes)\.(\d+)\.(question|answer|hint|mistake|correction)$/;
 
 /** The referee's instructions and the fields it may correct. */
 export function refereePrompt(doc: LessonDoc, framing: string[] = [], practice: { text: string; source: string }[] = []): string {
@@ -289,20 +293,45 @@ export function refereePrompt(doc: LessonDoc, framing: string[] = [], practice: 
 - Statements that contradict another part of the lesson or the student's sources (including values quoted from them).
 - Questions whose data don't agree with their answers or with each other; recompute every number you can.
 - Sources that don't state the block's main claim: check it against the cited passage, then set the right title plus timestamp, section or question number, or an empty string if the claim (or most of the block) isn't in the sources.
+- References to the sources by number anywhere in the lesson ("Section 4", "eq. (12)", "Table 2", "Figure 3", "Example 1.2"): check that the numbered item exists in the source named and says what the lesson claims it says; correct the number, or the claim.
+- Equations quoted from the sources: each must match the source and be written as display maths with its number (\\tag{n}). Where the source text around it is garbled (extraction damage), the lesson must say the source's form can't be read there rather than present a reconstruction as the source's.
+- Disagreements within the sources (a value, sign or definition that differs between two places) that the lesson passes over or settles silently: say so in the block, citing both.
+- Examples and questions that simplify the sources' model without saying so: add a sentence saying what is left out.
 - Section headings that promise something their section doesn't teach.${practice.length ? `\n- The student's own questions below must stay theirs to solve: if any block, answer or "read" focus lets one be answered in a single step (it states the rule or result that decides it, or names the method to use), rewrite that field so it teaches the idea without settling the question.\n  ${practice.slice(0, 8).map((q) => `${q.source}: ${q.text.replace(/\s+/g, " ").slice(0, 300)}`).join("\n  ")}` : ""}
 - Figure captions that state a quantity an example or question asks the student to find.${doc.concept_links?.length ? `\n- Concept-map links that don't read as a true sentence "from label to" (backwards, wrong or clumsy); correct the label field:\n  ${doc.concept_links.map((l, i) => `concept_links.${i}: ${l.from} | ${l.label} | ${l.to}`).join("\n  ")}` : ""}${framing.length ? `\n- How the lesson uses its key terms, diagrams and words (fix by editing the fields named, e.g. a block body or a diagram box label):\n  - ${framing.slice(0, 8).join("\n  - ")}` : ""}${untested.length && doc.check_yourself.length ? `\n- Objectives ${untested.join(", ")} have no check_yourself question. Rewrite the least useful check_yourself questions (question and answer) so each of these objectives is tested.` : ""}
-Leave style alone, keep the student's notation, and keep maths KaTeX-compatible ($...$ and $$...$$). Return an empty list if nothing is wrong.
+Leave style alone, keep the student's notation, and keep maths KaTeX-compatible ($...$ and $$...$$). Correct a field by its path below; to add a check_yourself question or a common mistake, use the next free number (e.g. check_yourself.${doc.check_yourself.length}.question and check_yourself.${doc.check_yourself.length}.answer), and set a question's objective with its .objective path (the number as text). Return an empty list if nothing is wrong.
 
 ${fields.map(([path, text]) => `<field path="${path}">\n${text}\n</field>`).join("\n")}`;
 }
 
-/** Applies the referee's corrections in place; returns what was fixed. */
+/**
+ * Applies the referee's corrections in place; returns what was fixed. A correction to a field that
+ * doesn't exist is listed as not applied rather than lost without a word.
+ */
 export function applyReferee(doc: LessonDoc, corrections: z.infer<typeof RefereeSchema>["corrections"]): string[] {
   const paths = new Set(refereeFields(doc).map(([p]) => p));
   const done: string[] = [];
+  const skipped: string[] = [];
   for (const c of corrections) {
-    if (!paths.has(c.path)) continue;
-    if (c.path.endsWith(".caption")) {
+    const add = c.path.match(APPEND);
+    if (!paths.has(c.path) && add) {
+      const list = (add[1] === "check_yourself" ? doc.check_yourself : doc.common_mistakes) as unknown as Record<string, unknown>[];
+      const fits = add[1] === "check_yourself" ? ["question", "answer", "hint"].includes(add[3]) : ["mistake", "correction"].includes(add[3]);
+      if (+add[2] === list.length && fits && c.text.trim()) {
+        list.push(add[1] === "check_yourself" ? { question: "", answer: "", kind: "apply", hint: null, objective: null } : { mistake: "", correction: "" });
+        for (const [p] of refereeFields(doc)) paths.add(p);
+        if (add[3] === "hint") paths.add(c.path);
+      }
+    }
+    if (!paths.has(c.path)) {
+      skipped.push(`${c.path}: ${c.problem}`);
+      continue;
+    }
+    if (c.path.endsWith(".objective")) {
+      const n = parseInt(c.text, 10);
+      const [, i] = c.path.split(".");
+      doc.check_yourself[+i].objective = n >= 1 && n <= doc.objectives.length ? n : null;
+    } else if (c.path.endsWith(".caption")) {
       const [, i, , j] = c.path.split(".");
       const f = doc.sections[+i]?.blocks[+j]?.figure;
       if (f) f.caption = c.text;
@@ -313,7 +342,11 @@ export function applyReferee(doc: LessonDoc, corrections: z.infer<typeof Referee
     } else setPath(doc, c.path, c.path.endsWith(".source") ? c.text.trim() || null : normalizeMath(c.text));
     done.push(`${c.path}: ${c.problem}`);
   }
-  return done;
+  // A question added with only one half is no question.
+  doc.check_yourself = doc.check_yourself.filter((q) => q.question.trim() && q.answer.trim());
+  doc.common_mistakes = doc.common_mistakes.filter((m) => m.mistake.trim());
+  if (skipped.length) console.warn(`Referee corrections not applied (no such field):\n${skipped.join("\n")}`);
+  return [...done, ...skipped.map((x) => `not applied, ${x}`)];
 }
 
 export { RefereeSchema };

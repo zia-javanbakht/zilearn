@@ -348,6 +348,8 @@ export function repeats(doc: LessonDoc, earlier: LessonDoc[]): string[] {
   const old = earlier.flatMap((e) =>
     e.sections.flatMap((s) => s.blocks.flatMap((b) => [b.body, b.solution ?? ""].flatMap(sentences).map((x) => ({ level: e.depth, text: x, words: content(x) })))),
   );
+  // Whole blocks too: a paraphrase repeats an idea without repeating any one sentence.
+  const oldBlocks = earlier.flatMap((e) => e.sections.flatMap((s) => s.blocks.filter((b) => b.kind !== "example").map((b) => ({ level: e.depth, title: b.title, words: content(`${b.title} ${b.body}`) }))));
   const oldMaths = new Map<string, number>();
   for (const e of earlier) for (const s of e.sections) for (const b of s.blocks) for (const m of displays(`${b.body}\n${b.solution ?? ""}`)) oldMaths.set(m, e.depth);
   const out: string[] = [];
@@ -368,6 +370,19 @@ export function repeats(doc: LessonDoc, earlier: LessonDoc[]): string[] {
           out.push(`${where} repeats what level ${hit.level} already said ("${hit.text.slice(0, 120)}"): refer back to it in a clause and spend the words on what this level adds.`);
           return;
         }
+      }
+      const w = content(`${b.title} ${b.body}`);
+      // Word overlap can't tell a paraphrase from a deeper treatment of the same terms, so this asks for a check.
+      const twin =
+        b.kind !== "example" && w.size >= 10
+          ? oldBlocks.find((o) => {
+              const both = [...w].filter((t) => o.words.has(t)).length;
+              return o.words.size >= 10 && both >= 0.42 * Math.min(w.size, o.words.size) && both >= 0.15 * (w.size + o.words.size - both);
+            })
+          : undefined;
+      if (twin) {
+        out.push(`${where} covers much the same ground as level ${twin.level}'s "${twin.title}": if it restates that block in other words, rewrite it to add this level's layer (how it works, why it holds, where it stops) and refer back to the earlier point in a clause.`);
+        return;
       }
       const same = [...displays(`${b.body}\n${b.solution ?? ""}`)].filter((m) => oldMaths.has(m));
       if (same.length >= 2) out.push(`${where} redoes ${same.length} equations from level ${oldMaths.get(same[0])}: quote the result from there in one line and go further with it.`);

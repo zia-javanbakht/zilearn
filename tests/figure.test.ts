@@ -78,4 +78,15 @@ describe("labels", () => {
     expect(plainLabel("$\\omega_n\\sqrt{\\zeta^2-1}$, $\\sqrt{k/m}$, $\\frac{c}{2m}$, $\\pm 1$")).toBe("ωₙ√(ζ²-1), √(k/m), c/(2m), ± 1");
     expect(plainLabel("time $t$ (s), $\\omega_n$, $u_{i+1}$, $x^2$")).toBe("time t (s), ωₙ, uᵢ₊₁, x²");
   });
+
+  it("handles the letter styles, accents and operators of continuum mechanics, and drops unknown commands", async () => {
+    const { plainLabel, mq } = await import("@/lib/figure");
+    expect(plainLabel("$\\mathcal{B}_0$ in $\\mathbb{R}^3$, $\\mathcal{C}$")).toBe("ℬ₀ in ℝ³, 𝒞");
+    expect(plainLabel("$\\boldsymbol{\\sigma} = \\bm{F}\\mathbf{S}\\mathbf{F}^T$")).toBe("σ = FSFᵀ");
+    expect(plainLabel("$\\hat{\\mathbf{n}}$, $\\bar{\\boldsymbol\\sigma}$, $\\tilde u$")).toBe("n\u0302, σ\u0304, u\u0303");
+    expect(plainLabel("$\\nabla_X \\cdot \\mathbf{P}$, $\\partial \\Psi / \\partial \\mathbf{E}$")).toBe("∇_X · P, ∂ Ψ / ∂ E");
+    expect(plainLabel("$\\operatorname{Div}\\mathbf{P} + \\mathbf{f}_0 = \\mathbf{0}$, $\\det \\mathbf F > 0$")).toBe("DivP + f₀ = 0, det F > 0");
+    expect(plainLabel("$\\left( \\int_{\\Omega} \\delta W \\right)$, $\\left\\{ a \\right\\}$, $\\mathsf{K}\\unknowncmd{x}$")).toBe("( ∫_Ω δ W ), { a }, Kx");
+    expect(mq("$\\mathbb{R}$".repeat(40), 5)).toBe('"ℝℝℝℝℝ"');
+  });
 });

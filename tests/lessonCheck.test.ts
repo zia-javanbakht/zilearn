@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkLesson, defuse, lintLesson, mathProblems, normalizeMath } from "@/lib/lessonCheck";
+import { applyReferee, checkLesson, defuse, lintLesson, mathProblems, normalizeMath, refereePrompt } from "@/lib/lessonCheck";
 import type { LessonDoc } from "@/lib/lesson";
 
 delete process.env.ANTHROPIC_API_KEY;
@@ -88,5 +88,45 @@ describe("provenance and referee", () => {
     expect(lessonToMarkdown(d)).toContain("📚 Beyond your notes");
     expect(markProvenance({ ...d, by: "heuristic" }).sections[0].blocks[0].source ?? null).toBeNull();
     expect(await refereeLesson(d, "")).toEqual([]);
+  });
+});
+
+describe("referee corrections", () => {
+  const withQuestions = () => {
+    const d = doc("Text");
+    d.objectives = ["Explain the weak form.", "Compute the tangent."];
+    d.check_yourself = [{ question: "Why?", answer: "Because.", kind: "explain", hint: null, objective: 1 }];
+    return d;
+  };
+
+  it("adds a question at the next number, sets objective tags, and reports fields that don't exist", () => {
+    const d = withQuestions();
+    expect(refereePrompt(d)).toContain('path="check_yourself.0.objective"');
+    const done = applyReferee(d, [
+      { path: "check_yourself.1.question", problem: "objective 2 untested", text: "Find $K_T$ for $\\Psi = \\tfrac12 K E^2$." },
+      { path: "check_yourself.1.answer", problem: "objective 2 untested", text: "$K_T = \\ldots$" },
+      { path: "check_yourself.1.objective", problem: "tag it", text: "2" },
+      { path: "check_yourself.0.objective", problem: "out of range", text: "7" },
+      { path: "sections.4.blocks.0.body", problem: "no such section", text: "x" },
+      { path: "check_yourself.5.question", problem: "skips a number", text: "x" },
+    ]);
+    expect(d.check_yourself).toHaveLength(2);
+    expect(d.check_yourself[1]).toMatchObject({ question: "Find $K_T$ for $\\Psi = \\tfrac12 K E^2$.", answer: "$K_T = \\ldots$", objective: 2 });
+    expect(d.check_yourself[0].objective).toBeNull();
+    expect(done.filter((x) => x.startsWith("not applied"))).toEqual(["not applied, sections.4.blocks.0.body: no such section", "not applied, check_yourself.5.question: skips a number"]);
+  });
+
+  it("drops a question added without its answer", () => {
+    const d = withQuestions();
+    applyReferee(d, [{ path: "check_yourself.1.question", problem: "half", text: "What is $J$?" }]);
+    expect(d.check_yourself).toHaveLength(1);
+  });
+
+  it("asks the referee to check numbered references, quoted equations and conflicts in the sources", () => {
+    const p = refereePrompt(withQuestions());
+    expect(p).toMatch(/"Section 4", "eq\. \(12\)", "Table 2"/);
+    expect(p).toMatch(/\\tag\{n\}/);
+    expect(p).toMatch(/Disagreements within the sources/);
+    expect(p).toMatch(/simplify the sources' model/);
   });
 });
