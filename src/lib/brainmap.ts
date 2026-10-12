@@ -66,6 +66,8 @@ Build a brainmap of the course content:
 - Order branches and subtopics in a sensible learning order (prerequisites first).
 - Mark importance 3 for topics that are core or appear in sample exams.
 - Cite source material ids for each topic.
+- Cover every numbered section and appendix of a paper or set of notes somewhere in the map.
+- Write each summary only from what its own section says: a result found for one case (one test, geometry or example) is not stated for the others, and a comparison says which method came out better where.
 - Do not create topics for administrative content (assessment dates, course logistics).
 - The text came from PDF extraction, OCR or speech recognition and may be damaged ("e ect" for "effect", "rst" for "first", misread or misheard terms). Read it in context and spell every title, summary and key term correctly; key terms must be terms the materials actually use.`;
 

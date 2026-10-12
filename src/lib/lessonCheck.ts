@@ -281,7 +281,13 @@ function refereeFields(doc: LessonDoc): [string, string][] {
 }
 
 /** A new check_yourself question or common mistake, at the next free number. */
-const APPEND = /^(check_yourself|common_mistakes)\.(\d+)\.(question|answer|hint|mistake|correction)$/;
+const APPEND = /^(check_yourself|common_mistakes|glossary)\.(\d+)\.(question|answer|hint|mistake|correction|term|meaning)$/;
+const APPEND_FIELDS: Record<string, string[]> = { check_yourself: ["question", "answer", "hint"], common_mistakes: ["mistake", "correction"], glossary: ["term", "meaning"] };
+const APPEND_EMPTY: Record<string, () => object> = {
+  check_yourself: () => ({ question: "", answer: "", kind: "apply", hint: null, objective: null }),
+  common_mistakes: () => ({ mistake: "", correction: "" }),
+  glossary: () => ({ term: "", meaning: "" }),
+};
 
 /** The referee's instructions and the fields it may correct. */
 export function refereePrompt(doc: LessonDoc, framing: string[] = [], practice: { text: string; source: string }[] = []): string {
@@ -297,11 +303,48 @@ export function refereePrompt(doc: LessonDoc, framing: string[] = [], practice: 
 - Equations quoted from the sources: each must match the source and be written as display maths with its number (\\tag{n}). Where the source text around it is garbled (extraction damage), the lesson must say the source's form can't be read there rather than present a reconstruction as the source's.
 - Disagreements within the sources (a value, sign or definition that differs between two places) that the lesson passes over or settles silently: say so in the block, citing both.
 - Examples and questions that simplify the sources' model without saying so: add a sentence saying what is left out.
+- Blocks with an empty source whose formula or claim the sources do state (perhaps in another form, or as one step of a longer equation): set the source.
+- Causal claims credited to the sources ("because", "explains why", "therefore", "leads to"): the cited passage must state the cause; otherwise state what the source does say, or present the explanation as the lesson's own reasoning with no source.
+- Text about how the lesson or its sources were produced (extraction, PDF, OCR, text layers, transcription): rewrite it for the student, e.g. "the paper's form of this equation isn't reproduced here; see Section 2, eq. (1)".
 - Section headings that promise something their section doesn't teach.${practice.length ? `\n- The student's own questions below must stay theirs to solve: if any block, answer or "read" focus lets one be answered in a single step (it states the rule or result that decides it, or names the method to use), rewrite that field so it teaches the idea without settling the question.\n  ${practice.slice(0, 8).map((q) => `${q.source}: ${q.text.replace(/\s+/g, " ").slice(0, 300)}`).join("\n  ")}` : ""}
-- Figure captions that state a quantity an example or question asks the student to find.${doc.concept_links?.length ? `\n- Concept-map links that don't read as a true sentence "from label to" (backwards, wrong or clumsy); correct the label field:\n  ${doc.concept_links.map((l, i) => `concept_links.${i}: ${l.from} | ${l.label} | ${l.to}`).join("\n  ")}` : ""}${framing.length ? `\n- How the lesson uses its key terms, diagrams and words (fix by editing the fields named, e.g. a block body or a diagram box label):\n  - ${framing.slice(0, 8).join("\n  - ")}` : ""}${untested.length && doc.check_yourself.length ? `\n- Objectives ${untested.join(", ")} have no check_yourself question. Rewrite the least useful check_yourself questions (question and answer) so each of these objectives is tested.` : ""}
-Leave style alone, keep the student's notation, and keep maths KaTeX-compatible ($...$ and $$...$$). Correct a field by its path below; to add a check_yourself question or a common mistake, use the next free number (e.g. check_yourself.${doc.check_yourself.length}.question and check_yourself.${doc.check_yourself.length}.answer), and set a question's objective with its .objective path (the number as text). Return an empty list if nothing is wrong.
+- Figure captions that state a quantity an example or question asks the student to find.${doc.concept_links?.length ? `\n- Concept-map links that don't read as a true sentence "from label to" (backwards, wrong or clumsy); correct the label field:\n  ${doc.concept_links.map((l, i) => `concept_links.${i}: ${l.from} | ${l.label} | ${l.to}`).join("\n  ")}` : ""}${framing.length ? `\n- How the lesson uses its key terms, diagrams and words (fix by editing the fields named, e.g. a block body or a diagram box label):\n  - ${framing.slice(0, 12).join("\n  - ")}` : ""}${untested.length && doc.check_yourself.length ? `\n- Objectives ${untested.join(", ")} have no check_yourself question. Rewrite the least useful check_yourself questions (question and answer) so each of these objectives is tested.` : ""}
+Leave style alone, keep the student's notation, and keep maths KaTeX-compatible ($...$ and $$...$$). Correct a field by its path below; to add a check_yourself question, a common mistake or a key term, use the next free number (e.g. check_yourself.${doc.check_yourself.length}.question and check_yourself.${doc.check_yourself.length}.answer, or glossary.${doc.glossary.length}.term and glossary.${doc.glossary.length}.meaning), and set a question's objective with its .objective path (the number as text). Return an empty list if nothing is wrong.
 
 ${fields.map(([path, text]) => `<field path="${path}">\n${text}\n</field>`).join("\n")}`;
+}
+
+/** Equation numbers a text refers to: "eq. (7)", "equations (5)-(6)", "Eqs. 2 and 3". */
+export function equationRefs(text: string): number[] {
+  const out = new Set<number>();
+  for (const m of text.matchAll(/\b(?:eqs?\.|equations?)\s*\(?(\d{1,3})\)?(?:\s*(?:[-–]|to|and|,)\s*\(?(\d{1,3})\)?)?/gi)) {
+    const a = +m[1];
+    const b = m[2] ? +m[2] : a;
+    for (let n = a; n <= Math.min(b, a + 6); n++) out.add(n);
+  }
+  return [...out].sort((x, y) => x - y);
+}
+
+/**
+ * Source equations the lesson (or the topic's summary) refers to by number but never writes out: a
+ * lesson about "the three Euler equations (5)" has to show them.
+ */
+export function equationGaps(doc: LessonDoc, summary = ""): string[] {
+  const all = [...texts(doc)].map(([, t]) => t).join("\n");
+  const shown = new Set([...all.matchAll(/\\tag\*?\{\s*(\d{1,3})\s*\}/g)].map((m) => +m[1]));
+  const wanted = equationRefs(`${summary}\n${all}`).filter((n) => !shown.has(n));
+  return wanted.length
+    ? [`The lesson${equationRefs(summary).some((n) => wanted.includes(n)) ? " and the topic summary" : ""} refer${wanted.length === 1 ? "s" : ""} to eq. ${wanted.map((n) => `(${n})`).join(", ")} of the sources but never ${wanted.length === 1 ? "writes it" : "write them"} out: show each as display maths with \\tag{n} in the block that uses it, copied from the source (no derivation needed), and read its symbols in words.`]
+    : [];
+}
+
+const META = /\b(extracted text|text extraction|extraction|PDF|OCR|text layer|transcription|transcribed)\b/i;
+
+/** Sentences about how the sources were turned into text, which mean nothing to the student. */
+export function metaProblems(doc: LessonDoc): string[] {
+  return [...texts(doc)].flatMap(([path, t]) => {
+    const m = META.exec(t);
+    return m ? [`${path} talks about "${m[0]}", how the sources were processed: say it for the student instead (e.g. "the paper's form of this equation isn't reproduced here; see Section 2, eq. (1)").`] : [];
+  });
 }
 
 /**
@@ -315,10 +358,9 @@ export function applyReferee(doc: LessonDoc, corrections: z.infer<typeof Referee
   for (const c of corrections) {
     const add = c.path.match(APPEND);
     if (!paths.has(c.path) && add) {
-      const list = (add[1] === "check_yourself" ? doc.check_yourself : doc.common_mistakes) as unknown as Record<string, unknown>[];
-      const fits = add[1] === "check_yourself" ? ["question", "answer", "hint"].includes(add[3]) : ["mistake", "correction"].includes(add[3]);
-      if (+add[2] === list.length && fits && c.text.trim()) {
-        list.push(add[1] === "check_yourself" ? { question: "", answer: "", kind: "apply", hint: null, objective: null } : { mistake: "", correction: "" });
+      const list = doc[add[1] as "check_yourself" | "common_mistakes" | "glossary"] as unknown as Record<string, unknown>[];
+      if (+add[2] === list.length && APPEND_FIELDS[add[1]].includes(add[3]) && c.text.trim()) {
+        list.push(APPEND_EMPTY[add[1]]() as Record<string, unknown>);
         for (const [p] of refereeFields(doc)) paths.add(p);
         if (add[3] === "hint") paths.add(c.path);
       }
@@ -345,6 +387,7 @@ export function applyReferee(doc: LessonDoc, corrections: z.infer<typeof Referee
   // A question added with only one half is no question.
   doc.check_yourself = doc.check_yourself.filter((q) => q.question.trim() && q.answer.trim());
   doc.common_mistakes = doc.common_mistakes.filter((m) => m.mistake.trim());
+  doc.glossary = doc.glossary.filter((g) => g.term.trim() && g.meaning.trim());
   if (skipped.length) console.warn(`Referee corrections not applied (no such field):\n${skipped.join("\n")}`);
   return [...done, ...skipped.map((x) => `not applied, ${x}`)];
 }

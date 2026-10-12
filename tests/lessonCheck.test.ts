@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyReferee, checkLesson, defuse, lintLesson, mathProblems, normalizeMath, refereePrompt } from "@/lib/lessonCheck";
+import { applyReferee, checkLesson, defuse, equationGaps, equationRefs, lintLesson, mathProblems, metaProblems, normalizeMath, refereePrompt } from "@/lib/lessonCheck";
+import { capGlossary } from "@/lib/lesson";
 import type { LessonDoc } from "@/lib/lesson";
 
 delete process.env.ANTHROPIC_API_KEY;
@@ -128,5 +129,40 @@ describe("referee corrections", () => {
     expect(p).toMatch(/\\tag\{n\}/);
     expect(p).toMatch(/Disagreements within the sources/);
     expect(p).toMatch(/simplify the sources' model/);
+  });
+});
+
+describe("source equations and meta text", () => {
+  it("reads equation references", () => {
+    expect(equationRefs("the three Euler equations (5)-(6), eq. (12) and Eqs. 2 and 3; see Table 4 (9)")).toEqual([2, 3, 5, 6, 12]);
+  });
+
+  it("asks for equations the lesson or the topic summary name but never write", () => {
+    const d = doc("The weak form follows from the Euler equations (5) and the split of eq. (7):\n\n$$\\delta\\varepsilon = \\nabla^s\\eta + \\tilde\\gamma \\tag{7}$$");
+    const [msg] = equationGaps(d, "States the Hu-Washizu principle, eqs. (2)-(3).");
+    expect(msg).toMatch(/lesson and the topic summary refer to eq\. \(2\), \(3\), \(5\)/);
+    expect(msg).not.toMatch(/\(7\)/);
+    expect(equationGaps(doc("No equations named here."))).toEqual([]);
+  });
+
+  it("flags text about extraction, PDFs and OCR", () => {
+    const [msg] = metaProblems(doc("The strength follows a Weibull law (the extracted text flattens this equation)."));
+    expect(msg).toMatch(/sections\.0\.blocks\.0\.body talks about "extracted text"/);
+    expect(metaProblems(doc("The strength follows a Weibull law."))).toEqual([]);
+  });
+
+  it("adds a key term at the next number", () => {
+    const d = doc("x");
+    d.glossary = [{ term: "patch test", meaning: "m" }];
+    applyReferee(d, [
+      { path: "glossary.1.term", problem: "main term missing", text: "enhanced strain $\\tilde{\\varepsilon}$" },
+      { path: "glossary.1.meaning", problem: "main term missing", text: "The added strain field." },
+    ]);
+    expect(d.glossary).toEqual([{ term: "patch test", meaning: "m" }, { term: "enhanced strain $\\tilde{\\varepsilon}$", meaning: "The added strain field." }]);
+  });
+
+  it("never cuts a main key term from the glossary", () => {
+    const g = ["fibre", "matrix", "ply", "pseudo-ductility", "fragmentation", "delamination"].map((term) => ({ term, meaning: "m" }));
+    expect(capGlossary(g, 4, ["fragmentation", "delamination"]).map((x) => x.term)).toEqual(["fibre", "matrix", "fragmentation", "delamination"]);
   });
 });

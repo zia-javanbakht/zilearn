@@ -70,6 +70,11 @@ describe("page quality", () => {
     // abs2024 p. 5: one numbered equation whose exponent and logarithm the text layer flattens.
     expect(mathsHeavy("The Weibull distribution gives the strength:\nσ = σ0 [ln(1/(1 − η))]1/m (1)\nwhere m is the shape parameter.")).toBe(true);
     expect(mathsHeavy("The strength is drawn from\nln\n1 − η\n(1)\nwhere η is a random number in [0,1].")).toBe(true);
+    // Unnumbered displays (Thompson p. 1), and an OCR layer that left the equations out (simo p. 6).
+    expect(mathsHeavy("Let the reference body be B0 with boundary partition\n∂B0 = Γφ ∪ ΓT, Γφ ∩ ΓT = ∅.\nThe primary unknown is the deformation map:\nφ : B0 → R3, u(X) = φ(X) − X.\nIts gradient is\nF = Grad φ = I + Grad u, J = det F > 0.")).toBe(true);
+    const prose = "the space k is to enhance the standard strain field derived from the displacement approximation, it";
+    expect(mathsHeavy([prose, prose, prose, "More precisely, let", "denote the space of standard strain fields. Then we require", "Then we require", prose, "defined by the gradient are independent in the sense that", prose, prose].join("\n"))).toBe(true);
+    expect(mathsHeavy([prose, prose, prose, "and so on.", prose, prose].join("\n"))).toBe(false);
     expect(mathsHeavy(["∂Ψ", "∂E", "= S", "1", "2", "(λ2 − 1)", "Some prose that explains the derivation step by step."].join("\n"))).toBe(true);
   });
 });
