@@ -199,7 +199,7 @@ export function headingLevel(line: PdfLine, body: number, sizes: number[]): numb
 export function pagesFromLines(pages: PdfLine[][], opts: { ocrPages?: ReadonlySet<number> } = {}): { pages: string[]; running: number } {
   const drop = runningLines(pages.map((p) => p.map((l) => l.text)));
   const body = bodySize(pages);
-  // Heading sizes, largest first; the title on page 1 is usually the largest, so it gets level 2 too.
+  // Heading sizes, largest first; the title on page 1 is usually the largest and becomes "#".
   const sizes = [...new Set(pages.flat().filter((l) => l.size >= body * 1.12 && l.text.trim().length >= 3).map((l) => l.size))].sort((a, b) => b - a);
   let running = 0;
   const texts = pages.map((lines, p) => {
@@ -222,7 +222,8 @@ export function pagesFromLines(pages: PdfLine[][], opts: { ocrPages?: ReadonlySe
       else out.push({ text: level ? l.text.trim() : l.text, level, size: l.size });
     });
     return out
-      .map((x) => (x.level ? `${"#".repeat(x.level)} ${x.text}` : x.text))
+      // The largest type near the top of page 1 is the document's title.
+      .map((x, i) => (x.level ? `${"#".repeat(p === 0 && i < 12 && sizes.length > 1 && x.size >= sizes[0] * 0.98 ? 1 : x.level)} ${x.text}` : x.text))
       .join("\n")
       .trim();
   });

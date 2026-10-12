@@ -93,12 +93,21 @@ function setPath(doc: LessonDoc, path: string, value: string | null) {
   if (o && (typeof o[last] === "string" || o[last] === null || (last === "source" && !(last in o)))) o[last] = value;
 }
 
+/**
+ * A model sometimes writes a line break as the two characters "\n" inside its JSON strings, which breaks
+ * tables and numbered steps. A backslash-n followed by anything but a letter is such a break; \nabla,
+ * \neq and \nu are left alone, and so is a LaTeX row break "\\" before an n.
+ */
+export function unescapeNewlines(s: string): string {
+  return s.replace(/(?<!\\)\\n(?![A-Za-z])/g, "\n");
+}
+
 /** Normalises delimiters and strips HTML in place; returns the fields that still have problems. */
 export function lintLesson(doc: LessonDoc): TextProblem[] {
   const out: TextProblem[] = [];
   for (const [path, raw] of texts(doc)) {
     // "Faded example" is the method's name, not the student's.
-    const text = stripHtml(normalizeMath(raw)).replace(/\bfaded (example|problem)(s?)\b/gi, (_, w: string, pl: string) => `partly worked ${w.toLowerCase()}${pl}`);
+    const text = stripHtml(normalizeMath(unescapeNewlines(raw))).replace(/\bfaded (example|problem)(s?)\b/gi, (_, w: string, pl: string) => `partly worked ${w.toLowerCase()}${pl}`);
     if (text !== raw) setPath(doc, path, text);
     const problems = mathProblems(text);
     if (problems.length) out.push({ path, text, problems });
@@ -281,12 +290,18 @@ function refereeFields(doc: LessonDoc): [string, string][] {
 }
 
 /** A new check_yourself question or common mistake, at the next free number. */
-const APPEND = /^(check_yourself|common_mistakes|glossary)\.(\d+)\.(question|answer|hint|mistake|correction|term|meaning)$/;
-const APPEND_FIELDS: Record<string, string[]> = { check_yourself: ["question", "answer", "hint"], common_mistakes: ["mistake", "correction"], glossary: ["term", "meaning"] };
+const APPEND = /^(check_yourself|common_mistakes|glossary|concept_links)\.(\d+)\.(question|answer|hint|mistake|correction|term|meaning|from|to|label)$/;
+const APPEND_FIELDS: Record<string, string[]> = {
+  check_yourself: ["question", "answer", "hint", "objective"],
+  common_mistakes: ["mistake", "correction"],
+  glossary: ["term", "meaning"],
+  concept_links: ["from", "to", "label"],
+};
 const APPEND_EMPTY: Record<string, () => object> = {
   check_yourself: () => ({ question: "", answer: "", kind: "apply", hint: null, objective: null }),
   common_mistakes: () => ({ mistake: "", correction: "" }),
   glossary: () => ({ term: "", meaning: "" }),
+  concept_links: () => ({ from: "", to: "", label: "" }),
 };
 
 /** The referee's instructions and the fields it may correct. */
@@ -308,7 +323,7 @@ export function refereePrompt(doc: LessonDoc, framing: string[] = [], practice: 
 - Text about how the lesson or its sources were produced (extraction, PDF, OCR, text layers, transcription): rewrite it for the student, e.g. "the paper's form of this equation isn't reproduced here; see Section 2, eq. (1)".
 - Section headings that promise something their section doesn't teach.${practice.length ? `\n- The student's own questions below must stay theirs to solve: if any block, answer or "read" focus lets one be answered in a single step (it states the rule or result that decides it, or names the method to use), rewrite that field so it teaches the idea without settling the question.\n  ${practice.slice(0, 8).map((q) => `${q.source}: ${q.text.replace(/\s+/g, " ").slice(0, 300)}`).join("\n  ")}` : ""}
 - Figure captions that state a quantity an example or question asks the student to find.${doc.concept_links?.length ? `\n- Concept-map links that don't read as a true sentence "from label to" (backwards, wrong or clumsy); correct the label field:\n  ${doc.concept_links.map((l, i) => `concept_links.${i}: ${l.from} | ${l.label} | ${l.to}`).join("\n  ")}` : ""}${framing.length ? `\n- How the lesson uses its key terms, diagrams and words (fix by editing the fields named, e.g. a block body or a diagram box label):\n  - ${framing.slice(0, 12).join("\n  - ")}` : ""}${untested.length && doc.check_yourself.length ? `\n- Objectives ${untested.join(", ")} have no check_yourself question. Rewrite the least useful check_yourself questions (question and answer) so each of these objectives is tested.` : ""}
-Leave style alone, keep the student's notation, and keep maths KaTeX-compatible ($...$ and $$...$$). Correct a field by its path below; to add a check_yourself question, a common mistake or a key term, use the next free number (e.g. check_yourself.${doc.check_yourself.length}.question and check_yourself.${doc.check_yourself.length}.answer, or glossary.${doc.glossary.length}.term and glossary.${doc.glossary.length}.meaning), and set a question's objective with its .objective path (the number as text). Return an empty list if nothing is wrong.
+Leave style alone, keep the student's notation, and keep maths KaTeX-compatible ($...$ and $$...$$). Correct a field by its path below; to add a check_yourself question, a common mistake or a key term, use the next free number (e.g. check_yourself.${doc.check_yourself.length}.question and check_yourself.${doc.check_yourself.length}.answer, or glossary.${doc.glossary.length}.term and glossary.${doc.glossary.length}.meaning, or a concept-map link as concept_links.${doc.concept_links?.length ?? 0}.from, .to and .label, naming two key terms by their glossary names), and set a question's objective with its .objective path (the number as text). Return an empty list if nothing is wrong.
 
 ${fields.map(([path, text]) => `<field path="${path}">\n${text}\n</field>`).join("\n")}`;
 }
@@ -358,11 +373,11 @@ export function applyReferee(doc: LessonDoc, corrections: z.infer<typeof Referee
   for (const c of corrections) {
     const add = c.path.match(APPEND);
     if (!paths.has(c.path) && add) {
-      const list = doc[add[1] as "check_yourself" | "common_mistakes" | "glossary"] as unknown as Record<string, unknown>[];
+      if (add[1] === "concept_links") doc.concept_links ??= [];
+      const list = doc[add[1] as "check_yourself" | "common_mistakes" | "glossary" | "concept_links"] as unknown as Record<string, unknown>[];
       if (+add[2] === list.length && APPEND_FIELDS[add[1]].includes(add[3]) && c.text.trim()) {
         list.push(APPEND_EMPTY[add[1]]() as Record<string, unknown>);
-        for (const [p] of refereeFields(doc)) paths.add(p);
-        if (add[3] === "hint") paths.add(c.path);
+        for (const f of APPEND_FIELDS[add[1]]) paths.add(`${add[1]}.${add[2]}.${f}`);
       }
     }
     if (!paths.has(c.path)) {
@@ -388,6 +403,7 @@ export function applyReferee(doc: LessonDoc, corrections: z.infer<typeof Referee
   doc.check_yourself = doc.check_yourself.filter((q) => q.question.trim() && q.answer.trim());
   doc.common_mistakes = doc.common_mistakes.filter((m) => m.mistake.trim());
   doc.glossary = doc.glossary.filter((g) => g.term.trim() && g.meaning.trim());
+  if (doc.concept_links) doc.concept_links = doc.concept_links.filter((l) => l.from.trim() && l.to.trim() && l.label.trim());
   if (skipped.length) console.warn(`Referee corrections not applied (no such field):\n${skipped.join("\n")}`);
   return [...done, ...skipped.map((x) => `not applied, ${x}`)];
 }

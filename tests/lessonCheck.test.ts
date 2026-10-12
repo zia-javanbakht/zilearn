@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyReferee, checkLesson, defuse, equationGaps, equationRefs, lintLesson, mathProblems, metaProblems, normalizeMath, refereePrompt } from "@/lib/lessonCheck";
+import { applyReferee, checkLesson, defuse, unescapeNewlines, equationGaps, equationRefs, lintLesson, mathProblems, metaProblems, normalizeMath, refereePrompt } from "@/lib/lessonCheck";
 import { capGlossary } from "@/lib/lesson";
 import type { LessonDoc } from "@/lib/lesson";
 
@@ -164,5 +164,23 @@ describe("source equations and meta text", () => {
   it("never cuts a main key term from the glossary", () => {
     const g = ["fibre", "matrix", "ply", "pseudo-ductility", "fragmentation", "delamination"].map((term) => ({ term, meaning: "m" }));
     expect(capGlossary(g, 4, ["fragmentation", "delamination"]).map((x) => x.term)).toEqual(["fibre", "matrix", "fragmentation", "delamination"]);
+  });
+});
+
+describe("model output repairs", () => {
+  it("turns a literal backslash-n into a line break, but not in LaTeX commands", () => {
+    expect(unescapeNewlines("| a | b |\\n|---|---|\\n1. Step\\n2. $\\nabla u \\neq \\nu$ and $a \\\\n_1$")).toBe("| a | b |\n|---|---|\n1. Step\n2. $\\nabla u \\neq \\nu$ and $a \\\\n_1$");
+  });
+
+  it("lets the referee add a concept-map link", () => {
+    const d = doc("x");
+    d.concept_links = [];
+    applyReferee(d, [
+      { path: "concept_links.0.from", problem: "map split", text: "fragmentation" },
+      { path: "concept_links.0.to", problem: "map split", text: "pseudo-ductility" },
+      { path: "concept_links.0.label", problem: "map split", text: "produces the plateau of" },
+      { path: "concept_links.1.from", problem: "half a link", text: "matrix" },
+    ]);
+    expect(d.concept_links).toEqual([{ from: "fragmentation", to: "pseudo-ductility", label: "produces the plateau of" }]);
   });
 });
