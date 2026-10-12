@@ -91,6 +91,9 @@ function relevance(text: string, terms: Set<string>): number {
   return n;
 }
 
+/** Words every paper uses about itself: no use as key terms on their own. */
+const GENERIC = /^(models?|methods?|results?|study|studies|paper|approach(es)?|work|analysis|analyses|data|cases?|values?|numbers?|figures?|tables?|sections?|equations?|effects?|properties|parameters?|behaviou?r|performance|process(es)?|system|problems?|solutions?|fibers|fibres)$/i;
+
 const DEFINES = /\b(is|are|means|refers to|is defined as|is called|we call|we define)\b/i;
 const ANALOGY = /\b(think of|imagine|picture|like a|as if|analogy|for example, a)\b/i;
 const LIMIT = /\b(assum\w*|only (valid|works|holds|applies)|breaks? down|limitations?|does not hold|doesn't hold|approximat\w*|neglect\w*|ignor\w*|valid (only|for|when)|in practice|real (structures|systems|buildings))\b/i;
@@ -204,9 +207,9 @@ export function offlineLesson(
   // The key terms the lesson is built around: the topic's keywords that the materials really use (a single
   // word must come up a few times), then the phrases the relevant material repeats most.
   const uses = (k: string) => relevant.filter((x) => mentions(x.text, k)).length;
-  const fromKeywords = [...new Set(info.keywords)].filter((k) => !titleOnly(k) && uses(k) >= (k.includes(" ") ? 1 : 3));
+  const fromKeywords = [...new Set(info.keywords)].filter((k) => !GENERIC.test(k) && !titleOnly(k) && uses(k) >= (k.includes(" ") ? 1 : 3));
   const fromText = topPhrases(relevant.map((x) => x.text.replace(/\$[^$]*\$/g, " ")).join(".\n"), 8)
-    .filter((p) => p.count >= 2 && !titleOnly(p.phrase) && !fromKeywords.some((k) => mentions(k, p.phrase) || mentions(p.phrase, k)))
+    .filter((p) => p.count >= 2 && !GENERIC.test(p.phrase) && !titleOnly(p.phrase) && !fromKeywords.some((k) => mentions(k, p.phrase) || mentions(p.phrase, k)))
     .map((p) => p.phrase);
   const candidates = [...fromKeywords, ...fromText].slice(0, 6);
   for (const term of [t, ...[...candidates].sort((a, b) => b.split(/\s+/).length - a.split(/\s+/).length)]) {
@@ -243,7 +246,7 @@ export function offlineLesson(
   for (const x of extraFormulas) used.add(x.text);
   const formulaBlock: LessonBlock[] = formulaBody ? [{ kind: "formula", title: `Key results for ${t}`, body: formulaBody, source: eqs[0]?.source ?? extraFormulas[0]?.source }] : [];
   const idea: LessonBlock[] = [
-    ...(summary ? [{ kind: "keypoint" as const, title: `What ${t} is about`, body: summary }] : []),
+    ...(summary.trim().length >= 20 ? [{ kind: "keypoint" as const, title: `What ${t} is about`, body: summary }] : []),
     ...defBlocks.slice(0, 2),
     ...intuitions.slice(0, 1).map((s) => ({ kind: "intuition" as const, title: "A way to picture it", body: s.text, source: s.source })),
   ];
@@ -372,7 +375,8 @@ export function offlineLesson(
       { heading: "More from your materials", blocks: more },
     ],
   };
-  let sections: LessonDoc["sections"] = byLevel[d].filter((x) => x.blocks.length);
+  // A block with nothing in it (an empty summary, a formula that didn't survive) teaches nothing.
+  let sections: LessonDoc["sections"] = byLevel[d].map((x) => ({ ...x, blocks: x.blocks.filter((b) => b.body.trim().length >= 3) })).filter((x) => x.blocks.length);
   // Thin materials: fall back to the big idea, then to anything at all, rather than an empty lesson.
   if (!sections.length) sections = [{ heading: "The idea", blocks: [...idea, ...more] }].filter((x) => x.blocks.length);
   if (!sections.length) sections.push({ heading: "From your materials", blocks: [{ kind: "definition", title: t, body: summary || `${t}, as covered in your materials.` }] });
@@ -463,7 +467,12 @@ function offlineLinks(sections: LessonDoc["sections"], terms: string[]): Concept
 function definition(term: string, all: (Sentence & { score: number })[]): { text: string; body: string; meaning: string; source: string; score: number } | null {
   const esc = term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").split(/\s+/).join("\\s+");
   const named = new RegExp(`\\b${esc}`, "i");
-  const verb = new RegExp(`\\b${esc}\\b[^.]{0,30}?\\b(is|are|means|refers to|is defined as|is called)\\b`, "i");
+  // The term must be what the sentence is about: "The damping ratio is ...", not "The properties of the
+  // composites are given in Table 2", and "is given / shown / provided" reports where, not what.
+  const verb = new RegExp(
+    `^(?:(?:the|a|an|this|these|such|each)\\s+)?(?:[\\w-]+\\s+){0,2}?${esc}\\s+(?:\\$[^$]+\\$\\s+|\\([^)]{1,20}\\)\\s+)?(?:is|are|means|refers to|denotes|is defined as|is called|describes)\\b(?!\\s+(?:also\\s+)?(?:given|shown|listed|provided|presented|plotted|summari[sz]ed|reported|illustrated|depicted|compared|used|obtained|calculated|computed|found|seen)\\b)`,
+    "i",
+  );
   const asked = new RegExp(`^what('s| is| are)\\s+(the\\s+)?${esc}\\b.*\\?$`, "i");
   const symbol = new RegExp(`(\\$[^$]+\\$)\\s*\\((the\\s+)?${esc}\\)`, "i");
   const after = new RegExp(`\\b${esc}\\s+(\\$[^$]+\\$)`, "i");

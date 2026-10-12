@@ -143,3 +143,24 @@ describe("student record", () => {
     expect(offline.sections.flatMap((x) => x.blocks).find((b) => b.title === "From your mock exam")?.body).toContain("Momentum accumulates past gradients.");
   });
 });
+
+describe("offline lessons from a paper", () => {
+  it("defines only terms a sentence is about, skips generic terms and an empty summary", async () => {
+    const { offlineLesson } = await import("@/lib/lessonOffline");
+    const head = { title: "Pseudo-ductile composites", depth: 2, level: "Understand", goal: "", map: { course: "Composites", path: [], before: [], after: [], children: [], related: [] } } as never;
+    const text =
+      "# Pseudo-ductile composites\n" +
+      "The properties of the pseudo-ductile composites are given in Table 2. " +
+      "Pseudo-ductile composites are laminates that fail gradually instead of suddenly. " +
+      "The model of the pseudo-ductile composites is used for every case. The model predicts failure of the model laminates. " +
+      "Fragmentation is the cracking of the low-strain layer into many pieces. Fragmentation of the composites gives the pseudo-ductile strain. " +
+      "Fragmentation in the composites spreads along the layer.";
+    const doc = offlineLesson(head, { summary: "", keywords: ["model", "fragmentation"], mastery: null }, [{ title: "abs2024", kind: "reading", text }]);
+    const blocks = doc.sections.flatMap((s) => s.blocks);
+    expect(blocks.find((b) => b.kind === "definition")?.body).toMatch(/^Pseudo-ductile composites are laminates/);
+    expect(blocks.map((b) => b.title)).not.toContain("What Pseudo-ductile composites is about");
+    expect(blocks.every((b) => b.body.trim().length >= 3)).toBe(true);
+    expect(doc.glossary.map((g) => g.term)).not.toContain("model");
+    expect(doc.glossary.find((g) => g.term === "fragmentation")?.meaning).toMatch(/^Fragmentation is the cracking/);
+  });
+});
