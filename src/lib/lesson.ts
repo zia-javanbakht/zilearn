@@ -139,7 +139,7 @@ const BlockSchema = z.object({
 export const LessonSchema = z.object({
   objectives: z.array(z.string()).describe("2-4 things the student can do after this pass, each starting with a verb (Explain, Compute, Choose...)"),
   where_it_fits: z.string().describe("2-3 sentences placing the topic in the course map: what it builds on, what it leads to"),
-  recall: z.array(QASchema).describe("Warm-up questions on the previous level (empty for level 1)"),
+  recall: z.array(QASchema).describe("Warm-up questions: on the previous level, and on a weak prerequisite when the prompt names one (otherwise empty at level 1)"),
   sections: z
     .array(
       z.object({
