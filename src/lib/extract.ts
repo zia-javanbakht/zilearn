@@ -191,7 +191,7 @@ const TRANSCRIBE = (n: number) =>
 - Headings as Markdown headings (# for the document title, ## for sections, ### below), with their numbers.
 - Every equation in LaTeX: inline as $...$, display as $$...$$ on its own lines, keeping its number as \\tag{n}. Keep primes, bars, hats, tildes, transposes and inverses, bold vectors and tensors, and blackboard bold exactly as printed.
 - Tables as Markdown tables, with their printed captions. For a figure, copy its printed caption word for word ("Figure 4. Illustration of …") on a line of its own, followed by a one-sentence description of what it shows in square brackets; don't copy the labels inside figures into the text.
-- Leave out running headers and footers, page numbers, and line-end hyphens (join the word).
+- Leave out running headers and footers, page numbers, and line-end hyphens (join the word). In slides, also leave out the navigation (a sidebar or bar listing the sections, frame counters such as "3/6") and the furniture of title and section-divider slides (course code, lecturer, date, "Part I"): write only a heading for a divider.
 - If the page is a scan, fix OCR errors from the context, but never invent what you can't read: write [unreadable] instead.
 Output only the transcription.`;
 
