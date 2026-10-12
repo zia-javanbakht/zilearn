@@ -171,7 +171,7 @@ describe("key terms", () => {
     });
     d.sections[0].blocks.push({ kind: "pitfall", title: "Faster with more damping?", body: "A heavier damper does not make the structure oscillate faster after release: damping lowers the frequency slightly, so the damped period is longer." });
     const p = framingProblems(d).join("\n");
-    expect(p).toMatch(/check_yourself 1 is answered by common mistake 1/);
-    expect(p).toMatch(/common mistake 1 repeats the pitfall "Faster with more damping\?"/);
+    expect(p).toMatch(/check_yourself.0 is answered by common_mistakes.0/);
+    expect(p).toMatch(/common_mistakes.0 repeats the pitfall "Faster with more damping\?"/);
   });
 });

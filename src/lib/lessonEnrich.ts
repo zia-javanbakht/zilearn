@@ -77,7 +77,8 @@ export interface EnrichOptions {
 
 /** The instructions for the enrichment pass (the student's materials go separately, as context). */
 export function enrichPrompt(doc: LessonDoc, o: EnrichOptions): string {
-  const framing = framingProblems(doc, o.framing);
+  // Only what a block edit can fix: questions and the mistakes list are the referee's.
+  const framing = framingProblems(doc, o.framing).filter((p) => !/^(check_yourself|common_mistakes)\./.test(p));
   return `You are a senior tutor giving this lesson a final enrichment before the student reads it. The student's materials are above.
 
 This is the "${doc.level}" pass (level ${doc.depth} of 4): ${o.brief}${o.next ? `\nThe next pass will cover: ${o.next}. Leave that for it.` : ""}

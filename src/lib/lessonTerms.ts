@@ -268,19 +268,19 @@ export function framingProblems(doc: LessonDoc, o: FramingOptions = {}): string[
   const mistakes = doc.common_mistakes.map((m) => content(`${m.mistake} ${m.correction}`));
   doc.check_yourself.forEach((q, i) => {
     const k = mistakes.findIndex((m) => overlap(content(`${q.question} ${q.answer}`), m) >= 0.6);
-    if (k >= 0) out.push(`check_yourself ${i + 1} is answered by common mistake ${k + 1}, printed just above it: test the idea in a new situation instead.`);
+    if (k >= 0) out.push(`check_yourself.${i} is answered by common_mistakes.${k}, printed just above it: test the idea in a new situation instead.`);
   });
   const pitfalls = doc.sections.flatMap((s) => s.blocks.filter((b) => b.kind === "pitfall").map((b) => ({ title: b.title, words: content(b.body) })));
   // Nor should a question be answered by a pitfall, or its answer be a sentence copied from a block.
   const runs = new Set(doc.sections.flatMap((s) => s.blocks.flatMap((b) => [...ngrams(`${b.body} ${b.solution ?? ""}`, 8)])));
   doc.check_yourself.forEach((q, i) => {
     const p = pitfalls.find((x) => overlap(content(`${q.question} ${q.answer}`), x.words) >= 0.6);
-    if (p) out.push(`check_yourself ${i + 1} is answered by the pitfall "${p.title}": test the idea in a new situation instead.`);
-    else if ([...ngrams(q.answer, 8)].some((g) => runs.has(g))) out.push(`check_yourself ${i + 1}'s answer copies a sentence of the lesson: ask it so the student has to apply the idea (a changed quantity or setting), not find the sentence.`);
+    if (p) out.push(`check_yourself.${i} is answered by the pitfall "${p.title}": test the idea in a new situation instead.`);
+    else if ([...ngrams(q.answer, 8)].some((g) => runs.has(g))) out.push(`check_yourself.${i}'s answer copies a sentence of the lesson: ask it so the student has to apply the idea (a changed quantity or setting), not find the sentence.`);
   });
   mistakes.forEach((m, k) => {
     const p = pitfalls.find((x) => overlap(m, x.words) >= 0.6);
-    if (p) out.push(`common mistake ${k + 1} repeats the pitfall "${p.title}": replace it with a different slip, or merge the two.`);
+    if (p) out.push(`common_mistakes.${k} repeats the pitfall "${p.title}": replace it with a different slip, or merge the two.`);
   });
   if (o.budget) {
     const words = teachingWords(doc);
