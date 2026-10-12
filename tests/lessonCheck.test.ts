@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyReferee, checkLesson, defuse, unescapeNewlines, equationGaps, equationRefs, lintLesson, mathProblems, metaProblems, normalizeMath, refereePrompt } from "@/lib/lessonCheck";
+import { applyReferee, beyondShare, checkLesson, defuse, unescapeNewlines, equationGaps, equationRefs, lintLesson, mathProblems, metaProblems, normalizeMath, refereePrompt } from "@/lib/lessonCheck";
 import { capGlossary } from "@/lib/lesson";
 import type { LessonDoc } from "@/lib/lesson";
 
@@ -149,6 +149,16 @@ describe("source equations and meta text", () => {
     const [msg] = metaProblems(doc("The strength follows a Weibull law (the extracted text flattens this equation)."));
     expect(msg).toMatch(/sections\.0\.blocks\.0\.body talks about "extracted text"/);
     expect(metaProblems(doc("The strength follows a Weibull law."))).toEqual([]);
+  });
+
+  it("flags remarks about numbering and lessons mostly from beyond the notes", () => {
+    const [msg] = metaProblems(doc("The Jacobian is $J = \\partial(x,y)/\\partial(\\xi,\\eta)$. (Definition 1.2 is not numbered as an equation in your notes.)"));
+    expect(msg).toMatch(/drop the remark/);
+    const d = doc("x");
+    d.sections[0].blocks = [1, 2, 3, 4, 5].map((n) => ({ kind: "note" as const, title: `B${n}`, body: "b", source: n === 1 ? "Notes, Definition 1.2" : null }));
+    expect(beyondShare(d)[0]).toMatch(/^4 of 5 blocks have no source/);
+    d.sections[0].blocks.forEach((b, i) => (b.source = i < 3 ? "Notes" : null));
+    expect(beyondShare(d)).toEqual([]);
   });
 
   it("adds a key term at the next number", () => {

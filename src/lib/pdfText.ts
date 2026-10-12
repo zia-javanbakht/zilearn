@@ -274,14 +274,14 @@ export function fixMathGlyphs(text: string, mathpi = usesMathPi(text)): { text: 
     });
   // TeX sets an accent before its letter, so the text layer hangs the dot or hat on the character
   // before ("Sincė 𝑭", "𝜌̇ 𝜙"); on a maths letter it belongs to the one after ("Since 𝑭̇", "𝜌 𝜙̇").
-  text = text.replace(/([\u0300-\u036f]+)([ \n]?)([\u{1d400}-\u{1d7ff}\u0391-\u03a9\u03b1-\u03c9\u03d1\u03d5\u03f5])/gu, (_m, mark: string, gap: string, base: string) => {
+  text = text.replace(/([\u0300-\u036f]+)([ \n]?)([\u{1d400}-\u{1d7ff}\u2100-\u214f\u0391-\u03a9\u03b1-\u03c9\u03d1\u03d5\u03f5])/gu, (_m, mark: string, gap: string, base: string) => {
     report.accents++;
     return `${gap}${base}${mark}`;
   });
   // A stacked d/dt comes out as "d" over "d𝑡" on two lines.
   text = text.replace(/(^|[\s(=:])d\n(d[\u{1d400}-\u{1d7ff}a-z])/gmu, "$1d/$2");
   // An integral's domain is set below it, which ends the line: "∫𝑆𝑝" then the integrand on the next.
-  text = text.replace(/(∫\S{0,6})\n(?!\n|--- Page)/g, "$1 ");
+  text = text.replace(/(∫\S{0,6})\n(?!\n|--- Page|#)/g, "$1 ");
   text = text.replace(/[\u0000-\u0008\u000b\u000e-\u001f¼þðÞ]/g, (c) => {
     if (mathpi && MATHPI[c]) {
       if (c < " ") report.controls++;
@@ -315,6 +315,8 @@ export function headingLevel(line: PdfLine, body: number, sizes: number[]): numb
   if (!body || line.size < body * 1.12 || t.length < 3 || t.length > 110) return 0;
   if (!/[A-Za-z]{3}/.test(t) || /[.,;:]$/.test(t) || /[=<>≤≥∑∫]/.test(t) || PAGE_NUMBER.test(t)) return 0;
   if (t.split(/\s+/).length > 14 || /^[a-z]/.test(t) || /\b(of|the|and|to|in|a|an|by|with|for|from|on)$/i.test(t)) return 0;
+  // A line of bold maths ("𝝈 ⋅⋅ 𝑫 d𝑣. Then") is set large but isn't a title.
+  if ((t.match(/[\u{1d400}-\u{1d7ff}]/gu) ?? []).length >= 2 && (t.match(/\b[A-Za-z][a-z]{2,}\b/g) ?? []).length < 2) return 0;
   return sizes.length > 1 && line.size >= sizes[sizes.length - 1] * 0.98 && line.size < sizes[0] ? 3 : 2;
 }
 
