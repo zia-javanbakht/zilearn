@@ -51,7 +51,7 @@ export const DEPTH_LEVELS = [
   {
     level: 3,
     name: "Apply",
-    goal: "Solve exam-style problems with it: a worked example, one you finish yourself, then problems on your own.",
+    goal: "Solve exam-style problems with it, from a worked example to problems on your own.",
     lesson: "Open with 2 recall questions on the level 2 ideas. Then give 2 fully worked exam-style examples with reasoning shown, a checklist of steps/pitfalls, and 2-3 unsolved practice problems (answers in a <details> block).",
   },
   {

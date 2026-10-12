@@ -217,14 +217,16 @@ function blockToTex(b: LessonBlock): string {
   const fig = b.figure ? figureTex(b.figure) : "";
   // A faded example prints its given steps and the student's turn; the rest of the working goes to the Answers.
   const sol = b.try_steps
-    ? `${b.solution ? `\n\n\\textbf{Worked so far.}\n\n${blockTex(b.solution)}` : ""}\n\n\\textbf{Your turn.}\n\n${blockTex(b.try_steps)}${b.try_answer ? `\n\n{\\footnotesize\\itshape The working is in the Answers.}` : ""}`
+    ? `${b.solution ? `\n\n\\textbf{Worked so far.}\n\n${blockTex(b.solution)}` : ""}\n\n\\textbf{Your turn.}\n\n${blockTex(b.try_steps)}${b.try_answer ? `\\nopagebreak[4]\n{\\footnotesize\\itshape The working is in the Answers.}` : ""}`
     : b.solution
       ? `\n\n\\textbf{Solution.}\n\n${blockTex(b.solution)}`
       : "";
   const env = THEOREM_ENV[b.kind];
   if (env) {
     const src = b.source ? `\n\n{\\hfill\\footnotesize\\itshape Source: ${inline(b.source)}\\par}` : "";
-    return `\\begin{${env}}[${inline(b.title)}]\n${blockTex(b.body)}${fig}${sol}${src}\n\\end{${env}}`;
+    // A body that opens with a list starts below the title, not on its line.
+    const body = blockTex(b.body);
+    return `\\begin{${env}}[${inline(b.title)}]\n${/^\\begin\{(itemize|enumerate)\}/.test(body) ? "\\leavevmode\n" : ""}${body}${fig}${sol}${src}\n\\end{${env}}`;
   }
   const [box, label] = BOX[b.kind] ?? ["blbox", "Note"];
   // Z's boxes take a subtitle, shown beside the title: the source, when there is one.
@@ -343,7 +345,7 @@ export function lessonToTex(raw: LessonDoc): string {
   const concept = conceptTikz(doc);
   if (concept) sec("Map of this lesson", concept);
   sec("Where this fits", blockTex(doc.where_it_fits));
-  if (doc.recall.length) sec("Warm-up", `\\begin{enbox}[Recall]\n${doc.recall.map((q) => `\\item ${ask(q)}`).join("\n")}\n\\end{enbox}`);
+  if (doc.recall.length) sec("Warm-up", `\\begin{enbox}[Warm-up]\n${doc.recall.map((q) => `\\item ${ask(q)}`).join("\n")}\n\\end{enbox}`);
   const home = homes(doc);
   for (const [i, x] of doc.sections.entries()) {
     const mine = [...home].filter(([, at]) => at === i).map(([t]) => `\\textbf{${inline(t)}}`);
@@ -387,6 +389,8 @@ function zDocument(doc: Head, body: string): string {
 \\usepackage{cancel}
 \\usepackage{needspace}
 \\raggedbottom
+\\clubpenalty=10000
+\\widowpenalty=10000
 \\setlength{\\emergencystretch}{2em}
 \\pgfplotsset{compat=1.18}
 

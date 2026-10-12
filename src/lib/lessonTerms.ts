@@ -100,6 +100,26 @@ const DROPPED = new WeakMap<LessonDoc, ConceptLink[]>();
 // "A does not change B" is not a link: the map shows what acts on what.
 const NEGATIVE = /\b(not|no|never|cannot|without|doesn't|don't|isn't|aren't|can't|won't)\b/i;
 
+/** A link label as a short phrase: raw subscripts (ω_n) as maths, no trailing article, at most 48 characters. */
+export function cleanLabel(s: string): string {
+  return s
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/(^|[^$\\\w])([A-Za-z\u0370-\u03ff])_\{?([A-Za-z0-9]{1,3})\}?(?![\w$])/g, (_, pre: string, x: string, sub: string) => `${pre}$${x}_{${sub}}$`)
+    .replace(/\s+(the|a|an)$/i, "")
+    .slice(0, 48);
+}
+
+/** Whether a block's diagram only redraws the list its own text gives (most boxes are list items). */
+export function echoesList(b: LessonDoc["sections"][number]["blocks"][number]): boolean {
+  const d = b.figure?.diagram;
+  if (!d || d.nodes.length < 3) return false;
+  const items = b.body.split("\n").filter((l) => /^\s*([-*+]|\d+[.)])\s/.test(l));
+  if (items.length < 2) return false;
+  const listed = d.nodes.filter((n) => items.some((l) => mentions(l, n.label))).length;
+  return listed >= 0.7 * d.nodes.length;
+}
+
 /** The topic's main key terms as the lesson spells them (glossary entries), in the topic's order. */
 export function mainTerms(doc: LessonDoc): string[] {
   return (doc.keywords ?? []).map((k) => doc.glossary.find((g) => key(g.term) === key(k) || mentions(g.term, k))?.term).filter((t): t is string => !!t);
@@ -131,7 +151,7 @@ export function tidyTerms(doc: LessonDoc): LessonDoc {
   const seen = new Set<string>();
   const together = (a: string, b: string) => doc.sections.some((_, i) => blockTexts(doc, i).some((t) => mentions(t, a) && mentions(t, b)));
   let links = (doc.concept_links ?? [])
-    .map((l) => ({ from: findTerm(doc, l.from), to: findTerm(doc, l.to), label: l.label.replace(/\s+/g, " ").trim().slice(0, 48) }))
+    .map((l) => ({ from: findTerm(doc, l.from), to: findTerm(doc, l.to), label: cleanLabel(l.label) }))
     .filter((l): l is ConceptLink => !!l.from && !!l.to && l.from !== l.to && !!l.label && !NEGATIVE.test(l.label))
     .filter((l) => home.has(l.from) && home.has(l.to) && together(l.from, l.to))
     .filter((l) => {
@@ -224,6 +244,17 @@ export function framingProblems(doc: LessonDoc, o: FramingOptions = {}): string[
         out.push(`The caption of the plot in ${where} mentions a ${styled[1]} curve, but every curve is drawn solid: tell the curves apart by their legend labels instead.`);
     });
   });
+  // A question the lesson's own list of mistakes answers just above it tests reading, not understanding.
+  const mistakes = doc.common_mistakes.map((m) => content(`${m.mistake} ${m.correction}`));
+  doc.check_yourself.forEach((q, i) => {
+    const k = mistakes.findIndex((m) => overlap(content(`${q.question} ${q.answer}`), m) >= 0.6);
+    if (k >= 0) out.push(`check_yourself ${i + 1} is answered by common mistake ${k + 1}, printed just above it: test the idea in a new situation instead.`);
+  });
+  const pitfalls = doc.sections.flatMap((s) => s.blocks.filter((b) => b.kind === "pitfall").map((b) => ({ title: b.title, words: content(b.body) })));
+  mistakes.forEach((m, k) => {
+    const p = pitfalls.find((x) => overlap(m, x.words) >= 0.6);
+    if (p) out.push(`common mistake ${k + 1} repeats the pitfall "${p.title}": replace it with a different slip, or merge the two.`);
+  });
   if (o.budget) {
     const words = teachingWords(doc);
     if (words > o.budget * 1.05) out.push(`The lesson's teaching text is about ${words} words, over this level's ${o.budget}: cut repetition and restatement rather than ideas.`);
@@ -255,6 +286,8 @@ const content = (s: string) =>
       .filter((w) => w.length > 2 && !STOP.has(w) && !COMMON.has(w)),
   );
 const COMMON = new Set(["this", "that", "which", "when", "then", "than", "from", "into", "each", "every", "here", "there", "they", "them", "their", "these", "those", "have", "has", "was", "were", "will", "would", "can", "not", "but", "you", "your", "are", "also", "only", "just", "more", "less", "about"]);
+/** How much of the smaller word set the other shares (0 when either is too short to judge). */
+const overlap = (a: Set<string>, b: Set<string>) => (Math.min(a.size, b.size) < 5 ? 0 : [...a].filter((w) => b.has(w)).length / Math.min(a.size, b.size));
 const sentences = (s: string) => s.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
 const displays = (s: string) => new Set([...s.matchAll(/\$\$([\s\S]+?)\$\$/g)].map((m) => m[1].replace(/\s+/g, "")));
 

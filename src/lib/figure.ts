@@ -213,7 +213,7 @@ export function diagramTikz(d: DiagramSpec, tex: (s: string) => string): string 
     // Wide or tall diagrams shrink to fit the page (adjustbox is loaded by Z).
     "\\begin{adjustbox}{max width=\\linewidth, max totalheight=0.45\\textheight}",
     "\\begin{tikzpicture}[font=\\sffamily\\footnotesize,",
-    "  zbox/.style={draw=SteelBlue4, fill=SteelBlue1!12, rounded corners=2pt, align=center, text width=2.5cm, minimum height=0.8cm, inner sep=3pt},",
+    "  zbox/.style={draw=SteelBlue4, fill=SteelBlue1!12, rounded corners=2pt, align=center, text width=2.5cm, minimum height=0.8cm, inner sep=3pt, execute at begin node=\\hyphenpenalty10000\\relax},",
     "  zarrow/.style={-{Stealth[length=2mm]}, thick, SteelBlue4}]",
     ...nodes,
     ...edges,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { badge, conceptMermaid, framingProblems, homes, linksFromText, mainTerms, mapGroups, mentions, repeats, shortHeading, tidyTerms } from "@/lib/lessonTerms";
+import { badge, cleanLabel, conceptMermaid, echoesList, framingProblems, homes, linksFromText, mainTerms, mapGroups, mentions, repeats, shortHeading, tidyTerms } from "@/lib/lessonTerms";
 import { spoilers } from "@/lib/lessonCheck";
 import type { LessonDoc } from "@/lib/lesson";
 
@@ -145,5 +145,32 @@ describe("key terms", () => {
     });
     const q = { source: "Tutorial 3, Q1", text: "A one-storey frame has mass 20 t and lateral stiffness 8000 kN/m. A pull-back test displaces the roof 25 mm and releases it. After 5 complete cycles the amplitude is 12 mm. (a) Find the natural period. (b) Find the damping ratio." };
     expect(spoilers(d, [q])).toEqual([expect.objectContaining({ kind: "wording", source: "Tutorial 3, Q1" })]);
+  });
+
+  it("tidies link labels: raw subscripts as maths, no trailing article", () => {
+    expect(cleanLabel("holds at ω_n the")).toBe("holds at $ω_{n}$");
+    expect(cleanLabel("is about $2\\pi$ times")).toBe("is about $2\\pi$ times");
+  });
+
+  it("spots a diagram that only redraws its block's list", () => {
+    const b = {
+      kind: "keypoint" as const,
+      title: "Three kinds of response",
+      body: "- **Underdamped**: oscillates and decays\n- **Critically damped**: fastest return\n- **Overdamped**: slow return",
+      figure: { type: "diagram" as const, caption: "", plot: null, diagram: { direction: "TD" as const, nodes: [{ id: "a", label: "Underdamped" }, { id: "b", label: "Critically damped" }, { id: "c", label: "Overdamped" }], edges: [] } },
+    };
+    expect(echoesList(b)).toBe(true);
+    expect(echoesList({ ...b, body: "Three cases follow from the sign under the root." })).toBe(false);
+  });
+
+  it("flags a question its own list of mistakes answers, and a mistake that repeats a pitfall", () => {
+    const d = doc({
+      common_mistakes: [{ mistake: "Thinking a heavier damper always makes the structure oscillate faster after release", correction: "Damping lowers the frequency of oscillation slightly, so the damped period is longer" }],
+      check_yourself: [{ question: "Does a heavier damper make the structure oscillate faster after release?", answer: "No: damping lowers the frequency of oscillation slightly, so the damped period is longer." }],
+    });
+    d.sections[0].blocks.push({ kind: "pitfall", title: "Faster with more damping?", body: "A heavier damper does not make the structure oscillate faster after release: damping lowers the frequency slightly, so the damped period is longer." });
+    const p = framingProblems(d).join("\n");
+    expect(p).toMatch(/check_yourself 1 is answered by common mistake 1/);
+    expect(p).toMatch(/common mistake 1 repeats the pitfall "Faster with more damping\?"/);
   });
 });
