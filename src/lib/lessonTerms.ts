@@ -312,7 +312,8 @@ export function framingProblems(doc: LessonDoc, o: FramingOptions = {}): string[
 }
 
 // Words that belong to the app's design, not to the student's subject.
-const JARGON = /\bfaded (?:example|problem)s?\b|\b(?:level|pass) [1-4]\b|\b(?:this|next|earlier|previous) pass\b/i;
+const JARGON =
+  /\bfaded (?:example|problem)s?\b|\b(?:level|pass) [1-4]\b|\b(?:this|next|earlier|previous) pass\b|\b(?:from|in|after) the survey\b|\b(?:survey|understand|apply|master) (?:level|lesson|pass)\b/i;
 
 /** The words of the lesson's sections: what the level's word budget counts. */
 export function teachingWords(doc: LessonDoc): number {
@@ -450,4 +451,27 @@ export function conceptLayout(doc: LessonDoc): ConceptLayout | null {
       .filter((g) => g.terms.length),
     links: (doc.concept_links ?? []).filter((l) => home.has(l.from) && home.has(l.to)).map((l) => ({ from: id(l.from), to: id(l.to), label: l.label })),
   };
+}
+
+/**
+ * Claims of the topic's brainmap summary that the lesson never covers: the student was promised them.
+ * A sentence counts as covered when most of its content words, and any maths it writes, appear in the
+ * lesson. Only the first level is held to the whole summary; deeper levels build on it.
+ */
+export function summaryGaps(doc: LessonDoc, summary: string): string[] {
+  if (!summary.trim() || doc.depth > 1) return [];
+  const body = [doc.where_it_fits, ...doc.sections.flatMap((x) => x.blocks.flatMap((b) => [b.title, b.body, b.solution ?? ""])), ...doc.glossary.map((g) => `${g.term} ${g.meaning}`), ...doc.takeaways].join("\n");
+  const words = content(body);
+  const maths = body.replace(/\s+/g, "");
+  return summary
+    .split(/(?<=[.!?])\s+/)
+    .map((x) => x.trim())
+    .filter((x) => {
+      const formulas = [...x.matchAll(/\$([^$]+)\$/g)].map((m) => m[1].replace(/\s+/g, ""));
+      if (formulas.some((f) => f.length > 3 && !maths.includes(f))) return true;
+      const w = content(x);
+      return w.size >= 4 && [...w].filter((t) => words.has(t)).length < 0.5 * w.size;
+    })
+    .slice(0, 3)
+    .map((x) => `The topic summary promises "${x.slice(0, 200)}", which the lesson never covers: teach it at this level's depth (state it, with its equation if it has one), or say plainly where it comes later.`);
 }
