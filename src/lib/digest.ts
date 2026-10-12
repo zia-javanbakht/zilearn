@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
-import { studySections, stem, topKeywords, truncate } from "./text";
+import { proseLines, studySections, stem, topKeywords, truncate } from "./text";
 import { headingRepairer } from "./headingRepair";
 import { stripTimestamps } from "./transcript";
 import { addTopic, getMaterial, listTopics, normTitle, setDigest, updateMaterial } from "./store";
@@ -271,7 +271,7 @@ function segments(text: string): string[] {
 }
 
 const WORD = /[A-Za-z][A-Za-z0-9\-']*/g;
-const STOP = new Set(tokensOf("the a an and or of to in on for with is are was were be been this that these those it its as at by from we you they i so then than which what when where how can could will would should may might do does did not no yes just also very really okay ok right um uh like going gonna want know think say said get got let let's make one two lot thing things kind sort today here there now talk talking look looking see mean basically actually we're you're it's that's there's here's i'm don't can't bit maybe against between through into over under about after before during each every all some any more most other such only own same both few written using uses used called means"));
+const STOP = new Set(tokensOf("the a an and or of to in on for with is are was were be been this that these those it its as at by from we you they i so then than which what when where how can could will would should may might do does did not no yes just also very really okay ok right um uh like going gonna want know think say said get got let let's make one two lot thing things kind sort today here there now talk talking look looking see mean basically actually we're you're it's that's there's here's i'm don't can't bit maybe against between through into over under about after before during each every all some any more most other such only own same both few written using uses used called means per via thus hence etc"));
 
 function tokensOf(s: string): string[] {
   return s.toLowerCase().split(/\s+/).filter(Boolean);
@@ -327,7 +327,9 @@ function titleFor(text: string, spread: Map<string, number>, total: number): str
 /** The n sentences that best cover the text's frequent terms, in their original order. */
 export function keySentences(raw: string, n: number): string {
   // Headings aren't sentences: left in, they'd run into the sentence after them ("Gradient Descent Gradient descent ...").
-  const text = raw
+  // Nor are figure captions and table rows, which would otherwise run into the paragraph around them.
+  const text = proseLines(raw.split("\n"))
+    .join("\n")
     .replace(/^\s*#{1,6}\s+.*$/gm, "")
     .replace(/^\s*([-*+]|\d+[.)])\s+/gm, "")
     .trim();

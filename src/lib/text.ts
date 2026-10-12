@@ -257,3 +257,48 @@ const SMALL_WORDS = new Set("a an and as at but by for from in of on or the to v
 function titleCase(s: string) {
   return s.toLowerCase().replace(/[a-z][a-z']*/g, (w, i: number) => (i > 0 && SMALL_WORDS.has(w) ? w : w[0].toUpperCase() + w.slice(1)));
 }
+
+const CAPTION = /^(figure|fig\.|table|scheme)\s*[\dIVX]+[.:]\s/i;
+const SENTENCE_END = /[.!?]["')\]]?(\d+(,\d+)*)?$/;
+const PAGE_MARK = /^-{2,}\s*page\s+\d+\s*-{2,}$/i;
+/** A flattened table row: mostly numbers ("Elastic modulus (GPa) 294 620 3.15"). */
+function tableRow(line: string): boolean {
+  const toks = line.split(/\s+/).filter(Boolean);
+  const nums = toks.filter((x) => /^[-+±~≈]?\d[\d.,]*%?$/.test(x)).length;
+  return nums >= 3 && nums / toks.length >= 0.4;
+}
+/** A line of running text rather than a table's header or cells. */
+function prose(line: string): boolean {
+  const toks = line.split(/\s+/).filter(Boolean);
+  const nums = toks.filter((x) => /\d/.test(x)).length;
+  return toks.filter((x) => /^[a-z][a-z'’-]+[,.;:]?$/.test(x)).length >= 5 && nums / toks.length < 0.25;
+}
+
+/**
+ * A document's lines without its layout: figure and table captions (with the lines they wrap onto),
+ * the rows under a table's caption, flattened numeric rows and page markers. A sentence they cut in
+ * two (a figure or page break mid-sentence) is joined again by dropping the blank lines between.
+ */
+export function proseLines(lines: string[]): string[] {
+  const out: string[] = [];
+  let inCaption = false;
+  let inTable = false;
+  for (const l of lines) {
+    const line = l.trim();
+    if (CAPTION.test(line) || (inCaption && line)) {
+      inCaption = !SENTENCE_END.test(line);
+      inTable = /^table/i.test(line) || inTable;
+      continue;
+    }
+    if (PAGE_MARK.test(line) || tableRow(line) || (inTable && line && !prose(line))) continue;
+    inTable = false;
+    if (/^[a-z]/.test(line) && out.length && !out[out.length - 1].trim()) {
+      let i = out.length - 1;
+      while (i >= 0 && !out[i].trim()) i--;
+      const before = i >= 0 ? out[i].trim() : "";
+      if (before && !/[.!?:]$/.test(before) && !/^([-*+]|\d+[.)]|\||\$\$|#)/.test(before)) out.length = i + 1;
+    }
+    out.push(l);
+  }
+  return out;
+}

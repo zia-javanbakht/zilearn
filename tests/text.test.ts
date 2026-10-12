@@ -66,6 +66,12 @@ describe("brainmap", () => {
     expect(titles).toEqual(["Mixed finite element methods", "Axisymmetric problems", "Model Problem II"]);
   });
 
+  it("keeps captions and table rows out of a section's summary", () => {
+    const text = "# A paper\n## Validation\nTwo composites were modelled, one with the conventional method and another\nTable 5. Properties of cohesive zone between plies.\nGIc (N/mm) K (MPa/mm)\n0.199 0.5 67 105\n\n--- Page 18 ---\nusing the thin-ply method. Both agree with the tests well.";
+    const v = heuristicTopics([m("m1", "paper", text)]).find((t) => t.title === "Validation")!;
+    expect(v.summary).toBe("Two composites were modelled, one with the conventional method and another using the thin-ply method. Both agree with the tests well.");
+  });
+
   it("builds an offline topic tree from headings", () => {
     const topics = heuristicTopics([m("m1", "Week 1", "# Supervised learning\nLabels are given.\n# Unsupervised learning\nNo labels.")]);
     expect(topics.map((t) => t.title)).toEqual(["Week 1", "Supervised learning", "Unsupervised learning"]);
