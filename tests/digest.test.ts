@@ -63,11 +63,12 @@ describe("digest of a recording", () => {
     expect(getMaterial(video.id)?.digest?.topics.length).toBeGreaterThan(1);
 
     const topics = heuristicTopics([getMaterial(video.id)!]);
-    expect(topics[0]).toMatchObject({ title: "Lecture 4", parent_ref: null });
-    expect(topics[0].keywords).toContain("gradient descent");
-    // The keyword map is the branch: its main terms under the lecture, their terms under them.
-    expect(topics.filter((t) => t.parent_ref === topics[0].ref).map((t) => t.title)).toEqual(video.digest!.topics.map((t) => t.title));
-    expect(topics.slice(1).map((t) => t.title)).toEqual(video.digest!.topics.flatMap((t) => [t.title, ...(t.subtopics ?? []).map((s) => s.title)]));
+    // The keyword map is the brainmap: its main terms are the branches, their terms under them.
+    expect(topics[0]).toMatchObject({ title: "Gradient descent", parent_ref: null });
+    expect(topics[0].keywords).toContain("Gradient descent");
+    expect(topics.filter((t) => !t.parent_ref).map((t) => t.title)).toEqual(video.digest!.topics.map((t) => t.title));
+    expect(topics.map((t) => t.title)).toEqual(video.digest!.topics.flatMap((t) => [t.title, ...(t.subtopics ?? []).map((s) => s.title)]));
+    expect(topics.every((t) => t.material_ids.includes(video.id))).toBe(true);
 
     const res = await addToBrainmap(new Request("http://x", { method: "POST" }), { params: Promise.resolve({ id: video.id }) });
     expect(res.status).toBe(201);

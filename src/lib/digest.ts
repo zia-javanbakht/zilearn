@@ -3,7 +3,7 @@ import { aiEnabled, generateStructured } from "./ai";
 import { proseLines, studySections, stem, topKeywords, truncate } from "./text";
 import { headingRepairer } from "./headingRepair";
 import { stripTimestamps } from "./transcript";
-import { addTopic, getMaterial, listTopics, normTitle, setDigest, updateMaterial } from "./store";
+import { addTopic, getMaterial, listMaterials, listTopics, normTitle, setDigest, updateMaterial } from "./store";
 import { checkKeywords, isGarbled, isWord, repairTerm, repairText } from "./textRepair";
 import { abstractSentences, groundTerms, keywordMap, termLabel, type KeywordNode } from "./keywords";
 import type { Digest, DigestTopic, Material } from "./types";
@@ -158,16 +158,31 @@ function normStart(s: string | null | undefined): string | null {
 }
 
 /**
- * Give new or changed materials their offline digest at once (cheap), returning them with it. An offline
- * digest from before keyword maps is made again; an AI digest or one the student edited is kept.
+ * Give new or changed materials their offline digest at once (cheap), returning them with it. A digest from
+ * before keyword maps is made again as a keyword map; one already a keyword map, or edited by the student, is kept.
  */
 export function digestNow(materials: Material[]): Material[] {
   return materials.map((m) => {
-    if (!m.text?.trim() || (m.digest && (m.digest.basis || m.digest.by === "ai" || m.digest.edited))) return m;
-    const digest = offlineDigest(m.text);
+    // A digest from before keyword maps (no basis, the AI's too) is remade from key terms; one the student edited stays.
+    if (!m.text?.trim() || (m.digest && (m.digest.basis || m.digest.edited))) return m;
+    const fresh = offlineDigest(m.text);
+    // The AI's overview of the item is still good; its old topic list isn't the map.
+    const digest = m.digest?.by === "ai" && m.digest.summary ? { ...fresh, summary: m.digest.summary } : fresh;
     setDigest(m.id, digest);
     return { ...m, digest };
   });
+}
+
+/**
+ * A course's materials as the course page lists them (text cut short), with any digest saved before keyword
+ * maps made again as one first, so the Materials tab shows the map the brainmap is built from.
+ */
+export function listMaterialsWithMaps(courseId: string): Material[] {
+  const list = listMaterials(courseId);
+  const stale = list.filter((m) => m.digest && !m.digest.basis && !m.digest.edited).map((m) => getMaterial(m.id)!);
+  if (!stale.length) return list;
+  const fresh = new Map(digestNow(stale).map((m) => [m.id, m.digest]));
+  return list.map((m) => (fresh.has(m.id) ? { ...m, digest: fresh.get(m.id)! } : m));
 }
 
 /** Replace the offline digest with an AI one (run after the response, it can take a while), fixing the typos it finds. */

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { dataDir } from "@/lib/db";
 import { buildTree, deleteCourse, getCourse, getPlan, listMaterials, listTopics, updateCourse } from "@/lib/store";
+import { listMaterialsWithMaps } from "@/lib/digest";
 import { body, fail, handle, ok, type Ctx } from "@/lib/http";
 import { check, CoursePatch } from "@/lib/validate";
 
@@ -14,7 +15,7 @@ export const GET = handle(async (_req: Request, { params }: Ctx<{ id: string }>)
   const plan = getPlan(id);
   return ok({
     course,
-    materials: listMaterials(id),
+    materials: listMaterialsWithMaps(id),
     tree: buildTree(listTopics(id)),
     planProgress: plan ? { total: plan.items.length, done: plan.items.filter((i) => i.done).length } : null,
   });

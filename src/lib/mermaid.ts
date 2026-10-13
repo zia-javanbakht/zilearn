@@ -9,7 +9,7 @@ function short(s: string, max: number) {
 }
 
 function mindmapText(s: string) {
-  return s.replace(/[()[\]{}"`<>]/g, " ").replace(/\s+/g, " ").trim() || "untitled";
+  return s.replace(/\s*\(([^()]+)\)/g, " · $1").replace(/[()[\]{}"`<>]/g, " ").replace(/\s+/g, " ").trim() || "untitled";
 }
 
 /**
