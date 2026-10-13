@@ -30,7 +30,7 @@ export const POST = handle(async (req: Request, { params }: Ctx<{ id: string }>)
   return ok({ ...m, digest: r?.digest ?? null });
 });
 
-/** Save a digest the student rearranged (topics moved, copied, renamed or deleted). */
+/** Save a map the student edited (terms added, moved, copied, renamed, noted or deleted); a new summary no longer replaces it on its own. */
 export const PUT = handle(async (req: Request, { params }: Ctx<{ id: string }>) => {
   const { id } = await params;
   const m = getMaterial(id);
@@ -42,11 +42,20 @@ export const PUT = handle(async (req: Request, { params }: Ctx<{ id: string }>) 
     const o = t as Partial<DigestTopic> | null;
     if (!o || typeof o.title !== "string" || !o.title.trim()) return null;
     const out: DigestTopic = { title: str(o.title, 120).trim(), start: typeof o.start === "string" ? o.start.slice(0, 10) : null, summary: str(o.summary, 2000) };
+    // The material's quotes go along with a term wherever it is moved.
+    if (Array.isArray(o.evidence))
+      out.evidence = o.evidence
+        .filter((e) => e && typeof e.text === "string")
+        .slice(0, 5)
+        .map((e) => ({ text: str(e.text, 1000), where: typeof e.where === "string" ? e.where.slice(0, 200) : null, start: typeof e.start === "string" ? e.start.slice(0, 10) : null }));
     if (deep) out.subtopics = (Array.isArray(o.subtopics) ? o.subtopics : []).map((s) => topic(s, false)).filter((s): s is DigestTopic => !!s).slice(0, 40);
     return out;
   };
   if (!b.digest || !Array.isArray(b.digest.topics)) return fail("No topics to save.");
-  const digest: Digest = { ...m.digest, topics: b.digest.topics.map((t) => topic(t, true)).filter((t): t is DigestTopic => !!t).slice(0, 60) };
+  const topics = b.digest.topics.map((t) => topic(t, true)).filter((t): t is DigestTopic => !!t).slice(0, 60);
+  // The map's terms are the material's key terms now.
+  const keywords = [...topics.map((t) => t.title), ...topics.flatMap((t) => (t.subtopics ?? []).map((s) => s.title))].map((k) => k.replace(/\s*\([^)]*\)$/, "")).slice(0, 12);
+  const digest: Digest = { ...m.digest, topics, keywords: m.digest.basis === "keywords" ? keywords : m.digest.keywords, edited: true };
   setDigest(id, digest);
   return ok({ ...m, digest });
 });

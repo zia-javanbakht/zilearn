@@ -1,4 +1,5 @@
 import { lessonToTex, markdownLessonToTex } from "@/lib/latex";
+import { lessonWithDiagramEdits } from "@/lib/diagramEdits";
 import { getCourse, getLesson, getTopic } from "@/lib/store";
 import { texDownload, texFileName } from "@/lib/texPdf";
 import { DEPTH_LEVELS } from "@/lib/types";
@@ -21,7 +22,7 @@ export const GET = handle(async (req: Request, { params }: Ctx<{ id: string }>) 
   if (!lesson) return fail("Open the lesson first, so there is something to print.", 404);
   const level = DEPTH_LEVELS[depth - 1];
   const source = lesson.doc
-    ? lessonToTex(lesson.doc)
+    ? lessonToTex(lessonWithDiagramEdits(lesson.doc))
     : markdownLessonToTex({ title: topic.title, depth, level: level.name, goal: level.goal, map: { course: getCourse(topic.course_id)?.name ?? "", path: [] } }, lesson.content);
   return texDownload(source, texFileName(topic.title, `-level-${depth}`), url.searchParams.get("format"));
 });

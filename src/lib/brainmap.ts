@@ -5,8 +5,9 @@ import { proseLines, studySections, topKeywords, truncate } from "./text";
 import { checkKeywords, repairTerm } from "./textRepair";
 import { clipWords } from "./figure";
 import { headingRepairer } from "./headingRepair";
+import { abstractOf } from "./keywords";
 import type { NewTopic } from "./store";
-import type { Course, Material } from "./types";
+import type { Course, Digest, DigestTopic, Material } from "./types";
 import { MATERIAL_KIND_LABELS } from "./types";
 
 /* ---------------- Structuring ---------------- */
@@ -50,9 +51,12 @@ async function structureWithClaude(course: Course, materials: Material[]) {
     const ref = `M${i + 1}`;
     refs.set(ref, m.id);
     const body = m.text ? truncate(m.text, Math.max(floor, Math.floor(m.text.length * ratio))) : "(no text available)";
-    // A digest keeps the whole of a long recording in view even when its transcript is cut to fit.
+    // A digest keeps the whole of a long recording in view even when its transcript is cut to fit; a keyword
+    // map is the skeleton the course map is built from, and one the student edited is theirs.
     const digest = m.digest
-      ? `<digest>\n${m.digest.summary}\nKey terms: ${m.digest.keywords.join(", ")}\nTopics: ${m.digest.topics.map((t) => t.title).join("; ")}\n</digest>\n`
+      ? m.digest.basis === "keywords"
+        ? `<keyword_map${m.digest.edited ? ' checked_by_student="yes"' : ""}>\n${m.digest.summary}\n${keywordLines(m.digest)}\n</keyword_map>\n`
+        : `<digest>\n${m.digest.summary}\nKey terms: ${m.digest.keywords.join(", ")}\nTopics: ${m.digest.topics.map((t) => t.title).join("; ")}\n</digest>\n`
       : "";
     return `<material id="${ref}" kind="${MATERIAL_KIND_LABELS[m.kind]}" title="${m.title.replace(/"/g, "'")}">\n${digest}${body}\n</material>`;
   });
@@ -63,6 +67,7 @@ Below are all the materials the student has collected for this course (lecture n
 ${blocks.join("\n\n")}
 
 Build a brainmap of the course content:
+- Build it from the materials' keyword maps: their key terms are the topics. Merge the same term from different materials into one topic (organise by concept, not by file), group terms under broader ones, and add a topic only for content no keyword map covers. A map checked by the student is final for that material: keep every term in it, keep its grouping where it makes sense across the course, and add nothing from that material that its map leaves out.
 - Organise by concept, not by file: merge material that covers the same idea from different sources.
 - 4-10 top-level branches, each with subtopics; go 2-4 levels deep. Leaves should be study-sized (30-60 minutes of work at most).
 - Order branches and subtopics in a sensible learning order (prerequisites first).
@@ -94,6 +99,12 @@ Build a brainmap of the course content:
     });
   }
   return { topics, summary: out.course_summary };
+}
+
+/** A keyword map as indented lines: "- term: note", its terms under it. */
+function keywordLines(d: Digest): string {
+  const line = (t: DigestTopic, indent: string) => `${indent}- ${t.title}${t.summary ? `: ${truncate(t.summary.replace(/\s+/g, " "), 300)}` : ""}`;
+  return d.topics.flatMap((t) => [line(t, ""), ...(t.subtopics ?? []).map((s) => line(s, "  "))]).join("\n");
 }
 
 /** Key terms spelt as the sources spell them; ones the sources never use are dropped unless that leaves too few. */
@@ -130,6 +141,17 @@ export function heuristicTopics(materials: Material[]): NewTopic[] {
       material_ids: [m.id],
       importance: m.kind === "sample_exam" ? 3 : 2,
     });
+    // A keyword map (above all one the student edited) is the branch: its terms are the topics.
+    const keywordMap = m.digest?.basis === "keywords" || m.digest?.edited ? m.digest : null;
+    if (keywordMap?.topics.length) {
+      keywordMap.topics.slice(0, 20).forEach((t, j) => {
+        const tref = `${ref}.k${j}`;
+        const subs = t.subtopics ?? [];
+        topics.push({ ref: tref, parent_ref: ref, title: truncate(t.title, 80), summary: noteOf(t), keywords: [t.title, ...subs.map((x) => x.title)].map(bareTerm).slice(0, 8), material_ids: [m.id], importance: subs.length >= 2 ? 3 : 2 });
+        subs.slice(0, 20).forEach((st, k) => topics.push({ ref: `${tref}.${k}`, parent_ref: tref, title: truncate(st.title, 80), summary: noteOf(st), keywords: [bareTerm(st.title)], material_ids: [m.id], importance: 2 }));
+      });
+      return;
+    }
     if (sections.length < 2 && digest?.topics.length) {
       digest.topics.slice(0, 15).forEach((t, j) => {
         const tref = `${ref}.d${j}`;
@@ -168,16 +190,27 @@ export function heuristicTopics(materials: Material[]): NewTopic[] {
   return topics;
 }
 
-function heuristicSummary(course: Course, materials: Material[]) {
-  const kw = topKeywords(materials.map((m) => `${m.title} ${m.text ?? ""}`).join(" "), 8);
-  return `${course.name} draws on ${materials.length} item${materials.length === 1 ? "" : "s"}. Frequent themes: ${kw.join(", ")}.`;
+/** "Representative volume element (RVE)" as a key term: "Representative volume element". */
+const bareTerm = (t: string) => t.replace(/\s*\([^)]*\)$/, "").trim();
+
+/** A term's note, with where the material says it ("Material properties: …"). */
+function noteOf(t: DigestTopic): string {
+  const where = t.evidence?.find((e) => e.text === t.summary)?.where;
+  return where && t.summary ? `${t.summary} (${where})` : t.summary;
 }
 
-/** A paper's abstract, which says what it is about better than its title and author lines do. */
-function abstractOf(text: string): string | null {
-  // Older journals call it the summary ("SUMMARY"); it ends at a blank line, a heading or the numbered introduction.
-  const m = text.slice(0, 8000).match(/^(?:#{1,6}\s*)?(?:abstract|summary)[.:]?\s*$\n([\s\S]{80,}?)(?:\n\s*\n|\n#{1,6}\s|\n1\.?\s+\p{Lu}|$)/imu);
-  return m ? m[1] : null;
+function heuristicSummary(course: Course, materials: Material[]) {
+  // The key terms of the items' maps, first terms first; word counts only for items without a map.
+  const terms = new Map<string, string>();
+  const width = Math.max(0, ...materials.map((m) => m.digest?.topics.length ?? 0));
+  for (let i = 0; i < width && terms.size < 8; i++)
+    for (const m of materials) {
+      const t = m.digest?.basis === "keywords" || m.digest?.edited ? m.digest.topics[i] : undefined;
+      if (t && terms.size < 8) terms.set(bareTerm(t.title).toLowerCase(), bareTerm(t.title));
+    }
+  const rest = materials.filter((m) => !(m.digest?.basis === "keywords" || m.digest?.edited));
+  const kw = [...terms.values(), ...(rest.length && terms.size < 8 ? topKeywords(rest.map((m) => `${m.title} ${m.text ?? ""}`).join(" "), 8 - terms.size) : [])];
+  return `${course.name} draws on ${materials.length} item${materials.length === 1 ? "" : "s"}. ${terms.size ? "Key terms" : "Frequent themes"}: ${kw.join(", ")}.`;
 }
 
 /** Numbered notes without an abstract: their text from the first numbered section, past the title page. */

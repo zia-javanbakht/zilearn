@@ -6,6 +6,7 @@ import { Markdown } from "../Markdown";
 import { Busy } from "../Busy";
 import { downloadExport, printElement, saveBlob } from "../texExport";
 import { exportableMarkdown } from "@/lib/markdownExport";
+import { withDiagramEdits } from "../DiagramEditor";
 import { DEPTH_LEVELS } from "@/lib/types";
 
 interface TocEntry {
@@ -98,7 +99,8 @@ export function LessonModal({
   async function copyMarkdown() {
     exportRef.current?.removeAttribute("open");
     if (!content) return;
-    const md = exportableMarkdown(content);
+    // Diagrams as the student edited them (found by the code the lesson drew, before the app's lines are dropped).
+    const md = exportableMarkdown(await withDiagramEdits(content));
     try {
       await navigator.clipboard.writeText(md);
       flash("Copied the lesson as Markdown");

@@ -176,6 +176,13 @@ CREATE TABLE IF NOT EXISTS topic_undo (
   data TEXT NOT NULL
 );
 
+-- A diagram the student edited (renamed, added, deleted, moved nodes), by the hash of the code it was drawn from.
+CREATE TABLE IF NOT EXISTS diagram_edits (
+  key TEXT PRIMARY KEY,
+  code TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_materials_course ON materials(course_id);
 
 CREATE INDEX IF NOT EXISTS idx_topics_course ON topics(course_id);

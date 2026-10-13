@@ -110,11 +110,20 @@ export interface ScanInfo {
   ai_pages?: number[];
 }
 
+/** What a material says about a key term, quoted, with the section (or time) it says it in. */
+export interface DigestEvidence {
+  text: string;
+  where: string | null;
+  start: string | null;
+}
+
 export interface DigestTopic {
   title: string;
   start: string | null; // "mm:ss" in a recording
   summary: string;
   subtopics?: DigestTopic[];
+  /** Keyword maps: the material's own sentences about this term. */
+  evidence?: DigestEvidence[];
 }
 
 export interface Digest {
@@ -122,6 +131,10 @@ export interface Digest {
   keywords: string[];
   topics: DigestTopic[];
   by: "ai" | "offline";
+  /** "keywords": the topics are the material's key terms (a keyword map); otherwise its sections. */
+  basis?: "keywords" | "sections";
+  /** The student changed the map: a new summary doesn't replace it, and the course brainmap follows it. */
+  edited?: boolean;
 }
 
 export interface Topic {

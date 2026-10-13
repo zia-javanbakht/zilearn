@@ -102,3 +102,34 @@ export function digestTitle(d: Digest, name: string): string {
   const p = digestPaths(d)[name];
   return (p && at(d, p)?.title) || "";
 }
+
+/**
+ * Add a key term or topic the map missed: onto the material ("root") as a main item, onto a main item as
+ * one of its own, onto a sub-item right after it.
+ */
+export function addDigestItem(d: Digest, target: string, title: string, summary = ""): Digest {
+  const name = title.trim().slice(0, 120);
+  if (!name) return d;
+  const out = clone(d);
+  const item: DigestTopic = { title: name, start: null, summary: summary.trim().slice(0, 2000) };
+  const p = target === "root" ? null : digestPaths(out)[target];
+  if (!p) out.topics.push({ ...item, subtopics: [] });
+  else if (p.length === 1) out.topics[p[0]].subtopics = [...(out.topics[p[0]].subtopics ?? []), item];
+  else out.topics[p[0]].subtopics!.splice(p[1] + 1, 0, item);
+  return out;
+}
+
+/** Change what an item's note says (the student's own words replace the extracted ones). */
+export function setDigestNote(d: Digest, name: string, summary: string): Digest {
+  const out = clone(d);
+  const p = digestPaths(out)[name];
+  const item = p && at(out, p);
+  if (item) item.summary = summary.trim().slice(0, 2000);
+  return out;
+}
+
+/** The note of an item, for editing. */
+export function digestNote(d: Digest, name: string): string {
+  const p = digestPaths(d)[name];
+  return (p && at(d, p)?.summary) || "";
+}

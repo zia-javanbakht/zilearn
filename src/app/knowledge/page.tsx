@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/components/api";
-import { Mermaid } from "@/components/Mermaid";
+import { DiagramEditor } from "@/components/DiagramEditor";
 import { Snippet } from "@/components/Markdown";
 
 interface Hit {
@@ -127,7 +127,7 @@ export default function KnowledgePage() {
           {" "}&ldquo;Rebuild links&rdquo; also asks the AI to check them and explain each connection.
         </p>
         {graph && graph.courses.length < 2 && <div className="alert info">Links appear between related topics. Add more courses to connect them with each other.</div>}
-        {graph?.mermaid && <Mermaid code={graph.mermaid} />}
+        {graph?.mermaid && <DiagramEditor code={graph.mermaid} zoom />}
         {graph && graph.links.length > 0 && (
           <div className="list">
             {graph.links.map((l) => (

@@ -135,7 +135,7 @@ function visibleTree(roots: TopicNode[], opts: FlowchartOptions) {
 
 /** Mermaid mindmap of one material's digest. */
 export function digestMindmap(title: string, d: Digest): string {
-  const label = (s: string) => s.replace(/[()[\]{}"`<>$\\]/g, " ").replace(/\s+/g, " ").trim().slice(0, 50) || "untitled";
+  const label = (s: string) => s.replace(/\s*\(([^()]+)\)/g, " · $1").replace(/[()[\]{}"`<>$\\]/g, " ").replace(/\s+/g, " ").trim().slice(0, 50) || "untitled";
   const lines = ["mindmap", `  root((${label(title)}))`];
   let i = 0;
   for (const t of d.topics) {
