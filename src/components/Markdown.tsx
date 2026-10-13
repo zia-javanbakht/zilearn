@@ -7,7 +7,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
-import { Mermaid } from "./Mermaid";
+import { DiagramEditor } from "./DiagramEditor";
 import { Plot } from "./Plot";
 import type { PlotSpec } from "@/lib/figure";
 
@@ -33,7 +33,8 @@ const components: Components = {
       const code = String(c).trim();
       // A lesson's concept map: "%% jump k0 ②" opens the section headed ② when box k0 is clicked.
       const jumps = new Map([...code.matchAll(/^\s*%% jump (\S+) (\S+)\s*$/gm)].map((m) => [m[1], m[2]]));
-      return <Mermaid code={code} fit onNodeClick={jumps.size ? (nid) => jumpTo(jumps.get(nid)) : undefined} />;
+      // Any diagram can be edited in place; the edit is kept for that diagram wherever it shows.
+      return <DiagramEditor code={code} fit onNodeClick={jumps.size ? (nid) => jumpTo(jumps.get(nid)) : undefined} />;
     }
     if (lang === "plot") {
       try {

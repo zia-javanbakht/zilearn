@@ -240,6 +240,10 @@ button.link:hover { text-decoration: underline; }
 .digest-topics { margin: 0; padding-left: 1.4em; display: grid; gap: 6px; }
 .digest-topics ul { margin: 2px 0 0; padding-left: 1.2em; }
 .digest-topics .markdown p { margin: 0.1em 0; }
+.digest-quotes { margin: 2px 0 4px; padding-left: 1em; list-style: none; display: grid; gap: 2px; }
+.digest-quotes li { font-style: italic; }
+.diagram-editor { margin: 0.5em 0; }
+.diagram-editor .selbar { position: static; box-shadow: none; }
 
 /* Lesson blocks, coloured like the Z class's boxes */
 .lb { border-left: 4px solid var(--lb, #888); background: color-mix(in srgb, var(--lb, #888) 9%, transparent); border-radius: 6px; padding: 2px 14px; margin: 12px 0; }

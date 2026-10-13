@@ -9,29 +9,103 @@ import { isWord } from "./textRepair";
 
 export interface PdfLine {
   text: string;
-  /** Largest font size on the line, in points. */
+  /** Largest font size of the line's text, in points (a list bullet set larger doesn't count). */
   size: number;
+  /** The line started with a list bullet (a Beamer triangle, "•"), now written as "- ". */
+  bullet?: boolean;
 }
 
 type Pdf = { numPages: number; getPage(n: number): Promise<{ getTextContent(): Promise<{ items: unknown[] }> }> };
+type Item = { str?: string; transform?: number[]; hasEOL?: boolean };
 
-/** Each page's lines as pdf.js gives them (the same text unpdf's extractText makes), with font sizes. */
+const BULLETS = /^[•●⚫▪■▶►▸‣◆◦○➤✓✗]$/;
+
+/** A line from its items: the text, its size, and a leading bullet glyph turned into "- ". */
+function lineOf(items: Item[]): PdfLine {
+  const sizeOf = (it: Item) => (it.transform ? Math.round(Math.hypot(it.transform[2], it.transform[3]) * 10) / 10 : 0);
+  const text = items.filter((it) => it.str?.trim());
+  // A bullet: a bullet character opening the line, or a lone glyph set larger than the word after it
+  // (Beamer's triangles come out as "K" or "n" from a symbol font; "ℓ" before a "max" subscript isn't one).
+  const first = text[0];
+  const bullet =
+    !!first &&
+    text.length > 1 &&
+    first.str!.trim().length === 1 &&
+    (BULLETS.test(first.str!.trim()) || (sizeOf(first) > sizeOf(text[1]) * 1.1 && /^\s*\p{Lu}\p{Ll}{2,}/u.test(text[1].str!)));
+  const rest = bullet ? items.slice(items.indexOf(first) + 1) : items;
+  // Exponents: a short piece raised above the maths symbol before it ("𝑱" then "−1" a little higher is 𝑱^{−1}).
+  // A raised number after a word or a full stop is a citation ("study,8"), which stays as it is, and so
+  // is a raised number of two digits or more after a bracket ("(Figure A1)16").
+  let str = "";
+  let exp: { y: number; text: string; tail: string } | null = null;
+  const close = () => {
+    if (exp) str += `^${exp.text.length > 1 ? `{${exp.text}}` : exp.text}${exp.tail}`;
+    exp = null;
+  };
+  rest.forEach((it, k) => {
+    const t = it.str ?? "";
+    const h = sizeOf(it);
+    const y = it.transform?.[5] ?? 0;
+    // Pieces of one exponent set separately ("−", "1") stay together.
+    if (exp && t.trim() && !/^\s/.test(t) && !exp.tail && Math.abs(y - exp.y) < 0.15 * h && /^[\p{L}\p{N}+−\-′*/]{1,6}\s?$/u.test(t)) {
+      exp.text += t.trim();
+      exp.tail = /\s$/.test(t) ? " " : "";
+      return;
+    }
+    close();
+    const prev = rest[k - 1];
+    const before = prev?.str ?? "";
+    // Raised against the symbol it follows, not the line: in a stacked fraction the line has no one baseline.
+    const raised = prev?.transform ? y - prev.transform[5] : 0;
+    const piece = t.trim();
+    const isExp =
+      h > 0 &&
+      raised > 0.25 * h &&
+      raised < 0.8 * h &&
+      /^[\p{L}\p{N}+−\-′*/]{1,6}\s?$/u.test(t) &&
+      /[\u{1d400}-\u{1d7ff}\u0370-\u03ff\u2100-\u214f)\]]$/u.test(before) &&
+      /[\d+−\u{1d400}-\u{1d7ff}]/u.test(piece) &&
+      !(/[)\]]$/.test(before) && /^\d{2,}$/.test(piece));
+    if (isExp) exp = { y, text: piece, tail: /\s$/.test(t) ? " " : "" };
+    else str += t;
+  });
+  close();
+  const size = Math.max(0, ...rest.filter((it) => it.str?.trim()).map(sizeOf));
+  return { text: bullet ? `- ${str.trim()}` : str, size, ...(bullet ? { bullet } : {}) };
+}
+
+/**
+ * Each page's lines as pdf.js gives them (the same text unpdf's extractText makes), with font sizes.
+ * A jump to another height starts a new line too: pdf.js can run a slide's title into the labels of
+ * the figure under it.
+ */
 export async function pdfLines(pdf: Pdf): Promise<PdfLine[][]> {
   const pages: PdfLine[][] = [];
   for (let n = 1; n <= pdf.numPages; n++) {
     const { items } = await (await pdf.getPage(n)).getTextContent();
     const lines: PdfLine[] = [];
-    let cur: PdfLine = { text: "", size: 0 };
-    for (const it of items as { str?: string; transform?: number[]; hasEOL?: boolean }[]) {
+    let cur: Item[] = [];
+    let y: number | null = null;
+    let size = 0;
+    const flush = (eol = false) => {
+      if (eol || cur.some((it) => it.str)) lines.push(lineOf(cur));
+      cur = [];
+      y = null;
+      size = 0;
+    };
+    for (const it of items as Item[]) {
       if (it.str == null) continue;
-      cur.text += it.str;
-      if (it.str.trim() && it.transform) cur.size = Math.max(cur.size, Math.round(Math.hypot(it.transform[2], it.transform[3]) * 10) / 10);
-      if (it.hasEOL) {
-        lines.push(cur);
-        cur = { text: "", size: 0 };
+      if (it.str.trim() && it.transform) {
+        const h = Math.hypot(it.transform[2], it.transform[3]);
+        // Against the piece before, so a fraction's numerator after its denominator doesn't break the line.
+        if (y != null && Math.abs(it.transform[5] - y) > 1.2 * Math.max(size, h)) flush();
+        y = it.transform[5];
+        size = Math.max(size, h);
       }
+      cur.push(it);
+      if (it.hasEOL) flush(true);
     }
-    if (cur.text) lines.push(cur);
+    flush();
     pages.push(lines);
   }
   return pages;
@@ -98,6 +172,47 @@ export function runningLines(pages: string[][]): Set<number>[] {
   return drop;
 }
 
+/** A slide's frame counter ("3/6"). */
+const FRAME_COUNTER = /^\s*\d{1,3}\s*\/\s*\d{1,3}\s*$/;
+
+/**
+ * Slide furniture that sits anywhere on the page, not just at its edges: a navigation sidebar listing
+ * the sections (three or more lines in a row, each repeated at the same size on a quarter of the pages)
+ * and frame counters. Returns, per page, the indexes to drop.
+ */
+export function repeatedBlocks(pages: PdfLine[][]): Set<number>[] {
+  const drop = pages.map(() => new Set<number>());
+  if (pages.length < 4) return drop;
+  const min = Math.max(3, Math.ceil(pages.length * 0.25));
+  const key = (l: PdfLine) => `${l.size}|${l.text.trim().replace(/\s+/g, " ").toLowerCase()}`;
+  const on = new Map<string, Set<number>>();
+  pages.forEach((lines, p) =>
+    lines.forEach((l) => {
+      if (!l.text.trim()) return;
+      const k = key(l);
+      if (!on.has(k)) on.set(k, new Set());
+      on.get(k)!.add(p);
+    }),
+  );
+  const often = (l: PdfLine) => (on.get(key(l))?.size ?? 0) >= min;
+  pages.forEach((lines, p) => {
+    let run: number[] = [];
+    const end = () => {
+      if (run.length >= 3) run.forEach((i) => drop[p].add(i));
+      run = [];
+    };
+    lines.forEach((l, i) => {
+      if (!l.text.trim()) return;
+      if (often(l)) run.push(i);
+      else end();
+    });
+    end();
+  });
+  if (pages.filter((lines) => lines.some((l) => FRAME_COUNTER.test(l.text))).length >= min)
+    pages.forEach((lines, p) => lines.forEach((l, i) => FRAME_COUNTER.test(l.text) && drop[p].add(i)));
+  return drop;
+}
+
 /** Publisher furniture on a first page: article type, journal volume, DOI, copyright, reuse notices, emails. */
 export function isPublisherLine(line: string): boolean {
   const t = line.trim();
@@ -133,6 +248,7 @@ export interface GlyphReport {
   mathpi: boolean;
   controls: number;
   integrals: number;
+  accents: number;
 }
 
 /** Whether a document shows MathPi's substitutions: several "¼" for "=", or "ð…Þ" pairs. */
@@ -148,7 +264,7 @@ export function usesMathPi(text: string): boolean {
  * Other control characters are dropped.
  */
 export function fixMathGlyphs(text: string, mathpi = usesMathPi(text)): { text: string; report: GlyphReport } {
-  const report: GlyphReport = { mathpi, controls: 0, integrals: 0 };
+  const report: GlyphReport = { mathpi, controls: 0, integrals: 0, accents: 0 };
   // The integral: "Z" alone at a line end (or alone on a line), its domain alone on the next line.
   const lone = (text.match(/(?:^|[ =(])Z\n[^\s]{1,6}\n/gm) ?? []).length;
   if (lone >= 2)
@@ -156,6 +272,16 @@ export function fixMathGlyphs(text: string, mathpi = usesMathPi(text)): { text: 
       report.integrals++;
       return `${pre}∫_${dom.length > 1 ? `{${dom}}` : dom} `;
     });
+  // TeX sets an accent before its letter, so the text layer hangs the dot or hat on the character
+  // before ("Sincė 𝑭", "𝜌̇ 𝜙"); on a maths letter it belongs to the one after ("Since 𝑭̇", "𝜌 𝜙̇").
+  text = text.replace(/([\u0300-\u036f]+)([ \n]?)([\u{1d400}-\u{1d7ff}\u2100-\u214f\u0391-\u03a9\u03b1-\u03c9\u03d1\u03d5\u03f5])/gu, (_m, mark: string, gap: string, base: string) => {
+    report.accents++;
+    return `${gap}${base}${mark}`;
+  });
+  // A stacked d/dt comes out as "d" over "d𝑡" on two lines.
+  text = text.replace(/(^|[\s(=:])d\n(d[\u{1d400}-\u{1d7ff}a-z])/gmu, "$1d/$2");
+  // An integral's domain is set below it, which ends the line: "∫𝑆𝑝" then the integrand on the next.
+  text = text.replace(/(∫\S{0,6})\n(?!\n|--- Page|#)/g, "$1 ");
   text = text.replace(/[\u0000-\u0008\u000b\u000e-\u001f¼þðÞ]/g, (c) => {
     if (mathpi && MATHPI[c]) {
       if (c < " ") report.controls++;
@@ -189,6 +315,8 @@ export function headingLevel(line: PdfLine, body: number, sizes: number[]): numb
   if (!body || line.size < body * 1.12 || t.length < 3 || t.length > 110) return 0;
   if (!/[A-Za-z]{3}/.test(t) || /[.,;:]$/.test(t) || /[=<>≤≥∑∫]/.test(t) || PAGE_NUMBER.test(t)) return 0;
   if (t.split(/\s+/).length > 14 || /^[a-z]/.test(t) || /\b(of|the|and|to|in|a|an|by|with|for|from|on)$/i.test(t)) return 0;
+  // A line of bold maths ("𝝈 ⋅⋅ 𝑫 d𝑣. Then") is set large but isn't a title.
+  if ((t.match(/[\u{1d400}-\u{1d7ff}]/gu) ?? []).length >= 2 && (t.match(/\b[A-Za-z][a-z]{2,}\b/g) ?? []).length < 2) return 0;
   return sizes.length > 1 && line.size >= sizes[sizes.length - 1] * 0.98 && line.size < sizes[0] ? 3 : 2;
 }
 
@@ -197,20 +325,37 @@ export function headingLevel(line: PdfLine, body: number, sizes: number[]): numb
  * "###" (by size, except on pages with an OCR layer). Maths glyphs are left for fixMathGlyphs, after ligature repair has read its slots.
  */
 export function pagesFromLines(pages: PdfLine[][], opts: { ocrPages?: ReadonlySet<number> } = {}): { pages: string[]; running: number } {
-  const drop = runningLines(pages.map((p) => p.map((l) => l.text)));
   const body = bodySize(pages);
   // Heading sizes, largest first; the title on page 1 is usually the largest and becomes "#".
   const sizes = [...new Set(pages.flat().filter((l) => l.size >= body * 1.12 && l.text.trim().length >= 3).map((l) => l.size))].sort((a, b) => b - a);
+  const blocks = repeatedBlocks(pages);
+  // Running heads are found twice: among all lines, and with the sidebar left out, where they sit at the
+  // page's edge. The first never takes a heading (a frame title that repeats a sidebar entry).
+  const all = runningLines(pages.map((p) => p.map((l) => l.text)));
+  const drop = runningLines(pages.map((p, n) => p.map((l, i) => (blocks[n].has(i) ? "" : l.text))));
+  all.forEach((a, p) => a.forEach((i) => !headingLevel(pages[p][i], body, sizes) && drop[p].add(i)));
+  blocks.forEach((b, p) => b.forEach((i) => drop[p].add(i)));
+  // Slides: a navigation sidebar or frame counters on a quarter of the pages.
+  const deck = blocks.filter((b) => b.size).length >= Math.max(3, Math.ceil(pages.length * 0.25));
   let running = 0;
+  // A book-style running head names the current section and the page: "4 Conservation of Linear Momentum 2".
+  const headings = new Set(pages.flat().filter((l) => headingLevel(l, body, sizes)).map((l) => l.text.trim().replace(/\s+/g, " ").toLowerCase()));
+  const sectionHead = (t: string) => {
+    const m = t.trim().match(/^(\d+(?:\.\d+)*\s+.+?)\s+\d{1,4}$/);
+    return !!m && headings.has(m[1].replace(/\s+/g, " ").toLowerCase());
+  };
   const texts = pages.map((lines, p) => {
     const out: { text: string; level: number; size: number }[] = [];
+    const top = lines.findIndex((l, i) => l.text.trim() && !drop[p].has(i));
     lines.forEach((l, i) => {
-      if (drop[p].has(i) || (p === 0 && (i < 25 || i >= lines.length - 12) && isPublisherLine(l.text))) {
+      if (drop[p].has(i) || (p === 0 && (i < 25 || i >= lines.length - 12) && isPublisherLine(l.text)) || (p > 0 && i === top && sectionHead(l.text))) {
         running++;
         return;
       }
       // An OCR layer's sizes follow the scanned glyphs, not the document's styles.
-      const level = opts.ocrPages?.has(p + 1) ? 0 : headingLevel(l, body, sizes);
+      // On a slide only the frame title at the top is a heading; larger type further down is a plot's
+      // axis labels or a subfigure's caption.
+      const level = opts.ocrPages?.has(p + 1) || (deck && out.some((x) => x.text.trim() && !x.level)) ? 0 : headingLevel(l, body, sizes);
       const last = out[out.length - 1];
       // A title set over several lines is one heading, including lines that start in lower case
       // ("Prediction of the failure" / "behavior of pseudo-ductile" / …).
@@ -221,13 +366,74 @@ export function pagesFromLines(pages: PdfLine[][], opts: { ocrPages?: ReadonlySe
       if (same && (level === last.level || !level) && joins) last.text += ` ${l.text.trim()}`;
       else out.push({ text: level ? l.text.trim() : l.text, level, size: l.size });
     });
-    return out
+    const marked = out.map((x, i) => ({
+      ...x,
       // The largest type near the top of page 1 is the document's title.
-      .map((x, i) => (x.level ? `${"#".repeat(p === 0 && i < 12 && sizes.length > 1 && x.size >= sizes[0] * 0.98 ? 1 : x.level)} ${x.text}` : x.text))
-      .join("\n")
-      .trim();
+      level: x.level && p === 0 && i < 12 && sizes.length > 1 && x.size >= sizes[0] * 0.98 ? 1 : x.level,
+    }));
+    const kept = structural(marked, p, deck);
+    return figureLabels(shatteredMatrices(kept.map((x) => (x.level ? `${"#".repeat(x.level)} ${x.text}` : x.text)), p + 1), p + 1).join("\n").trim();
   });
   return { pages: texts, running };
+}
+
+/**
+ * A matrix set with big brackets comes out as one bracket piece per line ("⎡", "⎢", "⎣") with its
+ * entries scattered between them; its layout can't be rebuilt from that, so it is pointed to instead.
+ */
+export function shatteredMatrices(lines: string[], page: number): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*[⎡⎛]\s*$/.test(lines[i])) {
+      const close = lines.findIndex((l, j) => j > i && /^\s*[⎦⎠]\s*$/.test(l));
+      if (close > 0 && close - i <= 60) {
+        out.push(`[matrix, see PDF page ${page}]`);
+        i = close;
+        continue;
+      }
+    }
+    out.push(lines[i]);
+  }
+  return out;
+}
+
+/**
+ * A drawn figure's labels come out as a run of short lines ("Gauss", "Quadrature", "𝑲𝑼 = 𝒇", "(reduced)")
+ * just before its caption; read as prose they are noise, so the run is pointed to instead. A run is at least
+ * four lines of at most five plain words with no sentence end, stopping at a heading, list item, blank line
+ * or prose. A run that holds or follows a table's caption, or three rows of numbers, is a table and is kept.
+ */
+export function figureLabels(lines: string[], page: number): string[] {
+  const words = (l: string) => (l.match(/[A-Za-z]{2,}/g) ?? []).length;
+  const label = (l: string) => l.trim() !== "" && !/^\s*(#|- |\d+\.\s|\[matrix)/.test(l) && !/[.;:]$/.test(l.trim()) && words(l) <= 5;
+  const out = [...lines];
+  for (let i = out.length - 1; i > 0; i--) {
+    if (!/^\s*(Figure|Fig\.)\s*\d+[.:]/.test(out[i])) continue;
+    let start = i;
+    while (start > 0 && label(out[start - 1])) start--;
+    const run = out.slice(start, i);
+    const table = /^\s*Table\s+[\dIVXl]+\b/i.test(out[start - 1] ?? "") || run.some((l) => /^\s*Table\s+[\dIVXl]+\b/i.test(l)) || run.filter((l) => (l.match(/\d+(?:[.,:]\d+)?/g) ?? []).length >= 3).length >= 3;
+    if (run.length >= 4 && !table) {
+      out.splice(start, i - start, `[diagram, see PDF page ${page}]`);
+      i = start;
+    }
+  }
+  return out;
+}
+
+/**
+ * Pages that only organise the document: a table of contents, a deck's title slide (its title is kept, not the course,
+ * lecturer and date lines under it), and divider slides that hold nothing but a heading or two ("Part I"
+ * with a part title, "Mesh"). They aren't content, so a divider's headings never become topics.
+ */
+function structural<T extends { text: string; level: number }>(lines: T[], p: number, deck: boolean): T[] {
+  const filled = lines.filter((x) => x.text.trim());
+  // A table of contents: dot leaders to page numbers. The headings themselves come later.
+  const leaders = filled.filter((x) => /(\.\s?){5,}\s*\d+$/.test(x.text.trim())).length;
+  if (leaders >= 3 && leaders >= filled.length / 2) return [];
+  if (p === 0) return deck && filled.some((x) => x.level === 1) ? filled.filter((x) => x.level === 1) : lines;
+  const divider = filled.length > 0 && filled.length <= 3 && filled.every((x) => x.level) && (deck || filled.some((x) => /^part\s+([ivx]+|\d+)\b/i.test(x.text.trim())));
+  return divider ? [] : lines;
 }
 
 /* ---------------- How trustworthy a page's text is ---------------- */

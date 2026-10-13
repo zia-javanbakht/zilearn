@@ -1,4 +1,5 @@
 import { diagramTikz, plotTikz, type Figure } from "./figure";
+import { exportableMarkdown } from "./markdownExport";
 import { conceptLayout, homes } from "./lessonTerms";
 import { markProvenance, normalizeDoc, type LessonBlock, type LessonDoc, type QA } from "./lesson";
 import type { Digest, DigestTopic } from "./types";
@@ -497,5 +498,5 @@ export function digestToTex(title: string, course: string, kind: string, d: Dige
 
 /** A lesson saved before lessons were structured: its Markdown, converted as it is. */
 export function markdownLessonToTex(head: Head, md: string): string {
-  return zDocument(head, blockTex(md.replace(/<\/?(div|details)[^>]*>/gi, "")));
+  return zDocument(head, blockTex(exportableMarkdown(md).replace(/<\/?(div|details)[^>]*>/gi, "")));
 }

@@ -94,6 +94,9 @@ export function Mermaid({
   const hanging = useRef<Map<string, Set<string>>>(new Map());
   const [moved, setMoved] = useState(false);
   const [foldedCount, setFoldedCount] = useState(0);
+  const [branchCount, setBranchCount] = useState(0);
+  /** Each foldable node's flip, to redraw its sign when everything is folded or unfolded at once. */
+  const flips = useRef<Map<string, () => void>>(new Map());
 
   /** Centre and size of a node as drawn now (with any offset). */
   function boxOf(nid: string): Box | null {
@@ -202,6 +205,7 @@ export function Mermaid({
     const controlled = !!togglesRef.current && !!toggleRef.current;
     hanging.current = controlled ? new Map() : hangingFrom([...g.nodes.keys()], g.edges);
     const branch = hanging.current;
+    flips.current = new Map();
     let justDragged = false;
 
     for (const n of g.nodes.values()) {
@@ -216,6 +220,7 @@ export function Mermaid({
         drawToggle(el, folded.current.has(nid) ? "closed" : "open", branch.get(nid)?.size ?? null, flip);
         applyFolds(branch);
       };
+      if (!controlled && branch.has(nid)) flips.current.set(nid, () => drawToggle(el, folded.current.has(nid) ? "closed" : "open", branch.get(nid)?.size ?? null, flip));
       el.addEventListener("click", (e) => {
         if (justDragged) return void (justDragged = false);
         clickRef.current?.(nid, how(e));
@@ -288,6 +293,7 @@ export function Mermaid({
       }
     }
     if (!controlled) applyFolds(branch);
+    setBranchCount(controlled || !interactive ? 0 : branch.size);
     // Room for the signs on the right-most nodes.
     const vb = svg.viewBox?.baseVal;
     if (vb && grow) svg.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.width + grow} ${vb.height}`);
@@ -349,18 +355,31 @@ export function Mermaid({
 
   function unfoldAll() {
     folded.current.clear();
-    ref.current?.querySelectorAll(".node-toggle.closed").forEach((t) => {
-      t.classList.replace("closed", "open");
-      t.querySelector("text")!.textContent = "−";
-    });
+    for (const redraw of flips.current.values()) redraw();
     applyFolds(hanging.current);
   }
 
-  const extras = (moved || foldedCount > 0) && (
+  /** Fold every branch below the top: the diagram's starting boxes and the ones they lead to stay in view. */
+  function foldAll() {
+    const g = graph.current;
+    if (!g) return;
+    const hasIn = new Set(g.edges.filter((e) => e.from !== e.to).map((e) => e.to));
+    const inner = [...hanging.current.keys()].filter((n) => hasIn.has(n));
+    folded.current = new Set(inner.length ? inner : hanging.current.keys());
+    for (const redraw of flips.current.values()) redraw();
+    applyFolds(hanging.current);
+  }
+
+  const extras = (moved || branchCount > 0) && (
     <>
+      {branchCount > 0 && (
+        <button className="sm" onClick={foldAll} title="Fold every branch, leaving the top of the diagram">
+          Collapse all
+        </button>
+      )}
       {foldedCount > 0 && (
         <button className="sm" onClick={unfoldAll} title="Show every folded branch again">
-          Unfold all
+          Expand all
         </button>
       )}
       {moved && (

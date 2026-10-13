@@ -34,18 +34,25 @@ const chunks = [...Array(12).keys()].flatMap((i) => (i < 6 ? GD : REG).map((text
 const transcript = formatTranscript(chunks);
 
 describe("digest of a recording", () => {
-  it("finds the summary, key terms and topics of a transcript without headings", () => {
+  it("maps a transcript from its key terms, each with what the lecture says and when", () => {
     expect(topPhrases(transcript, 3).map((p) => p.phrase)).toContain("gradient descent");
     const d = offlineDigest(transcript);
-    expect(d.by).toBe("offline");
+    expect(d).toMatchObject({ by: "offline", basis: "keywords" });
     expect(d.keywords.slice(0, 4)).toEqual(expect.arrayContaining(["gradient descent", "loss function"]));
     expect(d.summary).not.toMatch(/\[\d/);
     expect(d.summary.split(/[.!?]/).filter((s) => s.trim()).length).toBe(3);
-    const titles = d.topics.map((t) => t.title.toLowerCase());
-    expect(titles[0]).toBe("gradient descent");
-    expect(titles.at(-1)).toMatch(/regularisation|weight decay/);
-    expect(d.topics[0].start).toBe("00:00");
-    expect(d.topics.length).toBeLessThanOrEqual(3);
+    const all = d.topics.flatMap((t) => [t, ...(t.subtopics ?? [])]);
+    const titles = all.map((t) => t.title);
+    expect(titles).toEqual(expect.arrayContaining(["Gradient descent", "Loss function", "Learning rate", "Weight decay"]));
+    // Terms, not clauses: no verb hangs on the end.
+    expect(titles.filter((t) => /\b(controls|adds|removes|updates)\b/.test(t))).toEqual([]);
+    expect(d.topics[0]).toMatchObject({ title: "Gradient descent", start: "00:00" });
+    expect(all.find((t) => t.title === "Weight decay")?.start).toBe("06:00");
+    // Each term's note is the lecture's own sentence about it, kept with the others as evidence.
+    for (const t of all) {
+      expect(GD.concat(REG)).toContain(t.summary);
+      expect(t.evidence?.[0]?.text).toBe(t.summary);
+    }
     expect(digestMindmap("Lecture 4", d)).toMatch(/^mindmap\n  root\(\(Lecture 4\)\)\n    n0\[Gradient descent\]/);
   });
 
@@ -58,7 +65,9 @@ describe("digest of a recording", () => {
     const topics = heuristicTopics([getMaterial(video.id)!]);
     expect(topics[0]).toMatchObject({ title: "Lecture 4", parent_ref: null });
     expect(topics[0].keywords).toContain("gradient descent");
-    expect(topics.slice(1).map((t) => t.title)).toEqual(video.digest!.topics.map((t) => t.title));
+    // The keyword map is the branch: its main terms under the lecture, their terms under them.
+    expect(topics.filter((t) => t.parent_ref === topics[0].ref).map((t) => t.title)).toEqual(video.digest!.topics.map((t) => t.title));
+    expect(topics.slice(1).map((t) => t.title)).toEqual(video.digest!.topics.flatMap((t) => [t.title, ...(t.subtopics ?? []).map((s) => s.title)]));
 
     const res = await addToBrainmap(new Request("http://x", { method: "POST" }), { params: Promise.resolve({ id: video.id }) });
     expect(res.status).toBe(201);

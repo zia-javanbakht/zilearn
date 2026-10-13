@@ -1,6 +1,7 @@
 import { after } from "next/server";
 import { refreshLinks } from "@/lib/kb";
 import { structureCourse } from "@/lib/brainmap";
+import { digestNow } from "@/lib/digest";
 import { buildTree, getCourse, listMaterials, listTopics, replaceTopics, setMastery, updateCourse } from "@/lib/store";
 import { body, fail, handle, ok, type Ctx } from "@/lib/http";
 import type { Mastery } from "@/lib/types";
@@ -26,7 +27,8 @@ export const POST = handle(async (_req: Request, { params }: Ctx<{ id: string }>
   const { id } = await params;
   const course = getCourse(id);
   if (!course) return fail("Course not found", 404);
-  const materials = listMaterials(id, true);
+  // Every item's keyword map (as the student left it on the Materials tab) is what the map is built from.
+  const materials = digestNow(listMaterials(id, true));
   if (!materials.length) return fail("Add some materials first.");
   const { topics, summary, by } = await structureCourse(course, materials);
   replaceTopics(id, topics);

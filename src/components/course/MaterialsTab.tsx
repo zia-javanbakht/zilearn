@@ -373,6 +373,8 @@ function MaterialRow({
   onTranscribe: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  // The item's keyword map, to check and edit before the course brainmap is built from it.
+  const [mapOpen, setMapOpen] = useState(false);
   const [full, setFull] = useState<Material | null>(null);
   const [text, setText] = useState("");
   const isAudio = isRecording(m);
@@ -532,6 +534,11 @@ function MaterialRow({
               Clean up
             </button>
           )}
+          {m.digest && (
+            <button className={`sm${mapOpen ? " primary" : ""}`} aria-pressed={mapOpen} onClick={() => setMapOpen((v) => !v)} title="Its key terms as a map you can edit; the course brainmap is built from these maps">
+              {mapOpen ? "Hide map" : "Map"}
+            </button>
+          )}
           <button className="sm" onClick={toggle}>
             {open ? "Close" : m.status === "ready" ? "View text" : "Add text"}
           </button>
@@ -579,6 +586,7 @@ function MaterialRow({
           title={m.title}
         />
       )}
+      {mapOpen && !open && m.digest && <MaterialDigest m={m} ai={ai} onChanged={reload} onSeek={isAudio || yt ? seek : undefined} />}
       {open && full && (
         <div className="stack" style={{ marginTop: 8 }}>
           {full.text?.trim() && <MaterialDigest m={m} ai={ai} onChanged={reload} onSeek={isAudio || yt ? seek : undefined} />}

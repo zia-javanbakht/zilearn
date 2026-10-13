@@ -122,12 +122,7 @@ export function parseTranslate(t: string | null): [number, number] {
   return m ? [Number(m[1]), Number(m[2])] : [0, 0];
 }
 
-/** A short stable hash of a diagram's code, to remember how it was arranged. */
-export function codeHash(s: string): string {
-  let h = 0x811c9dc5;
-  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x01000193);
-  return (h >>> 0).toString(36);
-}
+export { codeHash } from "@/lib/diagramModel";
 
 /** Read the drawn diagram. Node ids are the names in the code ("n3", "root"); data-nid is set on each node. */
 export function readGraph(box: HTMLElement, code: string): Graph | null {

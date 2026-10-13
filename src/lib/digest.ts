@@ -5,13 +5,16 @@ import { headingRepairer } from "./headingRepair";
 import { stripTimestamps } from "./transcript";
 import { addTopic, getMaterial, listTopics, normTitle, setDigest, updateMaterial } from "./store";
 import { checkKeywords, isGarbled, isWord, repairTerm, repairText } from "./textRepair";
+import { abstractSentences, groundTerms, keywordMap, termLabel, type KeywordNode } from "./keywords";
 import type { Digest, DigestTopic, Material } from "./types";
 
 /**
- * A digest of one material: a short summary, key terms, and its topics (two levels, with the
- * [mm:ss] where each starts in a recording). It shows under the material, draws that material's
- * own mindmap, and feeds the course brainmap. The AI writes it when available; offline it is
- * extracted from headings, or for transcripts from the most frequent phrases of each stretch.
+ * A digest of one material: a short summary, its key terms, and its keyword map. The key terms come
+ * first; the map is built from them (main terms with the terms that go with them, two levels), and each
+ * term carries what the material itself says about it, quoted with its section or [mm:ss] time. It shows
+ * under the material, where the student can edit the map, and the course brainmap is built from it. The
+ * AI picks and organises the terms when available; offline they are extracted from the text. A material
+ * without enough key terms falls back to its sections, or for transcripts the stretches of its talk.
  */
 
 const RECORDING_KINDS = new Set(["youtube", "video", "audio_memo"]);
@@ -37,17 +40,15 @@ export function wantsAiDigest(): boolean {
   return aiEnabled();
 }
 
-const TopicSchema = z.object({
-  title: z.string().describe("Concise topic name, max ~6 words"),
-  start: z.string().nullable().describe('Where it starts in the recording as "mm:ss" or "h:mm:ss" (from the [mm:ss] markers), or null'),
-  summary: z.string().describe("1-2 sentences on what is said about it; maths in LaTeX ($...$)"),
+const TermSchema = z.object({
+  term: z.string().describe("The key term exactly as the material writes it (its acronym in brackets if it uses one), max ~6 words"),
+  parent: z.string().nullable().describe("The main term this one belongs under, written exactly as that term; null for a main term"),
+  note: z.string().describe("1-2 sentences of what the material says about this term, only from the material; maths in LaTeX ($...$)"),
+  start: z.string().nullable().describe('In a recording, where it is first explained as "mm:ss" or "h:mm:ss" (from the [mm:ss] markers); otherwise null'),
 });
 const DigestSchema = z.object({
   summary: z.string().describe("3-5 sentence overview of the content for a student; maths in LaTeX ($...$)"),
-  keywords: z.array(z.string()).describe("6-12 key terms, most important first"),
-  topics: z
-    .array(TopicSchema.extend({ subtopics: z.array(TopicSchema).describe("0-6 subtopics") }))
-    .describe("3-10 main topics in the order they are covered"),
+  terms: z.array(TermSchema).describe("8-20 key terms: 4-8 main terms (parent null) in the order the material takes them up, each with the terms that belong under it"),
   corrections: z
     .array(
       z.object({
@@ -77,25 +78,29 @@ export async function digestWithFixes(m: Pick<Material, "title" | "kind" | "text
         effort: "low",
         maxTokens: 8000,
         context: `<material title="${m.title.replace(/"/g, "'")}" kind="${m.kind}">\n${recording ? truncate(text, MAX_AI_CHARS) : docExcerpt(text)}\n</material>`,
-        prompt: `Summarise this course material for a student's study map: an overview, the key terms, and the topics it covers in order with their subtopics. Keep only subject content (no greetings, logistics or small talk). Use the [mm:ss] markers, when present, for where each topic starts. Cover every numbered section and appendix with a topic or subtopic, and write each topic's summary only from its own section: results belong to the case they were found for (don't carry one case's result to another).
+        prompt: `Read this course material for a student's study map. Start from its key terms: the concepts, methods, models, quantities and named results it is about. Then organise them into a keyword map, and for each term say what the material says about it.
+
+- Key terms are terms the material itself uses, written as it writes them. Not the journal, authors, affiliations, funding, references, figure or table numbers, slide navigation, or a generic word on its own (model, results, study, method, analysis, element).
+- 4-8 main terms in the order the material takes them up; every other term goes under the main term it belongs to (its parent is that main term, written exactly the same). An idea belongs to one term.
+- Each note says only what the material says about that term, for the case it says it (a result found for one case is not stated for another).
+- Use the [mm:ss] markers, when present, for where each term is first explained.
+- The summary is a 3-5 sentence overview of the material for a student.
 
 The text came from ${recording ? "speech recognition" : "PDF or document extraction, sometimes OCR"} and can be damaged: letters lost where a font joined ff/fi/fl ("e ect", "di erent", "rst" for "first"), words split or run together, misread letters ("rn" for "m", "1" for "l"), misheard technical terms. Read it in context:
-- Write every key term, title and summary with correct spelling, as the subject spells it. Key terms must be terms the material actually uses (in the reader's words, not invented ones).
+- Write every term, note and the summary with correct spelling, as the subject spells it.
 - List each damaged word you notice under corrections, with a few words of exact context. Don't list style, grammar or British/American spelling.`,
       });
-      const clean = (t: z.infer<typeof TopicSchema>): DigestTopic => ({ title: repairTerm(t.title, text), start: normStart(t.start), summary: t.summary.trim() });
-      const keywords = out.keywords.map((k) => k.trim()).filter(Boolean);
-      const checked = checkKeywords(keywords, text, { max: 12 });
-      return {
-        digest: {
-          summary: out.summary.trim(),
-          // Terms the text never mentions are dropped; if that would leave too few, the AI's list stands.
-          keywords: checked.length >= Math.min(4, keywords.length) ? checked : keywords.slice(0, 12),
-          topics: out.topics.slice(0, 12).map((t) => ({ ...clean(t), subtopics: t.subtopics.slice(0, 8).map(clean) })),
-          by: "ai",
-        },
-        corrections: out.corrections ?? [],
-      };
+      // Terms the text never uses are dropped; each kept one gets the material's own sentences about it.
+      const nodes = groundTerms(
+        text,
+        out.terms.map((t) => ({ term: repairTerm(t.term, text), parent: t.parent ? repairTerm(t.parent, text) : null, note: t.note, start: normStart(t.start) })),
+      );
+      if (nodes.length >= 2)
+        return {
+          digest: { summary: out.summary.trim(), ...fromKeywords(nodes), by: "ai", basis: "keywords" },
+          corrections: out.corrections ?? [],
+        };
+      console.warn("AI key terms not found in the text; using the offline keyword map");
     } catch (err) {
       console.error("AI digest failed; using the offline one", err);
     }
@@ -152,10 +157,13 @@ function normStart(s: string | null | undefined): string | null {
   return m ? m[0] : null;
 }
 
-/** Give new or changed materials their offline digest at once (cheap), returning them with it. */
+/**
+ * Give new or changed materials their offline digest at once (cheap), returning them with it. An offline
+ * digest from before keyword maps is made again; an AI digest or one the student edited is kept.
+ */
 export function digestNow(materials: Material[]): Material[] {
   return materials.map((m) => {
-    if (m.digest || !m.text?.trim()) return m;
+    if (!m.text?.trim() || (m.digest && (m.digest.basis || m.digest.by === "ai" || m.digest.edited))) return m;
     const digest = offlineDigest(m.text);
     setDigest(m.id, digest);
     return { ...m, digest };
@@ -166,7 +174,8 @@ export function digestNow(materials: Material[]): Material[] {
 export async function upgradeDigests(ids: string[]): Promise<void> {
   for (const id of ids) {
     const m = getMaterial(id);
-    if (!m?.text?.trim() || m.digest?.by === "ai" || !wantsAiDigest()) continue;
+    // A map the student edited is theirs: only "Summarise again" replaces it.
+    if (!m?.text?.trim() || m.digest?.by === "ai" || m.digest?.edited || !wantsAiDigest()) continue;
     const r = await digestWithFixes(m, true);
     // Skip if the text was edited meanwhile; that edit made its own digest.
     if (r?.digest.by !== "ai" || getMaterial(id)?.text !== m.text) continue;
@@ -222,9 +231,27 @@ const STAMP = /\[((?:\d{1,2}:)?\d{1,2}:\d{2})\]/;
 /** Text without LaTeX, so "\\eta \\nabla" isn't taken for a key term. */
 const noMath = (s: string) => s.replace(/\$\$[\s\S]*?\$\$|\$[^$\n]*\$|\\\(.*?\\\)/g, " ");
 
+/** Topics and key terms of a digest from a keyword map: main terms with their terms under them. */
+function fromKeywords(nodes: KeywordNode[]): Pick<Digest, "topics" | "keywords"> {
+  const topic = (n: KeywordNode): DigestTopic => ({ title: termLabel(n.term, n.aliases), start: n.start, summary: n.note, evidence: n.evidence });
+  const topics = nodes.slice(0, 12).map((n) => ({ ...topic(n), subtopics: n.children.slice(0, 8).map(topic) }));
+  const keywords = [...nodes.map((n) => n.term), ...nodes.flatMap((n) => n.children.map((c) => c.term))].slice(0, 12);
+  return { topics, keywords };
+}
+
 export function offlineDigest(raw: string): Digest {
   // Text saved before extraction repairs existed may still be broken ("e ect"); terms and summary use the repaired form.
   const text = repairText(raw).text;
+  const plain = stripTimestamps(text);
+  const summary = abstractSentences(text, 3) ?? keySentences(plain, 3);
+  // Key terms first; the map is built from them.
+  const nodes = keywordMap(text);
+  if (nodes.length >= 2 && nodes.reduce((n, x) => n + 1 + x.children.length, 0) >= 4) return { summary, ...fromKeywords(nodes), by: "offline", basis: "keywords" };
+  return { ...sectionDigest(text), summary };
+}
+
+/** Too few key terms to map (a short note, a chatty recording): the material's sections, or stretches of its talk. */
+function sectionDigest(text: string): Digest {
   const plain = stripTimestamps(text);
   const terms = noMath(plain);
   const sections = studySections(text).filter((s) => s.heading);
@@ -247,7 +274,7 @@ export function offlineDigest(raw: string): Digest {
   const covered = new Set(phrases.flatMap((p) => p.split(" ").map(stem)));
   // Only terms the text really contains, in its own spelling, with no extraction fragments.
   const keywords = checkKeywords([...phrases, ...topKeywords(terms, 16).filter((w) => !covered.has(stem(w)))], terms, { strict: true, max: 10 });
-  return { summary: keySentences(plain, 3), keywords, topics: topics.filter((t) => t.title), by: "offline" };
+  return { summary: keySentences(plain, 3), keywords, topics: topics.filter((t) => t.title), by: "offline", basis: "sections" };
 }
 
 /** Split a long text into 2-10 stretches of similar length on paragraph boundaries. */
