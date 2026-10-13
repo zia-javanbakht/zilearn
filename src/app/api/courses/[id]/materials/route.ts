@@ -1,6 +1,6 @@
-import { digestNow, settleNewText } from "@/lib/digest";
+import { digestNow, listMaterialsWithMaps, settleNewText } from "@/lib/digest";
 import { importFile, importLink, sizeLabel, sizeLimit, type ImportResult } from "@/lib/importer";
-import { getCourse, insertMaterial, listMaterials } from "@/lib/store";
+import { getCourse, insertMaterial } from "@/lib/store";
 import { fail, handle, later, ok, type Ctx } from "@/lib/http";
 import { MATERIAL_KINDS, type MaterialKind } from "@/lib/types";
 
@@ -21,7 +21,7 @@ function created(result: ImportResult) {
 
 export const GET = handle(async (_req: Request, { params }: Ctx<{ id: string }>) => {
   const { id } = await params;
-  return ok(listMaterials(id));
+  return ok(listMaterialsWithMaps(id));
 });
 
 /**

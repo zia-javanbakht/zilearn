@@ -34,11 +34,107 @@ const MAX_CHARS = 300_000;
 
 export async function structureCourse(course: Course, materials: Material[]): Promise<{ topics: NewTopic[]; summary: string; by: "claude" | "heuristic" }> {
   const usable = materials.filter((m) => (m.text ?? "").trim().length > 0 || m.title);
+  // Key terms first: when the items have keyword maps, those are the map, with or without AI.
+  if (usable.some(keywordMapOf)) {
+    const topics = heuristicTopics(usable);
+    if (aiEnabled()) {
+      try {
+        const out = await describeWithAi(course, usable, topics);
+        return { ...out, by: "claude" };
+      } catch (e) {
+        console.warn("[brainmap] The AI couldn't describe the keyword map; using the items' own sentences.", e);
+      }
+    }
+    return { topics, summary: heuristicSummary(course, usable), by: "heuristic" };
+  }
   if (aiEnabled() && usable.length) {
     const { topics, summary } = await structureWithClaude(course, usable);
     return { topics, summary, by: "claude" };
   }
   return { topics: heuristicTopics(usable), summary: heuristicSummary(course, usable), by: "heuristic" };
+}
+
+const DescribeSchema = z.object({
+  course_summary: z.string().describe("2-4 sentence overview of what the course covers."),
+  groups: z
+    .array(
+      z.object({
+        title: z.string().describe("A broader concept the branches share, as the materials name it (max ~6 words)"),
+        summary: z.string().describe("1-2 sentences on what ties them together, from the materials"),
+        members: z.array(z.string()).describe("ids of the top-level branches it holds (2 or more)"),
+      }),
+    )
+    .describe("Only when there are more than 8 top-level branches: broader branches to gather related ones under. Otherwise empty."),
+  topics: z
+    .array(
+      z.object({
+        id: z.string(),
+        summary: z.string().describe("1-3 sentences: what the materials say about this term, for the case they say it"),
+        importance: z.number().int().describe("1 = minor, 2 = normal, 3 = core / heavily examined"),
+      }),
+    )
+    .describe("One entry per branch id given."),
+});
+
+/**
+ * The AI's part when the map is built from keyword maps: the branches stay the items' terms, as they are;
+ * the AI writes each one's summary from the materials, rates its importance and, when there are many
+ * top-level branches, gathers related ones under broader ones.
+ */
+async function describeWithAi(course: Course, materials: Material[], topics: NewTopic[]): Promise<{ topics: NewTopic[]; summary: string }> {
+  const refs = new Map(materials.map((m, i) => [m.id, `M${i + 1}`]));
+  const kids = (ref: string | null) => topics.filter((t) => t.parent_ref === ref);
+  const line = (t: NewTopic, indent: string): string[] => [
+    `${indent}- [${t.ref}] ${t.title} (from ${t.material_ids.map((id) => refs.get(id)).join(", ")})${t.summary ? `: ${truncate(t.summary.replace(/\s+/g, " "), 300)}` : ""}`,
+    ...kids(t.ref).flatMap((c) => line(c, indent + "  ")),
+  ];
+  const budget = Math.floor(MAX_CHARS / Math.max(1, materials.length));
+  const blocks = materials.map((m) => `<material id="${refs.get(m.id)}" kind="${MATERIAL_KIND_LABELS[m.kind]}" title="${m.title.replace(/"/g, "'")}">\n${m.text ? truncate(m.text, budget) : "(no text available)"}\n</material>`);
+  const tops = kids(null).length;
+  const out = await generateStructured({
+    schema: DescribeSchema,
+    effort: "low",
+    maxTokens: 16000,
+    context: blocks.join("\n\n"),
+    prompt: `Course: ${course.name}${course.code ? ` (${course.code})` : ""}
+
+This is the student's brainmap of the course, built from the key terms of the materials above: each branch is a key term (the student checked these maps), the branches under it are the terms the materials discuss with it, and the text after each is a sentence the material says about it.
+
+${kids(null).flatMap((t) => line(t, "")).join("\n")}
+
+For every branch id:
+- Write its summary from what the materials say about that term: 1-3 sentences a student can learn from, for the case the material says it (a result found for one case is not stated for another). Use only the materials; do not add facts they don't state.
+- Rate its importance: 3 for terms the materials build on or that sample exams ask about.
+Keep the branches as they are: don't rename, add or drop any.
+${tops > 8 ? `There are ${tops} top-level branches: gather related ones under 3-6 broader branches named as the materials name the concept they share. A branch that fits no group stays where it is.` : "Leave groups empty."}`,
+  });
+  const byId = new Map(out.topics.map((t) => [t.id.replace(/^\[|\]$/g, "").trim(), t]));
+  const described = topics.map((t) => {
+    const d = byId.get(t.ref);
+    const summary = d?.summary?.trim();
+    return { ...t, summary: summary || t.summary, importance: d ? Math.min(3, Math.max(1, d.importance)) : t.importance };
+  });
+  // Groups hold top-level branches only, each in one group, and need two members to be worth a branch.
+  const top = new Set(kids(null).map((t) => t.ref));
+  const placed = new Set<string>();
+  const groups: NewTopic[] = [];
+  for (const [g, grp] of (out.groups ?? []).entries()) {
+    const members = grp.members.map((x) => x.replace(/^\[|\]$/g, "").trim()).filter((x) => top.has(x) && !placed.has(x));
+    if (members.length < 2 || !grp.title.trim()) continue;
+    const ref = `G${g}`;
+    members.forEach((x) => placed.add(x));
+    const ids = [...new Set(members.flatMap((x) => described.find((t) => t.ref === x)!.material_ids))];
+    groups.push({ ref, parent_ref: null, title: truncate(grp.title.trim(), 80), summary: grp.summary.trim(), keywords: members.map((x) => bareTerm(described.find((t) => t.ref === x)!.title)).slice(0, 8), material_ids: ids, importance: 3 });
+    for (const t of described) if (members.includes(t.ref)) t.parent_ref = ref;
+  }
+  // Each group stands where its first member stood.
+  const ordered: NewTopic[] = [];
+  for (const t of described) {
+    const g = groups.find((x) => x.ref === t.parent_ref);
+    if (g && !ordered.includes(g)) ordered.push(g);
+    ordered.push(t);
+  }
+  return { topics: ordered, summary: out.course_summary.trim() || heuristicSummary(course, materials) };
 }
 
 async function structureWithClaude(course: Course, materials: Material[]) {
@@ -116,10 +212,72 @@ function groundedTerms(terms: string[], sources: string): string[] {
 
 const CONTEXT_SECTION = /^(introduction( and motivation)?|motivation|background|conclusions?|concluding remarks|summary( and conclusions?)?|discussion and conclusions?|closing remarks|outlook)$/i;
 
-/** Offline structuring: one branch per material, subtopics from detected headings. */
-export function heuristicTopics(materials: Material[]): NewTopic[] {
+const keywordMapOf = (m: Material) => (m.digest && (m.digest.basis === "keywords" || m.digest.edited) && m.digest.topics.length ? m.digest : null);
+
+/** A term as one key across items: "Representative volume elements (RVE)" and "representative volume element" match. */
+const termKey = (t: string) =>
+  bareTerm(t)
+    .toLowerCase()
+    .replace(/[-‐‑–\s]+/g, " ")
+    .replace(/(?<=\w)s\b/g, "")
+    .trim();
+
+/** Most top-level branches the items' main terms make before each item becomes a branch of its own. */
+const MAX_TERM_BRANCHES = 14;
+
+/**
+ * The course map from the items' keyword maps: their main terms are the branches (a term several items
+ * use is one branch, citing them all) and the terms under each main term are its sub-branches, each with
+ * what the item says about it. Null when the items' main terms are too many to stand as branches.
+ */
+function keywordBranches(mapped: Material[]): NewTopic[] | null {
+  type Branch = { title: string; summary: string; ids: string[]; subs: Map<string, { title: string; summary: string; ids: string[] }> };
+  const mains = new Map<string, Branch>();
+  for (const m of mapped)
+    for (const t of keywordMapOf(m)!.topics.slice(0, 20)) {
+      const key = termKey(t.title);
+      if (!key) continue;
+      let b = mains.get(key);
+      if (!b) mains.set(key, (b = { title: t.title, summary: noteOf(t), ids: [], subs: new Map() }));
+      if (!b.ids.includes(m.id)) b.ids.push(m.id);
+      for (const st of (t.subtopics ?? []).slice(0, 20)) {
+        const k = termKey(st.title);
+        if (!k || k === key || mains.has(k)) continue;
+        const sub = b.subs.get(k);
+        if (sub) sub.ids.includes(m.id) || sub.ids.push(m.id);
+        else b.subs.set(k, { title: st.title, summary: noteOf(st), ids: [m.id] });
+      }
+    }
+  if (mapped.length > 1 && mains.size > MAX_TERM_BRANCHES) return null;
+  // A term that is a main term somewhere is a branch, not also a sub-branch elsewhere; a term two items put
+  // under different main terms stays under the first.
+  const placed = new Set<string>();
+  for (const b of mains.values())
+    for (const k of [...b.subs.keys()]) {
+      if (mains.has(k) || placed.has(k)) b.subs.delete(k);
+      placed.add(k);
+    }
   const topics: NewTopic[] = [];
+  [...mains.values()].forEach((b, j) => {
+    const ref = `K${j}`;
+    const subs = [...b.subs.values()];
+    topics.push({ ref, parent_ref: null, title: truncate(b.title, 80), summary: b.summary, keywords: [b.title, ...subs.map((x) => x.title)].map(bareTerm).slice(0, 8), material_ids: b.ids, importance: subs.length >= 2 || b.ids.length > 1 ? 3 : 2 });
+    subs.forEach((st, k) => topics.push({ ref: `${ref}.${k}`, parent_ref: ref, title: truncate(st.title, 80), summary: st.summary, keywords: [bareTerm(st.title)], material_ids: st.ids, importance: 2 }));
+  });
+  return topics;
+}
+
+/**
+ * Offline structuring. Items with a keyword map (above all one the student checked on the Materials tab)
+ * give the branches: their main terms, with the terms under them as sub-branches. Any other item is a
+ * branch of its own, with its sections (or its digest's topics) under it.
+ */
+export function heuristicTopics(materials: Material[]): NewTopic[] {
+  const mapped = materials.filter((m) => keywordMapOf(m));
+  const byTerms = mapped.length ? keywordBranches(mapped) : null;
+  const topics: NewTopic[] = byTerms ?? [];
   materials.forEach((m, i) => {
+    if (byTerms && keywordMapOf(m)) return;
     const ref = `M${i}`;
     const text = m.text ?? "";
     const sections = studySections(text).filter((s) => s.heading);
@@ -141,9 +299,9 @@ export function heuristicTopics(materials: Material[]): NewTopic[] {
       material_ids: [m.id],
       importance: m.kind === "sample_exam" ? 3 : 2,
     });
-    // A keyword map (above all one the student edited) is the branch: its terms are the topics.
-    const keywordMap = m.digest?.basis === "keywords" || m.digest?.edited ? m.digest : null;
-    if (keywordMap?.topics.length) {
+    // Too many items' terms to stand as branches: each item's keyword map is its own branch.
+    const keywordMap = keywordMapOf(m);
+    if (keywordMap) {
       keywordMap.topics.slice(0, 20).forEach((t, j) => {
         const tref = `${ref}.k${j}`;
         const subs = t.subtopics ?? [];

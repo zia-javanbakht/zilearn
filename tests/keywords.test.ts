@@ -100,8 +100,12 @@ describe("the course map follows the student's keyword map", () => {
     const edited = { ...d, topics: [...kept, { title: "My own term", start: null, summary: "Added by me.", subtopics: [] }], edited: true };
     const m = { id: "m1", course_id: "c", kind: "paper", title: "abs2024", text: paper, digest: edited } as unknown as Material;
     const topics = heuristicTopics([m]);
-    const branch = topics.filter((t) => t.parent_ref === topics[0].ref).map((t) => t.title);
-    expect(branch).toEqual([...kept.map((t) => t.title), "My own term"]);
+    // The main terms are the brainmap's branches; no branch for the paper itself.
+    const branches = topics.filter((t) => !t.parent_ref).map((t) => t.title);
+    expect(branches).toEqual([...kept.map((t) => t.title), "My own term"]);
+    // The terms under each main term are its sub-branches.
+    const first = topics.find((t) => t.title === kept[0].title)!;
+    expect(topics.filter((t) => t.parent_ref === first.ref).map((t) => t.title)).toEqual((kept[0].subtopics ?? []).map((s) => s.title));
     const dropped = d.topics.slice(2).map((t) => t.title);
     expect(topics.filter((t) => dropped.includes(t.title))).toEqual([]);
     // Notes say where the paper says it.
