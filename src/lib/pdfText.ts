@@ -16,7 +16,7 @@ export interface PdfLine {
 }
 
 type Pdf = { numPages: number; getPage(n: number): Promise<{ getTextContent(): Promise<{ items: unknown[] }> }> };
-type Item = { str?: string; transform?: number[]; hasEOL?: boolean };
+type Item = { str?: string; transform?: number[]; width?: number; hasEOL?: boolean };
 
 const BULLETS = /^[•●⚫▪■▶►▸‣◆◦○➤✓✗]$/;
 
@@ -179,8 +179,24 @@ export async function pdfLines(pdf: Pdf): Promise<PdfLine[][]> {
         const last = [...cur].reverse().find((c) => c.str?.trim() && c.transform);
         const under =
           base != null && last?.transform != null && h <= 0.85 * size && Math.hypot(last.transform[2], last.transform[3]) <= 0.85 * size && last.transform[5] - base > 0.2 * size && base - ny > 0 && base - ny < 0.6 * size && Math.abs(it.transform[4] - last.transform[4]) < 1.5 * size;
-        if (eol && !stacked && !under) flush(true);
-        else if (y != null && !stacked && !under && Math.abs(ny - y) > 1.2 * Math.max(size, h)) flush();
+        // A display equation's tall pieces (a big bracket, a fraction's numerator) are raised a little and go on
+        // to the right of the piece before; a new line starts back at the left, or lower down.
+        // Only where the line is set in a symbol font whose glyphs come out as control characters ("¼" for "="):
+        // pdfTeX's cmex lines (Thompson) keep their own handling.
+        const maths = /[\u0000-\u001f¼þ]/u;
+        const onward =
+          base != null &&
+          last?.transform != null &&
+          it.transform[4] >= last.transform[4] + (last.width ?? 0) - 0.5 &&
+          it.str.trim().length <= 4 &&
+          // cmex's big glyphs come out as letters ("Z" is ∫, "n" a brace): those are put back later, line by line.
+          !/^[A-Za-z]$/.test(it.str.trim()) &&
+          !/^[A-Za-z]$/.test(last.str!.trim()) &&
+          ny - base < 1.6 * size &&
+          ny - base > 0.25 * size &&
+          cur.some((c) => maths.test(c.str ?? ""));
+        if (eol && !stacked && !under && !onward) flush(true);
+        else if (y != null && !stacked && !under && !onward && Math.abs(ny - y) > 1.2 * Math.max(size, h)) flush();
         eol = false;
         y = it.transform[5];
         size = Math.max(size, h);
