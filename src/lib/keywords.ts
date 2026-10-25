@@ -589,7 +589,9 @@ export function keywordMap(text: string, opts: { mains?: number; children?: numb
   const terms = opts.terms ?? keyTerms(text, long ? 36 : 24);
   if (!terms.length) return [];
   const nMain = Math.min(opts.mains ?? (long ? 12 : 7), Math.max(3, Math.ceil(terms.length / 3)));
-  const sets = new Map(terms.map((t) => [t.term, new Set(sentences.flatMap((s, i) => (contains(s, termKeys(t.term, t.aliases)) ? [i] : [])))]));
+  // A box's sentences are about what its label names, though the label itself isn't in them.
+  const boxOf = (s: Sentence) => (s.box ? wordsOf(s.box).map(wordKey).join(" ") : null);
+  const sets = new Map(terms.map((t) => [t.term, new Set(sentences.flatMap((s, i) => (contains(s, termKeys(t.term, t.aliases)) || boxOf(s) === wordsOf(t.term).map(wordKey).join(" ") ? [i] : [])))]));
   // Main terms are ones the material keeps coming back to.
   const strong = terms.filter((t) => t.count >= 3);
   const main = (strong.length >= 3 ? strong : terms).slice(0, nMain);
