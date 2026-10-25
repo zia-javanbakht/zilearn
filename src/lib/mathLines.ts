@@ -70,6 +70,11 @@ export function markDisplayMaths(text: string): string {
     // A summation's index or a lone subscript set on its own line ("𝑖") sits between two lines of the equation.
     const scrap = (k: number) => k + 1 < lines.length && /^\S{1,3}$/u.test(lines[k].trim()) && !proseWords(lines[k]).length && isMathLine(lines[k + 1]);
     while (i < lines.length && (isMathLine(lines[i]) || scrap(i))) run.push(lines[i++].trim());
+    // A built-up formula's pieces ("ln", "( 1", "1 − η", ")] 1", "m") follow on short lines, down to its number.
+    const piece = (l: string | undefined) => l !== undefined && /^\S.{0,7}$/u.test(l.trim()) && !proseWords(l).length && !/^(#|---)/.test(l.trim());
+    let k = i;
+    while (k < lines.length && k - i < 8 && piece(lines[k]) && !/^\(\d{1,3}[a-z]?\)$/.test(lines[k].trim())) k++;
+    if (k > i && /^\(\d{1,3}[a-z]?\)$/.test(lines[k]?.trim() ?? "")) while (i <= k) run.push(lines[i++].trim());
     i--;
     // A scrap of symbols left open inside a sentence ("… = ∫𝑆𝑝 / 𝒙 × / 𝜌𝒗 d𝑣. Its rate …") is that sentence's maths, set off by an integral's limits.
     const before = out[out.length - 1]?.trim() ?? "";
