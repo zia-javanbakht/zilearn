@@ -562,7 +562,7 @@ function quotable(t: string, lenient = false): boolean {
   // A reference ("Wriggers, P. Nonlinear Finite Element Methods.") names a book; it doesn't teach.
   if (/^\p{Lu}[\p{L}'-]+,\s+(\p{Lu}\.\s?)+/u.test(t)) return false;
   // A lesson's labelled lines ("Formula: …", "Procedure: …") list rather than say.
-  if (/^(formula|procedure|key terms|beyond your notes)\s*:/i.test(t)) return false;
+  if (/^(formula|procedure|key terms|beyond your notes|source|sources|glossary|see also|pitfalls?)\b\s*:?/i.test(t)) return false;
   return words >= (lenient ? 4 : 6) && words <= 70 && letters / t.length > (lenient ? 0.4 : 0.6) && (lenient || !isGarbled(t));
 }
 
