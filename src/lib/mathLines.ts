@@ -41,7 +41,7 @@ export function isMathLine(raw: string): boolean {
   if (first.length >= 2 && !MATH_WORDS.has(first.toLowerCase()) && (english(first) || /^(we|it|is|as|so|by|if|an|at|to|be|of|or|no)$/i.test(first)) && words.length >= 1) return false;
   const tokens = t.split(/\s+/).length;
   // A table's row of numbers isn't an equation.
-  if ((t.match(/(?<![\p{L}])\d+(?:[.,]\d+)?%?(?![\p{L}])/gu) ?? []).length >= 5 && !OPERATOR.test(t)) return false;
+  if ((t.replace(/\(\d{1,3}[a-z]?\)$/, "").match(/(?<![\p{L}\p{N}.,:])\d+(?:[.,:]\d+)?%?(?![\p{L}])/gu) ?? []).length >= 5 && !OPERATOR.test(t)) return false;
   if (words.length <= 2 && (RELATION.test(t) || OPERATOR.test(t))) return true;
   return symbols >= 3 && words.length <= 3 && words.length / tokens < 0.3;
 }

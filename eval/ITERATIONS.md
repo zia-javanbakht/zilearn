@@ -48,3 +48,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 37 | An exponent's broken-font minus or plus (\u0001, þ) stays in the exponent: U_i^{j−} | 88.56 | 76.51 | yes |
 | 38 | In a symbol-font equation, big brackets and raised fraction parts stay on the equation's line (Hashin criteria) | 88.75 | 76.51 | yes |
 | 39 | An exponent after a big symbol-font bracket is read against the line's baseline: (σ11/XT)^2 | 88.85 | 76.51 | yes |
+| 40 | A subscript's digits and an equation's (8) tag no longer make an equation line look like a table row | 88.88 | 76.51 | yes |
