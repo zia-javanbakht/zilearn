@@ -54,9 +54,11 @@ export function markDisplayMaths(text: string): string {
   if (/\$\$/.test(text)) return text;
   const lines = text.split("\n");
   const out: string[] = [];
+  // Subscripts are marked for equations; in a sentence the symbol reads as the PDF wrote it ("𝑆𝑝").
+  const prose = (l: string) => l.replace(/_\{([^{}$]{1,6})\}|_([^\s{}$])/gu, "$1$2");
   for (let i = 0; i < lines.length; i++) {
     if (!isMathLine(lines[i])) {
-      out.push(lines[i]);
+      out.push(prose(lines[i]));
       continue;
     }
     const run: string[] = [];
@@ -72,7 +74,7 @@ export function markDisplayMaths(text: string): string {
     const tex = renderable(run.join(" "));
     // What KaTeX can't read (a garbled OCR line) stays plain text.
     if (tex) out.push(`$$${tex}$$`);
-    else out.push(...run);
+    else out.push(...run.map(prose));
   }
   return out.join("\n");
 }

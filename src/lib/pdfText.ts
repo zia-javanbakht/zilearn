@@ -37,23 +37,37 @@ function lineOf(items: Item[]): PdfLine {
   // A raised number after a word or a full stop is a citation ("study,8"), which stays as it is, and so
   // is a raised number of two digits or more after a bracket ("(Figure A1)16").
   let str = "";
-  let exp: { y: number; text: string; tail: string } | null = null;
+  let exp: { y: number; text: string; tail: string; x: number; base: Item | undefined; sub: string } | null = null;
+  const group = (x: string) => (x.length > 1 ? `{${x}}` : x);
   const close = () => {
-    if (exp) str += `^${exp.text.length > 1 ? `{${exp.text}}` : exp.text}${exp.tail}`;
+    if (exp) str += `${exp.sub ? `_${group(exp.sub)}` : ""}^${group(exp.text)}${exp.tail}`;
     exp = null;
   };
+  const SCRIPT = /^[\p{L}\p{N}+−\-′*/]{1,6}\s?$/u;
   rest.forEach((it, k) => {
     const t = it.str ?? "";
     const h = sizeOf(it);
     const y = it.transform?.[5] ?? 0;
     // Pieces of one exponent set separately ("−", "1") stay together.
-    if (exp && t.trim() && !/^\s/.test(t) && !exp.tail && Math.abs(y - exp.y) < 0.15 * h && /^[\p{L}\p{N}+−\-′*/]{1,6}\s?$/u.test(t)) {
+    if (exp && t.trim() && !/^\s/.test(t) && !exp.tail && !exp.sub && Math.abs(y - exp.y) < 0.15 * h && SCRIPT.test(t)) {
       exp.text += t.trim();
       exp.tail = /\s$/.test(t) ? " " : "";
       return;
     }
+    // A subscript set under the exponent, back at its x ("U" with "j+" over "i"): U_i^{j+}.
+    const by = exp?.base?.transform?.[5];
+    if (exp && by != null && t.trim() && SCRIPT.test(t) && h <= 0.85 * sizeOf(exp.base!) && by - y > 0.1 * h && by - y < 0.6 * sizeOf(exp.base!) && it.transform![4] <= exp.x + 0.5 * h) {
+      exp.sub += t.trim();
+      exp.tail = /\s$/.test(t) ? " " : exp.tail;
+      return;
+    }
+    if (exp && t === "") return;
+    if (exp && !t.trim() && exp.sub) {
+      if (/\s/.test(t)) exp.tail = " ";
+      return;
+    }
     close();
-    const prev = rest[k - 1];
+    const prev = [...rest.slice(0, k)].reverse().find((p) => p.str?.trim());
     const before = prev?.str ?? "";
     // Raised against the symbol it follows, not the line: in a stacked fraction the line has no one baseline.
     const raised = prev?.transform ? y - prev.transform[5] : 0;
@@ -66,9 +80,17 @@ function lineOf(items: Item[]): PdfLine {
       /^[\p{L}\p{N}+−\-′*/]{1,6}\s?$/u.test(t) &&
       ((/[\u{1d400}-\u{1d7ff}\u0370-\u03ff\u2100-\u214f)\]]$/u.test(before) && /[\d+−\u{1d400}-\u{1d7ff}]/u.test(piece)) ||
         // Set smaller after a symbol or a capital standing for one (pdfTeX's "F" then "T": Fᵀ; "(QF)" then "T").
-        (smaller && /^[\p{L}\p{N}+−′*]{1,4}$/u.test(piece) && /(?:^|[\s(=+−,⋅·])[A-Z]{1,3}$|[)\]\u0370-\u03ff\u{1d400}-\u{1d7ff}]$/u.test(before))) &&
+        (smaller && /^[\p{L}\p{N}+−′*]{1,4}$/u.test(piece) && /(?:^|[\s(=+−,⋅·])[A-Z]{1,3}\s?$|[)\]\u0370-\u03ff\u{1d400}-\u{1d7ff}]$/u.test(before))) &&
       !(/[)\]]$/.test(before) && /^\d{2,}$/.test(piece));
-    if (isExp) exp = { y, text: piece, tail: /\s$/.test(t) ? " " : "" };
+    // A subscript: set smaller and a little lower after a symbol ("ϵ" then "ik": ϵ_{ik}).
+    const lowered = prev?.transform ? prev.transform[5] - y : 0;
+    const isSub =
+      !isExp && smaller && lowered > 0.1 * h && lowered < 0.6 * sizeOf(prev!) && /^[\p{L}\p{N}]{1,4}\s?$/u.test(t) && /[\u{1d400}-\u{1d7ff}\u0370-\u03ff]\s?$|(?:^|[\s(=+−,⋅·])[A-Z]\s?$/u.test(before);
+    if (isExp) {
+      // The exponent sits on the symbol, not after the space pdf.js put behind it.
+      if (/\s$/.test(before)) str = str.replace(/\s$/, "");
+      exp = { y, text: piece, tail: /\s$/.test(t) ? " " : "", x: it.transform?.[4] ?? 0, base: prev, sub: "" };
+    } else if (isSub) str = `${str.replace(/\s$/, "")}_${group(piece)}${/\s$/.test(t) ? " " : ""}`;
     else str += t;
   });
   close();
@@ -152,8 +174,12 @@ export async function pdfLines(pdf: Pdf): Promise<PdfLine[][]> {
         const numX = base == null ? undefined : full.find((c) => c.transform![5] - base > 0.25 * h)?.transform?.[4];
         const stacked =
           base != null && y != null && numX != null && h >= 0.85 * size && y - base > 0.25 * h && y - base < 1.1 * h && base - ny > 0.25 * h && base - ny < 1.1 * h && it.transform[4] >= numX - h;
-        if (eol && !stacked) flush(true);
-        else if (y != null && !stacked && Math.abs(ny - y) > 1.2 * Math.max(size, h)) flush();
+        // pdf.js also ends the line after an exponent with a subscript under it still to come ("U", "j+", then "i").
+        const last = [...cur].reverse().find((c) => c.str?.trim() && c.transform);
+        const under =
+          base != null && last?.transform != null && h <= 0.85 * size && Math.hypot(last.transform[2], last.transform[3]) <= 0.85 * size && last.transform[5] - base > 0.2 * size && base - ny > 0 && base - ny < 0.6 * size && Math.abs(it.transform[4] - last.transform[4]) < 1.5 * size;
+        if (eol && !stacked && !under) flush(true);
+        else if (y != null && !stacked && !under && Math.abs(ny - y) > 1.2 * Math.max(size, h)) flush();
         eol = false;
         y = it.transform[5];
         size = Math.max(size, h);

@@ -44,3 +44,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 33 | Single-word penalty eased from 4 uses | 87.67 | 75.92 | no |
 | 34 | Evidence avoids sentences thick with maths symbols | 87.67 | 75.76 | no |
 | 35 | Long sentences are no longer cut into 30-word pieces when they end with a stop, and never inside an equation | 87.67 | 76.11 | yes |
+| 36 | Subscripts are read in equations (ϵ_{ik}, and U_i^{j+} where pdf.js ends the line between exponent and subscript); prose keeps 𝑆𝑝 | 88.42 | 76.51 | yes |
