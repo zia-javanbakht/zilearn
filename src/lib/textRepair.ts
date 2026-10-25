@@ -176,6 +176,12 @@ export function repairText(input: string, opts: RepairOptions = {}): { text: str
     return fixed;
   });
 
+  // A Roman numeral OCR read as ones in a capitals heading ("MODEL PROBLEM 11:" is II).
+  text = text.replace(/^(\d+\.\s+[A-Z][A-Z -]{3,}\s)(1{1,3})(?=\s*:)/gm, (_all, head: string, ones: string) => {
+    report.ocr++;
+    return head + "I".repeat(ones.length);
+  });
+
   // 5. OCR letter-shape confusions, judged by the document's own majority spelling.
   // Only a rare non-word next to a frequent spelling is changed, so a born-digital text is safe too:
   // a PDF's own text layer may be an old scan's OCR.
