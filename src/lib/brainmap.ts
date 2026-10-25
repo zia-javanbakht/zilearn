@@ -291,8 +291,9 @@ function mergeNamesakes(topics: NewTopic[]): NewTopic[] {
   const drop = new Set<string>();
   for (const t of topics) {
     if (!t.ref.startsWith("K") || !t.parent_ref?.startsWith("S")) continue;
-    const parent = topics.find((p) => p.ref === t.parent_ref)!;
-    if (termKey(parent.title) !== termKey(t.title)) continue;
+    // Its namesake section, wherever the term itself was placed.
+    const parent = topics.find((p) => p.ref.startsWith("S") && termKey(p.title) === termKey(t.title));
+    if (!parent) continue;
     drop.add(t.ref);
     for (const c of topics) if (c.parent_ref === t.ref) c.parent_ref = parent.ref;
   }
