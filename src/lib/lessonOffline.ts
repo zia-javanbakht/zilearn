@@ -602,3 +602,46 @@ function focusIn(title: string, relevant: (Sentence & { score: number })[], us: 
   const secs = [...new Set(us.filter((u) => u.title === title && u.section).map((u) => u.section!))];
   return secs.slice(0, 3).join("; ");
 }
+
+export interface TopicFacts {
+  /** Statements that define a term, best first: the topic itself, then its key terms. */
+  definitions: { term: string; text: string; source: string }[];
+  /** Display equations with the sentence that introduces them, from the passages most about the topic. */
+  formulas: { lead: string; math: string; source: string }[];
+  /** Other statements about the topic, most relevant first. */
+  statements: { text: string; source: string }[];
+}
+
+/**
+ * What the materials state about a topic, for the offline flashcards, exams and notes: the same
+ * definitions and formulas the offline lessons teach from, with where each comes from.
+ */
+export function topicFacts(title: string, keywords: string[], sources: Source[]): TopicFacts {
+  const terms = stems(`${title} ${keywords.join(" ")}`);
+  const us = units(sources);
+  const all = dedupe(us.flatMap(sentences))
+    .map((s) => ({ ...s, score: relevance(s.text, terms) }))
+    .filter((s) => s.own || mentions(s.text, title));
+  const definitions: TopicFacts["definitions"] = [];
+  const used = new Set<string>();
+  for (const term of [title, ...keywords.filter((k) => k.toLowerCase() !== title.toLowerCase() && !GENERIC.test(k))].slice(0, 6)) {
+    const def = definition(term, all);
+    // Only sentences that really say what the term is (score 2 and up), never one that merely mentions it.
+    if (!def || def.score < 2 || used.has(def.text) || isPrompt(def.text)) continue;
+    used.add(def.text);
+    definitions.push({ term, text: def.body, source: def.source });
+  }
+  const formulasOut = us
+    .filter((u) => u.own || mentions(`${u.section ?? ""} ${u.lines.join(" ")}`, title))
+    .map((u) => ({ u, score: relevance(`${u.section ?? ""} ${u.lines.join(" ")}`, terms) }))
+    .filter((x) => x.score > 1)
+    .sort((a, b) => b.score - a.score)
+    .flatMap(({ u }) => formulas(u).map((f) => ({ ...f, source: u.section ? `${u.title}, ${u.section}` : u.title })))
+    .slice(0, 6);
+  const statements = all
+    .filter((s) => s.score > 0 && !s.lead && !used.has(s.text) && isStatement(s.text) && !s.stamp)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6)
+    .map((s) => ({ text: s.text, source: s.source }));
+  return { definitions, formulas: formulasOut, statements };
+}

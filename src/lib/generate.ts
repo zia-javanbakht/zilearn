@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { aiEnabled, CUT_OFF_NOTE, generateStructured, generateText, UserError } from "./ai";
-import { excerptsFor } from "./kb";
+import { excerptsFor, sourcesFor } from "./kb";
+import { topicFacts } from "./lessonOffline";
+import { mentions } from "./lessonTerms";
 import { buildTree, flattenTree, getCourse, listMaterials, listTopics } from "./store";
-import { truncate } from "./text";
+import { plainSummary, truncate } from "./text";
 import {
   DEPTH_LEVELS,
   MASTERY_LABELS,
@@ -458,9 +460,9 @@ const CardSchema = z.object({
 export async function generateCards(courseId: string, scope: Scope, count: number) {
   const ctx = resolveScope(courseId, scope);
   if (!ctx.nodes.length) throw new UserError("Build the brainmap first.");
-  const n = Math.min(60, Math.max(5, Math.round(count)));
-  const leaves = ctx.nodes.filter((x) => !x.children.length);
-  const pool = leaves.length ? leaves : ctx.nodes;
+  const n = Math.min(60, Math.max(5, Math.round(count) || 20));
+  // Every topic in scope, parents too: a branch is a concept with its own definitions and results.
+  const pool = ctx.nodes;
   const byTitle = new Map(pool.map((x) => [x.title.toLowerCase(), x]));
   const topicOf = (title: string) =>
     byTitle.get(title.toLowerCase()) ?? pool.find((x) => title.toLowerCase().includes(x.title.toLowerCase())) ?? null;
@@ -491,19 +493,65 @@ Good flashcards:
     };
   }
 
-  // Offline: a definition card per topic, then key-term cards, weak topics first.
+  // Offline: cards from what the materials state about each topic (its definitions and formulas), weak
+  // topics first and taking turns, so a small deck still covers many topics.
   const order = [...pool].sort((a, b) => WEIGHT[b.effective_mastery ?? "dont_know"] - WEIGHT[a.effective_mastery ?? "dont_know"]);
+  const decks = order.map((t) => offlineCards(courseId, t));
   const cards: { front: string; back: string; topic_id: string | null }[] = [];
-  for (const t of order) if (t.summary) cards.push({ front: `What is **${t.title}**?`, back: t.summary, topic_id: t.id });
-  for (const t of order) {
-    for (const k of t.keywords.slice(0, 3)) {
-      const sentence = excerptsFor(courseId, k, 600, t.material_ids)
-        .flatMap((e) => e.split(/(?<=[.!?])\s+/))
-        .find((s) => s.toLowerCase().includes(k.toLowerCase()) && s.length > 30 && s.length < 300);
-      if (sentence) cards.push({ front: `In **${t.title}**, what does "${k}" refer to?`, back: sentence.trim(), topic_id: t.id });
+  // A parent's key term is often a subtopic too: the same answer is one card.
+  const answers = new Set<string>();
+  for (let i = 0; cards.length < n && decks.some((d) => d.length > i); i++)
+    for (const d of decks) {
+      const key = d[i]?.back.split("\n\n")[0].toLowerCase().replace(/\W+/g, "");
+      if (!d[i] || cards.length >= n || answers.has(key!)) continue;
+      answers.add(key!);
+      cards.push(d[i]);
     }
+  return { cards, by: "heuristic" as const };
+}
+
+/** One topic's offline cards: a card per definition, a "complete the formula" card per equation, else its summary. */
+export function offlineCards(courseId: string, t: TopicNode): { front: string; back: string; topic_id: string }[] {
+  const facts = topicFacts(t.title, t.keywords, sourcesFor(courseId, `${t.title} ${t.keywords.join(" ")}`, 12000, t.material_ids));
+  const from = (source: string) => `\n\n*From ${source}*`;
+  const out: { front: string; back: string; topic_id: string }[] = [];
+  for (const d of facts.definitions.slice(0, 3))
+    out.push({
+      front: d.term === t.title ? `What is **${d.term}**?` : `In ${t.title}, what is **${d.term}**?`,
+      back: d.text + from(d.source),
+      topic_id: t.id,
+    });
+  const about = [t.title, ...t.keywords];
+  for (const f of facts.formulas) {
+    // The formula must be introduced as being about this topic, not just sit near it.
+    if (!about.some((k) => mentions(`${f.lead} ${f.source}`, k))) continue;
+    const math = f.math.replace(/^\$\$|\$\$$/g, "").trim();
+    const eq = math.indexOf("=");
+    // "... = 0." leaves nothing to recall.
+    if (eq < 1 || math.includes("\n") || eq > 40 || math.slice(eq + 1).replace(/[\s.,;]/g, "").length < 3) continue;
+    const lead = f.lead && !/^\$\$/.test(f.lead) ? `${f.lead}\n\n` : `Complete the result for **${t.title}**:\n\n`;
+    out.push({ front: `${lead}$$${math.slice(0, eq).trim()} = \\;?$$`, back: `$$${math}$$${from(f.source)}`, topic_id: t.id });
+    if (out.length >= 5) break;
   }
-  return { cards: cards.slice(0, n), by: "heuristic" as const };
+  // A sentence the materials say about the term, with the term left out, asks for the term itself.
+  const summary = plainSummary(t.summary);
+  for (const text of [summary, ...facts.statements.map((x) => x.text)]) {
+    if (out.length >= 2) break;
+    const gap = cloze(text, t.title);
+    if (gap) out.push({ front: `Which term fills the gap?\n\n> ${gap}`, back: `**${t.title}**\n\n${text}`, topic_id: t.id });
+  }
+  if (!out.length && summary) out.push({ front: `What is **${t.title}** about?`, back: summary, topic_id: t.id });
+  return out;
+}
+
+/** The text with a term (or its plural) replaced by one gap, or null when too little is left to go on. */
+export function cloze(text: string, term: string): string | null {
+  const esc = term.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "[\\s-]+");
+  const re = new RegExp(`(?<![\\p{L}])${esc}(?:e?s)?(?![\\p{L}])`, "giu");
+  if (!re.test(text)) return null;
+  const gapped = text.replace(re, "_____");
+  // The gap must leave enough words around it to work the term out from.
+  return gapped.split(/\s+/).filter((w) => /\p{L}{2}/u.test(w) && !w.includes("_____")).length >= 6 ? gapped : null;
 }
 
 /** Flashcards from the questions a student got wrong or only partly right in a graded exam. */
