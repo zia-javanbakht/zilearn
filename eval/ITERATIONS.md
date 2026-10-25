@@ -21,3 +21,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 12 | Figure labels up to 7 words ("Same internal virtual work after integration") are folded into the diagram pointer | 85.41 | 68.8 | yes |
 | 13 | Display equations in a PDF's text become $$…$$ blocks (KaTeX-checked); sentences keep the equation they lead into | 86.65 | 68.93 | yes |
 | 14 | Exponents set smaller after a capital or bracket (pdfTeX's Fᵀ, F⁻ᵀ, (QF)ᵀ) are read as ^T, ^{−T} | 87.23 | 68.84 | yes |
+| 15 | Stacked fractions (numerator over denominator) are read as a/b on one line, e.g. P = ∂Ψ/∂F | 87.41 | 68.81 | yes |

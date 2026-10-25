@@ -32,7 +32,7 @@ function lineOf(items: Item[]): PdfLine {
     text.length > 1 &&
     first.str!.trim().length === 1 &&
     (BULLETS.test(first.str!.trim()) || (sizeOf(first) > sizeOf(text[1]) * 1.1 && /^\s*\p{Lu}\p{Ll}{2,}/u.test(text[1].str!)));
-  const rest = bullet ? items.slice(items.indexOf(first) + 1) : items;
+  const rest = fractions(bullet ? items.slice(items.indexOf(first) + 1) : items, sizeOf);
   // Exponents: a short piece raised above the maths symbol before it ("𝑱" then "−1" a little higher is 𝑱^{−1}).
   // A raised number after a word or a full stop is a citation ("study,8"), which stays as it is, and so
   // is a raised number of two digits or more after a bracket ("(Figure A1)16").
@@ -77,6 +77,47 @@ function lineOf(items: Item[]): PdfLine {
 }
 
 /**
+ * A fraction set as a numerator raised above the line and a denominator below it ("∂Ψ" over "∂F") as one
+ * piece on the baseline: "∂Ψ/∂F", or "(a + b)/(c)" when either part has spaces.
+ */
+function fractions(items: Item[], sizeOf: (it: Item) => number): Item[] {
+  const text = items.filter((it) => it.str?.trim() && it.transform);
+  if (text.length < 3) return items;
+  // The baseline: the height most of the line's characters sit at.
+  const at = new Map<number, number>();
+  for (const it of text) at.set(Math.round(it.transform![5]), (at.get(Math.round(it.transform![5])) ?? 0) + it.str!.trim().length);
+  const base = [...at].sort((a, b) => b[1] - a[1])[0][0];
+  const out: Item[] = [];
+  for (let k = 0; k < items.length; k++) {
+    const it = items[k];
+    const h = sizeOf(it);
+    const dy = (x: Item) => (x.transform ? x.transform[5] - base : 0);
+    if (!it.str?.trim() || !it.transform || !(dy(it) > 0.25 * h && dy(it) < 1.1 * h)) {
+      out.push(it);
+      continue;
+    }
+    // The numerator: pieces at its height; then the denominator: pieces as far below.
+    let j = k;
+    let num = "";
+    while (j < items.length && (!items[j].str?.trim() || (items[j].transform && Math.abs(dy(items[j]) - dy(it)) < 0.15 * h))) num += items[j++].str ?? "";
+    const x0 = it.transform[4];
+    let den = "";
+    const d0 = items[j];
+    if (d0?.transform && dy(d0) < -0.25 * h && dy(d0) > -1.1 * h && d0.transform[4] >= x0 - h && sizeOf(d0) >= 0.85 * h) {
+      while (j < items.length && (!items[j].str?.trim() || (items[j].transform && Math.abs(dy(items[j]) - dy(d0)) < 0.15 * h))) den += items[j++].str ?? "";
+    }
+    if (!num.trim() || !den.trim() || sizeOf(it) < 0.85 * Math.max(...text.map(sizeOf))) {
+      out.push(it);
+      continue;
+    }
+    const part = (x: string) => (/\s/.test(x.trim()) ? `(${x.trim()})` : x.trim());
+    out.push({ ...it, str: `${part(num)}/${part(den)}`, transform: [...it.transform.slice(0, 5), base] });
+    k = j - 1;
+  }
+  return out;
+}
+
+/**
  * Each page's lines as pdf.js gives them (the same text unpdf's extractText makes), with font sizes.
  * A jump to another height starts a new line too: pdf.js can run a slide's title into the labels of
  * the figure under it.
@@ -95,19 +136,32 @@ export async function pdfLines(pdf: Pdf): Promise<PdfLine[][]> {
       y = null;
       size = 0;
     };
+    // pdf.js ends a line after a fraction's numerator; the line goes on if its denominator comes next.
+    let eol = false;
     for (const it of items as Item[]) {
       if (it.str == null) continue;
       if (it.str.trim() && it.transform) {
         const h = Math.hypot(it.transform[2], it.transform[3]);
-        // Against the piece before, so a fraction's numerator after its denominator doesn't break the line.
-        if (y != null && Math.abs(it.transform[5] - y) > 1.2 * Math.max(size, h)) flush();
+        // Against the piece before, so a fraction's numerator after its denominator doesn't break the line,
+        // nor does its denominator after its numerator (raised above the line's baseline, then set below it).
+        // The baseline is where the line's first full-size piece sits; the numerator is raised above it and the
+        // denominator starts under it. Full-size pieces only: a superscript over a subscript ("F" with "t" over "f") is smaller.
+        const full = cur.filter((c) => c.str?.trim() && c.transform && Math.hypot(c.transform[2], c.transform[3]) >= 0.85 * size);
+        const base = full[0]?.transform?.[5];
+        const ny = it.transform[5];
+        const numX = base == null ? undefined : full.find((c) => c.transform![5] - base > 0.25 * h)?.transform?.[4];
+        const stacked =
+          base != null && y != null && numX != null && h >= 0.85 * size && y - base > 0.25 * h && y - base < 1.1 * h && base - ny > 0.25 * h && base - ny < 1.1 * h && it.transform[4] >= numX - h;
+        if (eol && !stacked) flush(true);
+        else if (y != null && !stacked && Math.abs(ny - y) > 1.2 * Math.max(size, h)) flush();
+        eol = false;
         y = it.transform[5];
         size = Math.max(size, h);
       }
       cur.push(it);
-      if (it.hasEOL) flush(true);
+      if (it.hasEOL) eol = true;
     }
-    flush();
+    flush(eol);
     pages.push(lines);
   }
   return pages;
