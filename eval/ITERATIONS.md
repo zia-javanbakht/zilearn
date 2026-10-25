@@ -82,3 +82,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 71 | Section notes drop the words leading into an equation that left it out | 89.1 | 79.22 | yes |
 | 72 | A figure caption box runs on to its stop and starts with a capital | 89.1 | 79.62 | yes |
 | 73 | A term's note prefers a sentence of six words or more over a bare list item | 89.1 | 79.7 | yes |
+| 74 | A scrap of maths left open mid-sentence stays in the sentence | 89.1 | 79.7 | yes |

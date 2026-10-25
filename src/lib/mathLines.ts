@@ -71,8 +71,12 @@ export function markDisplayMaths(text: string): string {
     const scrap = (k: number) => k + 1 < lines.length && /^\S{1,3}$/u.test(lines[k].trim()) && !proseWords(lines[k]).length && isMathLine(lines[k + 1]);
     while (i < lines.length && (isMathLine(lines[i]) || scrap(i))) run.push(lines[i++].trim());
     i--;
+    // A scrap of symbols left open inside a sentence ("… = ∫𝑆𝑝 / 𝒙 × / 𝜌𝒗 d𝑣. Its rate …") is that sentence's maths, set off by an integral's limits.
+    const before = out[out.length - 1]?.trim() ?? "";
+    const after = lines[i + 1]?.trim() ?? "";
+    const midSentence = run.length === 1 && run[0].length <= 8 && /^[=+−×<>)·⋅-]|[=+−×<>(·⋅-]$/.test(run[0]) && before && !/[.!?:]$/.test(before) && !before.startsWith("$$") && after && !isMathLine(after) && proseWords(after).length >= 2;
     // A lone number tag isn't an equation by itself.
-    if (run.every((l) => /^\(\d{1,3}[a-z]?\)$/.test(l))) {
+    if (midSentence || run.every((l) => /^\(\d{1,3}[a-z]?\)$/.test(l))) {
       out.push(...run);
       continue;
     }
