@@ -163,7 +163,9 @@ function headingLevel(line: string): number {
     return num ? num[1].split(".").length : md[1].length - 1;
   }
   const num = line.match(/^(\d+(?:\.\d+){0,3})[.)]?\s/);
-  return num ? num[1].split(".").length : 1;
+  if (num) return num[1].split(".").length;
+  const letter = line.match(/^[A-H]((?:\.\d+){0,2})\s/);
+  return letter ? 1 + (letter[1].match(/\./g)?.length ?? 0) : 1;
 }
 
 export function splitSections(text: string): Section[] {
@@ -222,6 +224,14 @@ function headingOf(line: string): string | null {
   // Appendices keep their label: "Appendix II: Stability proof" is how the paper refers to it.
   m = line.match(/^(appendix\s+(?:\d+|[IVX]+|[A-Z]))[.:)\-–]?\s+(.+)$/i);
   if (m && titleLike(m[2], 12)) return `${unshout(m[1])}: ${unshout(m[2].trim())}`;
+  // Lettered appendices: "B Exercises for Hand Calculation", "A.4 Why may existence theory require different function spaces?".
+  m = line.match(/^([A-H])\.(\d+)\s+(\p{Lu}[^.!]{2,100}\??)$/u);
+  if (m && /\p{Ll}/u.test(m[3]) && !/[=<>≤≥]/.test(m[3]) && m[3].split(/\s+/).length <= 14 && (m[3].endsWith("?") || titleLike(m[3], 12))) return m[3].trim();
+  m = line.match(/^([A-H])\s+(\p{Lu}[\p{L}-]*(?:\s+[^\s.!?]+){1,11})$/u);
+  if (m && /\p{Ll}/u.test(m[2]) && titleLike(m[2], 12)) {
+    const words = m[2].split(/\s+/).filter((w) => !SMALL_WORDS.has(w.toLowerCase()));
+    if (words.filter((w) => /^\p{Lu}/u.test(w)).length >= Math.max(2, 0.6 * words.length)) return m[2].trim();
+  }
   m = line.match(/^(\d+(?:\.\d+){0,2})[.)]?\s+([A-Z][^.!?]{2,80})$/);
   // Numbered list items in running prose ("2. Equations (9)-(10) are the Euler equations of") and
   // wrapped maths ("2 KE2, E = 1") aren't headings.

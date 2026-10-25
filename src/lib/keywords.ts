@@ -106,11 +106,18 @@ function wordKey(w: string): string {
   return stem(w.toLowerCase().replace(/[’']s?$/, "").replace(/[-‐‑–]/g, ""));
 }
 
+const DRILL = /^((multiple[- ]choice\s+)?(concept\s+)?quiz(zes)?|exercises?|hints?|answers?|answer checks|self[- ]?tests?|review questions|practice (problems|questions)|problems|solutions)\b/i;
+
 /** The material's teaching text: no title page, affiliations, references, funding or declarations. */
 function bodySections(text: string): { heading: string; body: string; lead: boolean }[] {
   const out: { heading: string; body: string; lead: boolean }[] = [];
   let backMatter = false;
+  // Exercises, hints, answer checks and quizzes go over the text again: their terms are its terms.
+  let drill: number | null = null;
   for (const s of studySections(text)) {
+    if (s.heading && drill != null && (s.level ?? 1) <= drill) drill = null;
+    if (s.heading && drill == null && DRILL.test(s.heading)) drill = s.level ?? 1;
+    if (drill != null) continue;
     const lines = s.body.split("\n");
     const kept: string[] = [];
     for (const l of lines) {
@@ -270,7 +277,8 @@ function runs(sentence: string): string[][] {
   for (const tok of sentence.split(/\s+/)) {
     // An opening bracket starts an aside: "law of thermodynamics (balance of energy)" is two terms.
     if (/^[([{]/.test(tok)) end();
-    const word = tok.replace(/^[("'“‘[]+|[)"'”’\],.;:!?]+$/g, "");
+    // Names joined by an en dash are one word: "Piola–Kirchhoff", "Cauchy–Green".
+    const word = tok.replace(/^[("'“‘[]+|[)"'”’\],.;:!?]+$/g, "").replace(/(?<=\p{L})[‐‑–](?=\p{L})/gu, "-");
     if (word === "of" && cur.length && !cur.includes("of")) {
       cur.push(word);
       continue;
