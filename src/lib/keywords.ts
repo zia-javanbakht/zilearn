@@ -529,12 +529,15 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
   // ("volume element" in "representative volume element") is the longer one, a longer one used much less than
   // its shorter form ("enhanced strain field" next to "enhanced strain") gives way to it, and pieces of one long
   // name ("driven return mapping", "strain driven return") are that name.
+  const loose = (w: string[]) => w.map((x) => x.replace(/(ility|ile|ivity|ive|ality|al|icity|ic)$/, "")).join(" ");
   const picked: { c: Candidate; score: number; form: string }[] = [];
   for (const s of scored) {
     if (picked.length >= max) break;
     const words = s.c.key.split(" ");
     const clash = picked.some((p) => {
       const pw = p.c.key.split(" ");
+      // One term in two word forms ("pseudo-ductility behavior", "pseudo-ductile behavior").
+      if (loose(words) === loose(pw)) return true;
       if (inside(words, pw)) return s.c.count <= p.c.count * 3;
       if (inside(pw, words)) return s.c.count < Math.max(3, p.c.count * 0.5);
       return overlap(words, pw) && s.c.count <= p.c.count * 1.5;
