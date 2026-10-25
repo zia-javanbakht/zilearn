@@ -17,6 +17,8 @@ describe("display maths in a PDF's text", () => {
     expect(markDisplayMaths(text)).toBe("The strong form is\n$$Div P + ρ0b = 0 in B0, (1) φ = φ̄ on Γφ, (2)$$\nHere, ρ0 is the density.\n$$𝒙 = ∑ 𝑖 𝑁𝑖 𝒙𝑖$$");
     // LaTeX's own characters are escaped; a line it still can't read stays text.
     expect(markDisplayMaths("a & b = 50%")).toBe("$$a \\& b = 50\\%$$");
+    // A lone equation number is LaTeX's tag.
+    expect(markDisplayMaths("Text before.\nE = mc^2 (3)")).toBe("Text before.\n$$E = mc^2 \\tag{3}$$");
     // Text that already has maths blocks (an AI transcription) is left alone.
     expect(markDisplayMaths("$$x = 1$$\ny = 2")).toBe("$$x = 1$$\ny = 2");
   });

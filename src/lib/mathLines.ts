@@ -90,6 +90,8 @@ function renderable(line: string): string | null {
     .replace(/\$/g, "")
     .replace(/\s*\u0338\s*=/g, " ≠")
     .replace(/[&%#]/g, (c) => `\\${c}`);
+  // The equation's number, as LaTeX numbers it: "… (12)" is \tag{12}, when it is the block's only one.
+  if ((t.match(/\(\d{1,3}[a-z]?\)/g) ?? []).length === 1) t = t.replace(/\s*\((\d{1,3}[a-z]?)\)\s*$/, " \\tag{$1}");
   if ((t.match(/\{/g) ?? []).length !== (t.match(/\}/g) ?? []).length) t = t.replace(/[{}]/g, (c) => `\\${c}`);
   try {
     katex.renderToString(t, { displayMode: true, throwOnError: true, strict: "ignore" });
