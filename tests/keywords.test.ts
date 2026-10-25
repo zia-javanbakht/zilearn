@@ -21,6 +21,26 @@ beforeAll(async () => {
 const flat = (s: string) => s.replace(/\s+/g, " ");
 
 describe("key terms of a paper", () => {
+  it("names a head noun that is nearly always qualified by its most used phrase", () => {
+    const t = [
+      "The consistent tangent drives the Newton method.",
+      "We derive the consistent tangent from the residual.",
+      "A consistent tangent gives quadratic convergence.",
+      "The load tangent vanishes for dead loads.",
+      "The internal tangent comes from the stress.",
+      "Each Newton tangent is assembled per element.",
+      "The total tangent sums both parts.",
+    ].join(" ");
+    const terms = keyTerms(t).map((k) => k.term.toLowerCase());
+    expect(terms).toContain("consistent tangent");
+    expect(terms).not.toContain("tangent");
+  });
+
+  it("leaves out a verb the text also uses as a participle", () => {
+    const t = "The mass oscillates. The system oscillates freely. It oscillates at the damped frequency. The beam oscillates slowly. Without oscillating, it stops. The damping ratio sets the decay. The damping ratio is small.";
+    expect(keyTerms(t).map((k) => k.term.toLowerCase())).not.toContain("oscillates");
+  });
+
   it("reads the author's keywords", () => {
     expect(authorKeywords(paper)).toEqual(["Pseudo-ductile composite", "finite element model", "micro-mechanical model", "multiscale model"]);
   });
@@ -42,7 +62,7 @@ describe("key terms of a paper", () => {
   it("maps the terms and quotes what the paper says about each, with the section it says it in", () => {
     const map = keywordMap(paper);
     expect(map.length).toBeGreaterThanOrEqual(4);
-    expect(map.length).toBeLessThanOrEqual(7);
+    expect(map.length).toBeLessThanOrEqual(12);
     const all = map.flatMap((n) => [n, ...n.children]);
     expect(all.length).toBeGreaterThanOrEqual(12);
     const text = flat(paper);

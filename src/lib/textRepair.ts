@@ -111,7 +111,8 @@ export function repairText(input: string, opts: RepairOptions = {}): { text: str
   const note = (from: string, to: string) => {
     if (report.examples.length < 8 && !report.examples.some((e) => e.startsWith(`"${from}"`))) report.examples.push(`"${from}" → "${to}"`);
   };
-  let text = normalise(input);
+  // A radical's bar, drawn in some publishers' fonts as a run of ffi glyphs, is the root sign.
+  let text = normalise(input).replace(/(?:ffi){3,}f{0,2}/g, "√");
   const vocab = vocabOf(opts.context ? `${normalise(opts.context)}\n${text}` : text);
 
   // 1. A stray character where the ligature was: pick the ligature that makes a word.
@@ -167,8 +168,25 @@ export function repairText(input: string, opts: RepairOptions = {}): { text: str
     return joined;
   });
 
+  // A section number OCR read with I or l for 1 and loose spaces ("2.2.I .", "3. I .") is the number.
+  text = text.replace(/^(\d+(?: ?\. ?(?:\d+|[Il]))+) ?\.(?= \p{Lu})/gmu, (all, num: string) => {
+    if (!/[Il ]/.test(all)) return all;
+    const fixed = `${num.replace(/[Il]/g, "1").replace(/ /g, "")}.`;
+    report.ocr++;
+    note(all, fixed);
+    return fixed;
+  });
+
+  // A Roman numeral OCR read as ones in a capitals heading ("MODEL PROBLEM 11:" is II).
+  text = text.replace(/^(\d+\.\s+[A-Z][A-Z -]{3,}\s)(1{1,3})(?=\s*:)/gm, (_all, head: string, ones: string) => {
+    report.ocr++;
+    return head + "I".repeat(ones.length);
+  });
+
   // 5. OCR letter-shape confusions, judged by the document's own majority spelling.
-  if (opts.ocr) text = fixOcrShapes(text, opts.context, report, note);
+  // Only a rare non-word next to a frequent spelling is changed, so a born-digital text is safe too:
+  // a PDF's own text layer may be an old scan's OCR.
+  text = fixOcrShapes(text, opts.context, report, note);
   return { text, report };
 }
 
@@ -265,6 +283,10 @@ const SHAPES: [RegExp, string][] = [
   [/1/g, "l"],
   [/0/g, "o"],
   [/5/g, "s"],
+  // Scans of old journals: "Jinite", "Jield" for "finite", "field"; "Finany" for "Finally".
+  [/j/g, "f"],
+  [/j/g, "fi"],
+  [/n/g, "ll"],
 ];
 
 /** A rare spelling one OCR confusion away from a frequent one is the frequent one misread. */
@@ -273,7 +295,7 @@ function fixOcrShapes(text: string, context: string | undefined, report: RepairR
   for (const w of `${context ?? ""}\n${text}`.toLowerCase().match(/[a-z0-9]+/g) ?? []) counts.set(w, (counts.get(w) ?? 0) + 1);
   const fixes = new Map<string, string>();
   for (const [w, n] of counts) {
-    if (n > 2 || w.length < 4 || (w.match(/[a-z]/g) ?? []).length < 3 || isWord(w)) continue;
+    if (n > 5 || w.length < 4 || (w.match(/[a-z]/g) ?? []).length < 3 || isWord(w)) continue;
     let best: { v: string; n: number } | null = null;
     for (const [re, to] of SHAPES) {
       for (const m of w.matchAll(new RegExp(re.source, "g"))) {
@@ -283,13 +305,35 @@ function fixOcrShapes(text: string, context: string | undefined, report: RepairR
       }
     }
     if (best) fixes.set(w, best.v);
+    // A slash read as l between two words the text uses ("stresslplane" is "stress/plane").
+    else
+      for (let p = 4; p <= w.length - 4; p++)
+        if (w[p] === "l" && (counts.get(w.slice(0, p)) ?? 0) >= 3 && (counts.get(w.slice(p + 1)) ?? 0) >= 3 && isWord(w.slice(0, p)) && isWord(w.slice(p + 1))) {
+          fixes.set(w, `${w.slice(0, p)}/${w.slice(p + 1)}`);
+          break;
+        }
   }
+  // A dollar sign for the fi ligature ("strain$eld", "$nite"), when that makes a word the text uses.
+  text = text.replace(/([A-Za-z]*)\$([a-z]{2,})\b/g, (all, a: string, b: string) => {
+    const lower = a.toLowerCase();
+    // "strain$eld" is two words run together: "strain field".
+    for (const [head, tail] of [[lower, `fi${b}`], ["", `${lower}fi${b}`]] as const) {
+      if ((counts.get(tail) ?? 0) < 3) continue;
+      if (head && !isWord(head) && (counts.get(head) ?? 0) < 3) continue;
+      report.ocr++;
+      const fixed = head ? `${a} ${tail}` : likeCase(a || "f", tail);
+      note(all, fixed);
+      return fixed;
+    }
+    return all;
+  });
   if (!fixes.size) return text;
   return text.replace(/\b[A-Za-z0-9]+\b/g, (w) => {
     const to = fixes.get(w.toLowerCase());
     if (!to) return w;
     report.ocr++;
-    const fixed = likeCase(w, to);
+    // A capital J misread for f keeps the word's own case ("Jield" is "field").
+    const fixed = /^J[a-z]/.test(w) && to[0] === "f" ? to : likeCase(w, to);
     note(w, fixed);
     return fixed;
   });

@@ -11,6 +11,13 @@ describe("heading repair", () => {
     expect(mend("Jinite elements")).toBe("Finite elements");
   });
 
+  it("reads a run of garbled words as the document's closest phrase", () => {
+    const m = headingRepairer("The enhanced strain field is new. An enhanced strain field again. Its interpolation and interpolation. Derivation of the weak form.");
+    expect(m("Enkanwd srrainjfield interpolation")).toBe("Enhanced strain field interpolation");
+    expect(m("Derivation of the weak form")).toBe("Derivation of the weak form");
+    expect(m("Example 1 : A plane problem")).toBe("Example 1: A plane problem");
+  });
+
   it("joins a word split by a stray space", () => {
     expect(mend("Axis ymmetric problems")).toBe("Axisymmetric problems");
     expect(mend("Finite element")).toBe("Finite element");

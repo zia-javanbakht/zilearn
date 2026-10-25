@@ -1,0 +1,296 @@
+{
+ "doc": "Simo & Rifai (1990), mixed assumed strain methods and incompatible modes",
+ "groups": [
+  {
+   "name": "Introduction and motivation",
+   "aliases": [
+    "Motivation and overview",
+    "Introduction"
+   ],
+   "concepts": [
+    [
+     "*Assumed strain methods",
+     "Assumed strain"
+    ],
+    [
+     "Assumed stress methods",
+     "Assumed stress"
+    ],
+    [
+     "*Incompatible modes",
+     "Method of incompatible modes",
+     "Incompatible mode"
+    ],
+    [
+     "Coarse mesh accuracy",
+     "Low order quadrilaterals"
+    ]
+   ]
+  },
+  {
+   "name": "Physically non-linear elasticity",
+   "aliases": [
+    "Model problem I",
+    "Three-field variational formulation",
+    "Three-field enhanced strain formulation"
+   ],
+   "concepts": [
+    [
+     "*Hu-Washizu principle",
+     "Hu-Washizu",
+     "Hu-Washizu variational principle"
+    ],
+    [
+     "*Enhanced strain",
+     "Enhanced strain field",
+     "Enhanced strains",
+     "Enhanced strain reparametrization"
+    ],
+    [
+     "Three-field variational formulation",
+     "Three-field mixed formulation",
+     "Three-field formulation"
+    ],
+    [
+     "Euler-Lagrange equations",
+     "Euler equations"
+    ],
+    [
+     "Stored energy function",
+     "Stored energy"
+    ]
+   ]
+  },
+  {
+   "name": "Mixed finite element approximations",
+   "aliases": [
+    "Mixed interpolation",
+    "Mixed interpolation and design conditions"
+   ],
+   "concepts": [
+    [
+     "*Isoparametric displacement interpolation",
+     "Isoparametric interpolation",
+     "Isoparametric map"
+    ],
+    [
+     "*Assumed discrete stress field",
+     "Stress interpolation",
+     "Stress field"
+    ],
+    [
+     "*Orthogonality condition",
+     "L2-orthogonality",
+     "Orthogonality"
+    ],
+    [
+     "Static condensation",
+     "Condensation",
+     "Element-level condensation"
+    ],
+    [
+     "Return mapping algorithm",
+     "Extension to plasticity",
+     "Plasticity"
+    ]
+   ]
+  },
+  {
+   "name": "Convergence and stability",
+   "aliases": [
+    "Remarks on convergence and stability",
+    "Convergence, stability and stress recovery"
+   ],
+   "concepts": [
+    [
+     "*Patch test",
+     "Consistency and the patch test"
+    ],
+    [
+     "*B-bar method",
+     "Interpretation as a B-bar method",
+     "B-bar"
+    ],
+    [
+     "Stability analysis",
+     "Stability of the discrete problem",
+     "Stability"
+    ],
+    [
+     "Stress recovery",
+     "Least-squares stress recovery",
+     "Least-squares variational recovery"
+    ]
+   ]
+  },
+  {
+   "name": "Element design",
+   "aliases": [
+    "Element design: enhanced strain field interpolation",
+    "Element design in isoparametric space",
+    "Enhanced strain field interpolation"
+   ],
+   "concepts": [
+    [
+     "*Transformation rules",
+     "Tensor and vector transformation"
+    ],
+    [
+     "*Construction of enhanced strain interpolations",
+     "Enhanced strain interpolation",
+     "Design recipe"
+    ],
+    [
+     "*Plane elasticity element",
+     "Five-parameter element",
+     "Plane element",
+     "Incompatible mode-like element"
+    ],
+    [
+     "Axisymmetric element",
+     "Axisymmetry"
+    ],
+    [
+     "Wilson's quad",
+     "Wilson element",
+     "Wilson's incompatible mode element",
+     "Analysis of Wilson's quad"
+    ]
+   ]
+  },
+  {
+   "name": "Plate bending",
+   "aliases": [
+    "Mindlin-Reissner plate",
+    "Model problem II",
+    "Mindlin-Reissner plate bending theory",
+    "Mindlin-Reissner plate element"
+   ],
+   "concepts": [
+    [
+     "*Mindlin-Reissner plate theory",
+     "Mindlin-Reissner",
+     "Plate bending element",
+     "Plate element"
+    ],
+    [
+     "*Enhanced shear strain",
+     "Enhanced shear strain field",
+     "Transverse shear strain",
+     "Transverse shear"
+    ],
+    [
+     "Mixed variational formulation",
+     "Plate variational formulation"
+    ]
+   ]
+  },
+  {
+   "name": "Numerical simulations",
+   "aliases": [
+    "Numerical examples",
+    "Numerical tests"
+   ],
+   "concepts": [
+    [
+     "*Beam bending: mesh distortion",
+     "Mesh distortion",
+     "Beam bending",
+     "Sensitivity to mesh distortion"
+    ],
+    [
+     "Driven cavity flow",
+     "Incompressible elasticity",
+     "Driven cavity"
+    ],
+    [
+     "*J2 flow theory",
+     "Plasticity and viscoplasticity",
+     "Elastoplastic",
+     "J2-flow"
+    ],
+    [
+     "Cook's membrane",
+     "Cook's membrane problem"
+    ],
+    [
+     "Double edge notched specimen",
+     "Notched specimen"
+    ],
+    [
+     "Thick cylinder",
+     "Axisymmetric elasticity",
+     "Expansion of a thick cylinder"
+    ],
+    [
+     "Viscoplasticity",
+     "Viscoplastic"
+    ],
+    [
+     "Neo-Hookean material",
+     "Compressible neo-Hookean",
+     "Geometrically non-linear problem"
+    ]
+   ]
+  }
+ ],
+ "also": [
+  [
+   "Mixed methods"
+  ],
+  [
+   "Mixed formulation"
+  ],
+  [
+   "Enhanced elements"
+  ],
+  [
+   "Enhanced element"
+  ],
+  [
+   "Mean dilatation"
+  ],
+  [
+   "Locking"
+  ],
+  [
+   "Nearly incompressible"
+  ],
+  [
+   "Bilinear"
+  ],
+  [
+   "Quadrilateral"
+  ],
+  [
+   "Concluding remarks"
+  ],
+  [
+   "Clamped arch"
+  ],
+  [
+   "Circular plate"
+  ],
+  [
+   "Square plate"
+  ],
+  [
+   "Rhombic plate"
+  ],
+  [
+   "Thin cylinder"
+  ],
+  [
+   "Variational crimes"
+  ],
+  [
+   "Newton"
+  ],
+  [
+   "Linearization"
+  ],
+  [
+   "Strain driven"
+  ]
+ ]
+}

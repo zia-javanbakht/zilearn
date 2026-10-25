@@ -151,6 +151,8 @@ export interface Section {
   body: string;
   /** How deep the heading sits: 0 for a document title ("# …"), 1 for a section, 2 for a subsection, … */
   level?: number;
+  /** The heading opened its paragraph ("Effect of the RVE size: …") rather than standing on its own line. */
+  runIn?: boolean;
 }
 
 /** The depth of a heading line, from its Markdown hashes or its numbering ("2.1" is 2). */
@@ -161,16 +163,29 @@ function headingLevel(line: string): number {
     return num ? num[1].split(".").length : md[1].length - 1;
   }
   const num = line.match(/^(\d+(?:\.\d+){0,3})[.)]?\s/);
-  return num ? num[1].split(".").length : 1;
+  if (num) return num[1].split(".").length;
+  const letter = line.match(/^[A-H]((?:\.\d+){0,2})\s/);
+  return letter ? 1 + (letter[1].match(/\./g)?.length ?? 0) : 1;
 }
 
 export function splitSections(text: string): Section[] {
   const lines = text.replace(/\r/g, "").split("\n");
+  const marked = (text.match(/^#{2,4}\s/gm) ?? []).length >= 4;
   const sections: Section[] = [];
   let cur: Section | null = null;
   for (const raw of lines) {
     const line = raw.trim();
-    const h = headingOf(line);
+    // A heading run into its paragraph ("Effect of the RVE size: To investigate …", "2.2.2. The patch test. Consider …").
+    const run: { heading: string; rest: string; level?: number } | null = !cur || !cur.body || /[.!?:]\s*$/.test(cur.body.trimEnd()) ? runInHeading(line) : null;
+    if (run) {
+      if (cur) sections.push(cur);
+      const parent: Section | undefined = [...sections, ...(cur ? [cur] : [])].reverse().find((s) => s.heading && !s.runIn);
+      cur = { heading: run.heading, body: run.rest + "\n", level: run.level ?? (parent?.level ?? 1) + 1, runIn: true };
+      continue;
+    }
+    // Where the reader marked the headings (by type size), an unmarked numbered line is a list item or a
+    // diagram's label ("3 Designing for decay"), not a heading it missed.
+    const h = marked && !/^#/.test(line) ? null : headingOf(line);
     // A title set over two lines ("A CLASS OF … METHODS AND" / "THE METHOD OF …") is one heading.
     if (h && cur && cur.heading && !cur.body && TRAILING_FUNCTION_WORD.test(cur.heading)) {
       cur.heading += ` ${h}`;
@@ -184,6 +199,19 @@ export function splitSections(text: string): Section[] {
   }
   if (cur) sections.push(cur);
   return sections.filter((s) => s.heading || s.body.trim());
+}
+
+/**
+ * A paragraph that opens with its own title: "Effect of fiber volume fraction of the middle ply: As explained …"
+ * or a numbered "2.3.1. Extension to plasticity. The formulation …". The title must read like one.
+ */
+function runInHeading(line: string): { heading: string; rest: string; level?: number } | null {
+  let m = line.match(/^(\d+\.\d+(?:\.\d+)*)\.?\s+([A-Z][^.!?:]{2,80})[.:]\s+(\p{Lu}.*)$/u);
+  // "4.2. Example 1: A plane elasticity element" is a title with a colon in it, not a title and a sentence.
+  if (m && titleLike(m[2], 10) && (/[.!?]/.test(m[3]) || m[3].length > 80)) return { heading: unshout(m[2].trim()), rest: m[3], level: m[1].split(".").length };
+  m = line.match(/^([A-Z][^.!?:;()]{8,90}):\s+(\p{Lu}.*)$/u);
+  if (m && m[1].split(/\s+/).length >= 3 && titleLike(m[1], 12)) return { heading: m[1].trim(), rest: m[2] };
+  return null;
 }
 
 function headingOf(line: string): string | null {
@@ -200,6 +228,14 @@ function headingOf(line: string): string | null {
   // Appendices keep their label: "Appendix II: Stability proof" is how the paper refers to it.
   m = line.match(/^(appendix\s+(?:\d+|[IVX]+|[A-Z]))[.:)\-–]?\s+(.+)$/i);
   if (m && titleLike(m[2], 12)) return `${unshout(m[1])}: ${unshout(m[2].trim())}`;
+  // Lettered appendices: "B Exercises for Hand Calculation", "A.4 Why may existence theory require different function spaces?".
+  m = line.match(/^([A-H])\.(\d+)\s+(\p{Lu}[^.!]{2,100}\??)$/u);
+  if (m && /\p{Ll}/u.test(m[3]) && !/[=<>≤≥]/.test(m[3]) && m[3].split(/\s+/).length <= 14 && (m[3].endsWith("?") || titleLike(m[3], 12))) return m[3].trim();
+  m = line.match(/^([A-H])\s+(\p{Lu}[\p{L}-]*(?:\s+[^\s.!?]+){1,11})$/u);
+  if (m && /\p{Ll}/u.test(m[2]) && titleLike(m[2], 12)) {
+    const words = m[2].split(/\s+/).filter((w) => !SMALL_WORDS.has(w.toLowerCase()));
+    if (words.filter((w) => /^\p{Lu}/u.test(w)).length >= Math.max(2, 0.6 * words.length)) return m[2].trim();
+  }
   m = line.match(/^(\d+(?:\.\d+){0,2})[.)]?\s+([A-Z][^.!?]{2,80})$/);
   // Numbered list items in running prose ("2. Equations (9)-(10) are the Euler equations of") and
   // wrapped maths ("2 KE2, E = 1") aren't headings.
@@ -251,6 +287,9 @@ export function isAuthorLine(s: string): boolean {
  * The sections worth studying: headings without numbering clutter, back matter (references, funding,
  * declarations) left out, and front-page labels and author lines kept only as untitled text.
  */
+/** Sections a lesson puts before its first numbered one that are its own, not a title page. */
+const FRONT_SECTION = /^(map of this (lesson|topic|chapter)|where this fits|warm[- ]?up|overview|learning (objectives|outcomes)|objectives|prerequisites)$/i;
+
 export function studySections(text: string): Section[] {
   const out: Section[] = [];
   const sections = splitSections(text);
@@ -263,7 +302,7 @@ export function studySections(text: string): Section[] {
     // "References I": a slide deck numbers the frames of a long list.
     if (BACK_MATTER.test(h.replace(/\s+(I{1,3}|IV|\d)$/, ""))) return;
     // Front matter sits before the first few headings; a closing "Summary" is a real section.
-    if (s.heading && i < 5 && (FRONT_LABELS.test(h) || isAuthorLine(s.heading) || (i > 0 && i < firstNumbered && (s.level ?? 0) > 1))) out.push({ heading: "", body: s.body });
+    if (s.heading && i < 5 && (FRONT_LABELS.test(h) || isAuthorLine(s.heading) || (i > 0 && i < firstNumbered && (s.level ?? 0) > 1 && !FRONT_SECTION.test(h)))) out.push({ heading: "", body: s.body });
     // Numbering is the paper's bookkeeping; the level keeps the structure it carried.
     else out.push({ ...s, heading: h });
   });

@@ -1,0 +1,40 @@
+{
+ "doc": "Lecture notes: Balance Laws in Continuum Mechanics",
+ "groups": [
+  {"name": "Overview", "aliases": ["Balance laws", "Balance law", "Global and local form"], "concepts": [
+   ["*Global and local form", "Global form", "Local form", "Integral form"],
+   ["*Referential and spatial cuts", "Spatial cut", "Referential cut", "Cut-out part"],
+   ["Transforming a global balance law to local form", "Global to local"]
+  ]},
+  {"name": "Global-to-local tools", "aliases": ["The global-to-local tools"], "concepts": [
+   ["*Cauchy-type theorems", "Cauchy's theorem", "Cauchy theorem", "Cauchy-type theorem"],
+   ["*Divergence theorem", "Gauss' theorem", "Gauss theorem"],
+   ["*Localisation theorem", "Localization theorem", "Localisation"],
+   ["*Closed-system identity", "Closed system"]
+  ]},
+  {"name": "Conservation of mass", "aliases": ["Mass conservation"], "concepts": [
+   ["*Continuity equation"],
+   ["Rate of the Jacobian", "Jacobian rate"],
+   ["Mass density", "Mass of the referential and spatial cuts"]
+  ]},
+  {"name": "Conservation of linear momentum", "aliases": ["Linear momentum", "Balance of linear momentum", "Linear momentum balance"], "concepts": [
+   ["*Cauchy's equation of motion", "Equation of motion", "Local form of the balance of linear momentum"],
+   ["Body force", "Surface force", "Surface traction", "Traction"]
+  ]},
+  {"name": "Conservation of angular momentum", "aliases": ["Angular momentum", "Angular momentum balance", "Balance of angular momentum"], "concepts": [
+   ["*Symmetry of the Cauchy stress", "Symmetric stress", "Stress symmetry", "Cauchy stress"]
+  ]},
+  {"name": "Balance of energy", "aliases": ["First law of thermodynamics", "Energy balance", "Balance of energy: the first law of thermodynamics"], "concepts": [
+   ["*Theorem of expended power", "Expended power", "Stress power"],
+   ["*Local energy equation", "Local form of energy balance", "Localisation: the local energy equation"],
+   ["Internal energy", "Kinetic energy", "Energy of the spatial cut"],
+   ["Heat flux", "Thermal power", "Heat source"]
+  ]},
+  {"name": "Balance of entropy", "aliases": ["Second law of thermodynamics", "Entropy balance", "Balance of entropy: the second law of thermodynamics"], "concepts": [
+   ["*Entropy", "Entropy balance", "Entropy production"],
+   ["*Clausius-Duhem inequality", "Clausius-Duhem", "Dissipation inequality"],
+   ["Absolute temperature", "Temperature"]
+  ]}
+ ],
+ "also": [["Outward unit normal"], ["Deformation map"], ["Velocity gradient"], ["Rate of deformation"], ["Reference configuration"], ["Current configuration"], ["Spatial velocity gradient"], ["Mass"], ["Thermodynamics"], ["Constitutive"]]
+}

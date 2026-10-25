@@ -1,0 +1,121 @@
+import katex from "katex";
+import { ENGLISH_WORDS } from "./englishWords";
+
+/*
+ * Display equations in a PDF's own text layer come out as lines of Unicode maths between the sentences
+ * ("Π(φ) =", "∫_{B0} ρ0b · φ dV −"). Marking them as $$…$$ blocks lets everything downstream tell maths
+ * from prose: key terms and summaries skip them, formula cards and lessons quote them, and the reader
+ * renders them as maths. The symbols are kept as the PDF wrote them.
+ */
+
+const RELATION = /[=≤≥<>≈≡≠∼⇐⇒⟹⟺→↦]/;
+const OPERATOR = /[∑∫∮∂∇√∏±∓×⋅·∘⊗]/;
+const SYMBOL = /[=≤≥<>≈≡≠∼⇐⇒⟹⟺→↦∑∫∮∂∇√∏±∓×⋅·∘⊗∀∃∈∉⊂⊆∪∩∅∞′^_{}|‖Ͱ-Ͽ\u{1D400}-\u{1D7FF}]/gu;
+/** Names maths writes as words: a line of them is still maths ("Div P + ρ0b = 0"). */
+const MATH_WORDS = new Set("div grad curl rot det tr sym skew diag dev sin cos tan sinh cosh tanh exp log ln lim sup inf max min arg ker dim span on in for and if or with".split(" "));
+
+let common: Set<string> | null = null;
+function english(w: string): boolean {
+  common ??= new Set(ENGLISH_WORDS.split(" "));
+  const x = w.toLowerCase();
+  return common.has(x) || common.has(x.replace(/s$/, "")) || common.has(x.replace(/(ed|ing)$/, ""));
+}
+
+/** Words of running text in a line: three or more letters, not a maths name. */
+function proseWords(line: string): string[] {
+  return (line.match(/(?<![\p{L}\p{N}_^])\p{L}{3,}(?![\p{N}_^])/gu) ?? []).filter((w) => !MATH_WORDS.has(w.toLowerCase()) && /^[A-Za-z]+$/.test(w));
+}
+
+/** A line that is (part of) a display equation, not a sentence that mentions some maths. */
+export function isMathLine(raw: string): boolean {
+  const t = raw.trim();
+  if (!t || t.length > 160) return false;
+  if (/^\\begin\{bmatrix\}.*\\end\{bmatrix\}$/.test(t)) return true;
+  if (/^(#|- |\* |\d+[.)]\s+\p{L}|\$\$|\[(diagram|matrix|figure)|(figure|fig\.|table)\s*\d)/iu.test(t)) return false;
+  // An equation's number on its own line.
+  if (/^\(\d{1,3}[a-z]?\)$/.test(t)) return true;
+  const words = proseWords(t);
+  const symbols = (t.match(SYMBOL) ?? []).length;
+  if (!symbols) return false;
+  // A sentence opens with a word ("we recover ∫ P : Grad η dV ="); an equation with a symbol or a name.
+  const first = t.match(/^\p{L}+/u)?.[0] ?? "";
+  if (first.length >= 2 && !MATH_WORDS.has(first.toLowerCase()) && (english(first) || /^(we|it|is|as|so|by|if|an|at|to|be|of|or|no)$/i.test(first)) && words.length >= 1) return false;
+  // An exercise's part or a quiz option ("(a) Derive S = …", "B. K = … only.") is a sentence about maths.
+  if (/^(\([a-h]\)|[A-E]\.)\s/.test(t) && words.length >= 2) return false;
+  const tokens = t.split(/\s+/).length;
+  // A table's row of numbers isn't an equation.
+  if ((t.replace(/\(\d{1,3}[a-z]?\)$/, "").match(/(?<![\p{L}\p{N}.,:])\d+(?:[.,:]\d+)?%?(?![\p{L}])/gu) ?? []).length >= 5 && !OPERATOR.test(t)) return false;
+  if (words.length <= 2 && (RELATION.test(t) || OPERATOR.test(t))) return true;
+  return symbols >= 3 && words.length <= 3 && words.length / tokens < 0.3;
+}
+
+/**
+ * The text with each run of display-maths lines as one $$…$$ block. Text already holding $$ blocks (an
+ * AI transcription, Markdown notes) is left as it is.
+ */
+export function markDisplayMaths(text: string): string {
+  if (/\$\$/.test(text)) return text;
+  const lines = text.split("\n");
+  const out: string[] = [];
+  // Subscripts are marked for equations; in a sentence the symbol reads as the PDF wrote it ("𝑆𝑝").
+  const prose = (l: string) => l.replace(/_\{([^{}$]{1,6})\}|_([^\s{}$])/gu, "$1$2");
+  // A figure's caption runs on to its first stop; its lines are never an equation ("(c) width = 0.2 mm").
+  let caption = false;
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (/^(figure|fig\.|table)\s*\d+[.:]/i.test(t)) caption = true;
+    if (caption || !isMathLine(lines[i])) {
+      out.push(prose(lines[i]));
+      if (caption && (!t || /[.!?]$/.test(t))) caption = false;
+      continue;
+    }
+    const run: string[] = [];
+    // A summation's index or a lone subscript set on its own line ("𝑖") sits between two lines of the equation.
+    const scrap = (k: number) => k + 1 < lines.length && /^\S{1,3}$/u.test(lines[k].trim()) && !proseWords(lines[k]).length && isMathLine(lines[k + 1]);
+    while (i < lines.length && (isMathLine(lines[i]) || scrap(i))) run.push(lines[i++].trim());
+    // A built-up formula's pieces ("ln", "( 1", "1 − η", ")] 1", "m") follow on short lines, down to its number.
+    const piece = (l: string | undefined) => l !== undefined && /^\S.{0,7}$/u.test(l.trim()) && !proseWords(l).length && !/^(#|---)/.test(l.trim());
+    let k = i;
+    while (k < lines.length && k - i < 8 && piece(lines[k]) && !/^\(\d{1,3}[a-z]?\)$/.test(lines[k].trim())) k++;
+    if (k > i && /^\(\d{1,3}[a-z]?\)$/.test(lines[k]?.trim() ?? "")) while (i <= k) run.push(lines[i++].trim());
+    i--;
+    // A scrap of symbols left open inside a sentence ("… = ∫𝑆𝑝 / 𝒙 × / 𝜌𝒗 d𝑣. Its rate …") is that sentence's maths, set off by an integral's limits.
+    const before = out[out.length - 1]?.trim() ?? "";
+    const after = lines[i + 1]?.trim() ?? "";
+    const midSentence = run.length === 1 && run[0].length <= 8 && /^[=+−×<>)·⋅-]|[=+−×<>(·⋅-]$/.test(run[0]) && before && !/[.!?:]$/.test(before) && !before.startsWith("$$") && after && !isMathLine(after) && proseWords(after).length >= 2;
+    // A lone number tag isn't an equation by itself.
+    if (midSentence || run.every((l) => /^\(\d{1,3}[a-z]?\)$/.test(l))) {
+      out.push(...run);
+      continue;
+    }
+    const tex = renderable(run.join(" "));
+    // What KaTeX can't read (a garbled OCR line) stays plain text.
+    if (tex) out.push(`$$${tex}$$`);
+    else out.push(...run.map(prose));
+  }
+  return out.join("\n");
+}
+
+/** Whether a position falls inside a \begin{bmatrix} … \end{bmatrix}. */
+function inMatrix(t: string, at: number): boolean {
+  const open = t.lastIndexOf("\\begin{bmatrix}", at);
+  return open >= 0 && t.indexOf("\\end{bmatrix}", open) > at;
+}
+
+/** The line as maths KaTeX renders, with LaTeX's special characters escaped; null if it still can't. */
+function renderable(line: string): string | null {
+  let t = line
+    .replace(/\$/g, "")
+    .replace(/\s*\u0338\s*=/g, " ≠")
+    // A matrix's column breaks are LaTeX's own; any other & is a character.
+    .replace(/[&%#]/g, (c, at: number, all: string) => (c === "&" && inMatrix(all, at) ? c : `\\${c}`));
+  // The equation's number, as LaTeX numbers it: "… (12)" is \tag{12}, when it is the block's only one.
+  if ((t.match(/\(\d{1,3}[a-z]?\)/g) ?? []).length === 1) t = t.replace(/\s*\((\d{1,3}[a-z]?)\)\s*$/, " \\tag{$1}");
+  if ((t.match(/\{/g) ?? []).length !== (t.match(/\}/g) ?? []).length) t = t.replace(/[{}]/g, (c) => `\\${c}`);
+  try {
+    katex.renderToString(t, { displayMode: true, throwOnError: true, strict: "ignore" });
+    return t;
+  } catch {
+    return null;
+  }
+}

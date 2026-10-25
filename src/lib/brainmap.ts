@@ -36,16 +36,16 @@ export async function structureCourse(course: Course, materials: Material[]): Pr
   const usable = materials.filter((m) => (m.text ?? "").trim().length > 0 || m.title);
   // Key terms first: when the items have keyword maps, those are the map, with or without AI.
   if (usable.some(keywordMapOf)) {
-    const topics = heuristicTopics(usable);
     if (aiEnabled()) {
       try {
-        const out = await describeWithAi(course, usable, topics);
+        // The AI gathers the terms under broader branches itself; offline, the document's sections do.
+        const out = await describeWithAi(course, usable, heuristicTopics(usable, { gather: false }));
         return { ...out, by: "claude" };
       } catch (e) {
         console.warn("[brainmap] The AI couldn't describe the keyword map; using the items' own sentences.", e);
       }
     }
-    return { topics, summary: heuristicSummary(course, usable), by: "heuristic" };
+    return { topics: heuristicTopics(usable), summary: heuristicSummary(course, usable), by: "heuristic" };
   }
   if (aiEnabled() && usable.length) {
     const { topics, summary } = await structureWithClaude(course, usable);
@@ -210,7 +210,14 @@ function groundedTerms(terms: string[], sources: string): string[] {
   return checked.length >= Math.min(3, terms.length) ? checked : terms.map((t) => repairTerm(t, sources)).filter(Boolean).slice(0, 8);
 }
 
-const CONTEXT_SECTION = /^(introduction( and motivation)?|motivation|background|conclusions?|concluding remarks|summary( and conclusions?)?|discussion and conclusions?|closing remarks|outlook)$/i;
+/** Exercises, hints, answers and quizzes: practice on the material, not a part of its content. */
+const DRILL_SECTION = /^((multiple[- ]choice\s+)?(concept\s+)?quiz(zes)?|exercises?|hints?|answers?|questions and answers|answer checks|self[- ]?tests?|review questions|practice (problems|questions)|problems|solutions|warm[- ]?up|check yourself|your turn|try (it|this))\b/i;
+
+// A lesson's scaffolding ("Where this fits", "Key terms", "Takeaways") frames its sections the same way.
+const CONTEXT_SECTION =
+  /^(introduction( and motivation)?|motivation|background|conclusions?|concluding remarks|summary( and conclusions?)?|discussion and conclusions?|closing remarks|outlook|map of this (lesson|topic|chapter)|where this fits|key (terms|ideas|points)|common (mistakes|errors|pitfalls)|connections|takeaways|key takeaways|learning (objectives|outcomes)|objectives|recap|what('|’)s next|further reading)$/i;
+
+const RESTATES = /^(map of this (lesson|topic|chapter)|where this fits|key (terms|ideas|points)|takeaways|key takeaways|connections|common (mistakes|errors|pitfalls)|recap)$/i;
 
 const keywordMapOf = (m: Material) => (m.digest && (m.digest.basis === "keywords" || m.digest.edited) && m.digest.topics.length ? m.digest : null);
 
@@ -220,7 +227,11 @@ const termKey = (t: string) =>
     .toLowerCase()
     .replace(/[-‐‑–\s]+/g, " ")
     .replace(/(?<=\w)s\b/g, "")
-    .trim();
+    .trim()
+    .replace(/^(the|a|an) /, "");
+
+/** Most main terms that stand as top-level branches on their own; more are gathered under broader ones. */
+const MAX_LOOSE_BRANCHES = 5;
 
 /** Most top-level branches the items' main terms make before each item becomes a branch of its own. */
 const MAX_TERM_BRANCHES = 14;
@@ -230,7 +241,7 @@ const MAX_TERM_BRANCHES = 14;
  * use is one branch, citing them all) and the terms under each main term are its sub-branches, each with
  * what the item says about it. Null when the items' main terms are too many to stand as branches.
  */
-function keywordBranches(mapped: Material[]): NewTopic[] | null {
+function keywordBranches(mapped: Material[], gather = true): NewTopic[] | null {
   type Branch = { title: string; summary: string; ids: string[]; subs: Map<string, { title: string; summary: string; ids: string[] }> };
   const mains = new Map<string, Branch>();
   for (const m of mapped)
@@ -258,13 +269,153 @@ function keywordBranches(mapped: Material[]): NewTopic[] | null {
       placed.add(k);
     }
   const topics: NewTopic[] = [];
-  [...mains.values()].forEach((b, j) => {
+  const branches = [...mains.values()];
+  // One paper or set of notes with many main terms: its sections gather them, as the AI gathers them under broader branches.
+  const groups = gather && mapped.length === 1 && branches.length > MAX_LOOSE_BRANCHES ? sectionGroups(mapped[0], branches.map((b) => b.title)) : null;
+  const groupOf = new Map<number, string>();
+  groups?.forEach((g, gi) => {
+    const all = [...g.members, ...g.parts.flatMap((p) => p.members)];
+    topics.push({ ref: `S${gi}`, parent_ref: null, title: g.title, summary: g.summary, keywords: all.map((i) => bareTerm(branches[i].title)).slice(0, 8), material_ids: [mapped[0].id], importance: 3 });
+    for (const i of g.members) groupOf.set(i, `S${gi}`);
+    g.parts.forEach((p, k) => {
+      topics.push({ ref: `S${gi}.p${k}`, parent_ref: `S${gi}`, title: p.title, summary: p.summary, keywords: p.members.map((i) => bareTerm(branches[i].title)).slice(0, 8), material_ids: [mapped[0].id], importance: p.members.length ? 3 : 2 });
+      for (const i of p.members) groupOf.set(i, `S${gi}.p${k}`);
+    });
+  });
+  branches.forEach((b, j) => {
     const ref = `K${j}`;
     const subs = [...b.subs.values()];
-    topics.push({ ref, parent_ref: null, title: truncate(b.title, 80), summary: b.summary, keywords: [b.title, ...subs.map((x) => x.title)].map(bareTerm).slice(0, 8), material_ids: b.ids, importance: subs.length >= 2 || b.ids.length > 1 ? 3 : 2 });
-    subs.forEach((st, k) => topics.push({ ref: `${ref}.${k}`, parent_ref: ref, title: truncate(st.title, 80), summary: st.summary, keywords: [bareTerm(st.title)], material_ids: st.ids, importance: 2 }));
+    topics.push({ ref, parent_ref: groupOf.get(j) ?? null, title: truncate(b.title, 80), summary: b.summary, keywords: [b.title, ...subs.map((x) => x.title)].map(bareTerm).slice(0, 8), material_ids: b.ids, importance: subs.length >= 2 || b.ids.length > 1 ? 3 : 2 });
+    // A sub-term the heading of another section names ("Angular momentum" in "Conservation of Angular Momentum") goes there.
+    const elsewhere = (title: string) => {
+      const key = ` ${termKey(title)} `;
+      const hits = groups?.flatMap((g, gi) => (` ${termKey(g.title)} `.includes(key) ? [`S${gi}`] : [])) ?? [];
+      return termKey(title).includes(" ") && hits.length === 1 && hits[0] !== groupOf.get(j) ? hits[0] : null;
+    };
+    subs.forEach((st, k) => topics.push({ ref: `${ref}.${k}`, parent_ref: elsewhere(st.title) ?? ref, title: truncate(st.title, 80), summary: st.summary, keywords: [bareTerm(st.title)], material_ids: st.ids, importance: 2 }));
   });
-  return topics;
+  return orderByDocument(mergeNamesakes(topics), groups);
+}
+
+/** A term a section is named after ("Stress measures" in "Stress Measures") is that section's branch: its sub-terms move up to it. */
+function mergeNamesakes(topics: NewTopic[]): NewTopic[] {
+  const drop = new Set<string>();
+  for (const t of topics) {
+    // A main term in a section, or a sub-term anywhere ("Theorem of expended power" under another term).
+    if (!t.ref.startsWith("K") || !(t.parent_ref?.startsWith("S") || t.ref.includes("."))) continue;
+    // Its namesake section, wherever the term itself was placed.
+    const parent = topics.find((p) => p.ref.startsWith("S") && termKey(p.title) === termKey(t.title));
+    if (!parent) continue;
+    drop.add(t.ref);
+    // Its sub-terms stay where it was placed: in that section, or with what the text discusses them.
+    for (const c of topics) if (c.parent_ref === t.ref) c.parent_ref = t.parent_ref;
+  }
+  return topics.filter((t) => !drop.has(t.ref));
+}
+
+/** Groups first where they start; a term outside every group stays where the keyword map put it. */
+function orderByDocument(topics: NewTopic[], groups: { title: string }[] | null): NewTopic[] {
+  if (!groups?.length) return topics;
+  const tops = topics.filter((t) => !t.parent_ref);
+  const under = (ref: string): NewTopic[] => topics.filter((t) => t.parent_ref === ref).flatMap((t) => [t, ...under(t.ref)]);
+  return tops.flatMap((t) => [t, ...under(t.ref)]);
+}
+
+/**
+ * A single paper or set of notes with many key terms: its sections gather them, as a student reads it.
+ * Each main term goes to the section that mentions it most (its introduction and conclusion count for
+ * less); a section that gathers two or more terms is a branch, named as the material names it.
+ */
+type SectionGroup = { title: string; summary: string; members: number[]; parts: { title: string; summary: string; members: number[] }[] };
+
+function sectionGroups(m: Material, terms: string[]): SectionGroup[] | null {
+  const text = m.text ?? "";
+  const sections = studySections(text).filter((s) => s.heading && !/^(abstract|summary|keywords?)$/i.test(s.heading));
+  const lvl = Math.min(...sections.map((s) => s.level ?? 1).filter((l) => l > 0));
+  type Part = { title: string; body: string; subs: { title: string; body: string }[] };
+  type G = { title: string; body: string; own: string; context: boolean; parts: Part[] };
+  const gs: G[] = [];
+  for (const s of sections) {
+    if ((s.level ?? 1) === 0) continue;
+    // A lesson's "Key terms", "Connections" or "Check yourself" after its last section isn't part of that section.
+    const scaffold = CONTEXT_SECTION.test(s.heading) || DRILL_SECTION.test(s.heading);
+    if ((s.level ?? 1) <= lvl || !gs.length || scaffold) gs.push({ title: s.heading, body: s.body, own: s.body, context: CONTEXT_SECTION.test(s.heading) || /^appendix\b/i.test(s.heading) || DRILL_SECTION.test(s.heading), parts: [] });
+    else {
+      const g = gs[gs.length - 1];
+      g.body += `\n${s.heading}\n${s.body}`;
+      // Its subsections, one level down; deeper ones belong to theirs.
+      if ((s.level ?? 1) === lvl + 1 || !g.parts.length) g.parts.push({ title: s.heading, body: s.body, subs: [] });
+      else {
+        const p = g.parts[g.parts.length - 1];
+        p.body += `\n${s.heading}\n${s.body}`;
+        if ((s.level ?? 1) === lvl + 2 || !p.subs.length) p.subs.push({ title: s.heading, body: s.body });
+        else p.subs[p.subs.length - 1].body += `\n${s.heading}\n${s.body}`;
+      }
+    }
+  }
+  if (gs.length < 2) return null;
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const count = (body: string, term: string) => {
+    const words = bareTerm(term).toLowerCase().split(/\s+/).map((w) => esc(w.replace(/s$/, "")) + "s?");
+    return (body.toLowerCase().match(new RegExp(`\\b${words.join("[\\s-]+")}\\b`, "g")) ?? []).length;
+  };
+  const boxes = new Map<string, Set<string>>();
+  const boxed = (body: string) => {
+    if (!boxes.has(body))
+      boxes.set(
+        body,
+        new Set(
+          [...body.matchAll(/^\s*(?:definition|theorem|lemma|corollary|proposition|keypoint|key point|remark)\s+[\d.]+\s*[—–]\s*([^.\n]{3,80})\./gim)].map((m) => termKey(m[1].replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim())),
+        ),
+      );
+    return boxes.get(body)!;
+  };
+  const members = gs.map(() => [] as number[]);
+  const partOf = gs.map((g) => g.parts.map(() => [] as number[]));
+  const subOf = gs.map((g) => g.parts.map((p) => p.subs.map(() => [] as number[])));
+  terms.forEach((t, i) => {
+    let best = -1;
+    let score = 0;
+    gs.forEach((g, gi) => {
+      // A lesson's map, key-term list or takeaways restate every term: they say nothing about where one belongs.
+      const n = count(g.body, t) * (g.context ? (RESTATES.test(g.title) ? 0 : 0.5) : 1);
+      if (n > score) (score = n), (best = gi);
+    });
+    // The section whose box defines or states it ("Theorem 2.2 — Divergence (Gauss') Theorem") is its home.
+    const home = gs.findIndex((g) => !g.context && boxed(g.body).has(termKey(t)));
+    if (home >= 0) best = home;
+    if (best < 0) return;
+    // A term one subsection discusses most of the time goes under that subsection.
+    const g = gs[best];
+    const inPart = g.parts.map((p) => count(p.body, t));
+    const k = inPart.indexOf(Math.max(0, ...inPart));
+    if (k >= 0 && inPart[k] >= 1 && inPart[k] >= 0.5 * count(g.body, t)) {
+      // And within it, a sub-subsection the same way: that one is listed beside its subsection.
+      const inSub = g.parts[k].subs.map((x) => count(x.body, t));
+      const j = inSub.indexOf(Math.max(0, ...inSub));
+      if (j >= 0 && inSub[j] >= 1 && inSub[j] >= 0.5 * inPart[k]) subOf[best][k][j].push(i);
+      else partOf[best][k].push(i);
+    } else members[best].push(i);
+  });
+  const mend = headingRepairer(text);
+  const out: SectionGroup[] = gs.flatMap((g, gi) => {
+    // An introduction or conclusion frames the paper's topics rather than being one: its terms stay branches of their own.
+    if (g.context) return [];
+    // Subsections that name a part of the content, or hold a term.
+    const parts = g.parts
+      .flatMap((p, k) => [
+        { title: clipWords(mend(p.title), 60), summary: firstSentences(p.body, 2), members: partOf[gi][k], sub: false },
+        ...p.subs.map((x, j) => ({ title: clipWords(mend(x.title), 60), summary: firstSentences(x.body, 2), members: subOf[gi][k][j], sub: true })).filter((x) => x.members.length),
+      ])
+      .filter((p) => p.members.length || (!p.sub && !DRILL_SECTION.test(p.title) && !CONTEXT_SECTION.test(p.title) && p.title.split(/\s+/).length <= 8 && !/[?]$/.test(p.title)))
+      .slice(0, 8)
+      .map(({ sub: _, ...p }) => p);
+    const held = members[gi].length + parts.reduce((n, p) => n + p.members.length, 0);
+    // A paper of a few sections is read section by section, so each is a branch even before a term lands in it.
+    if (held < 1 && parts.length < 3 && gs.filter((x) => !x.context).length > 10) return [];
+    return [{ title: clipWords(mend(g.title), 60), summary: firstSentences(g.own, 2) || firstSentences(g.body, 2), members: members[gi], parts }];
+  });
+  return out.length >= 2 ? out : null;
 }
 
 /**
@@ -272,9 +423,9 @@ function keywordBranches(mapped: Material[]): NewTopic[] | null {
  * give the branches: their main terms, with the terms under them as sub-branches. Any other item is a
  * branch of its own, with its sections (or its digest's topics) under it.
  */
-export function heuristicTopics(materials: Material[]): NewTopic[] {
+export function heuristicTopics(materials: Material[], opts: { gather?: boolean } = {}): NewTopic[] {
   const mapped = materials.filter((m) => keywordMapOf(m));
-  const byTerms = mapped.length ? keywordBranches(mapped) : null;
+  const byTerms = mapped.length ? keywordBranches(mapped, opts.gather ?? true) : null;
   const topics: NewTopic[] = byTerms ?? [];
   materials.forEach((m, i) => {
     if (byTerms && keywordMapOf(m)) return;
@@ -364,7 +515,9 @@ const bareTerm = (t: string) => t.replace(/\s*\([^)]*\)$/, "").trim();
 
 /** A term's note, with where the material says it ("… (see “Material properties”)"); see plainSummary. */
 function noteOf(t: DigestTopic): string {
-  const where = t.evidence?.find((e) => e.text === t.summary)?.where;
+  // The note is its quote, read as a sentence (a capital, a stop).
+  const bare = (x: string) => x.trim().replace(/\.$/, "").toLowerCase();
+  const where = t.evidence?.find((e) => bare(e.text) === bare(t.summary))?.where;
   return where && t.summary ? `${t.summary} (see “${where.replace(/[“”]/g, "")}”)` : t.summary;
 }
 
@@ -388,18 +541,27 @@ function afterTitlePage(text: string): string {
   return first > 0 ? text.slice(first) : text;
 }
 
-function firstSentences(text: string, n: number) {
+function firstSentences(text: string, n: number, around = true): string {
   const s = proseLines(text.split("\n"))
+    // An equation stands where it is: the words leading into it ("The trial space is") and on from it ("where S is …") are no sentence without it.
+    .map((l) => (around && /^\s*\$\$/.test(l) ? "\u0001" : l))
     // A figure's labels ("1 2", "Natural / Parent") and a line of symbols say nothing on their own:
     // keep lines of words, list items and headings.
-    .filter((l) => (l.match(/(?:^|\s)[A-Za-z][a-z]{2,}[,.;:)]?(?=\s|$)/g) ?? []).length >= 3 || /^\s*-\s+\S/.test(l) || /^#/.test(l.trim()))
+    .filter((l) => l === "\u0001" || (l.match(/(?:^|\s)[A-Za-z][a-z]{2,}[,.;:)]?(?=\s|$)/g) ?? []).length >= 3 || /^\s*-\s+\S/.test(l) || /^#/.test(l.trim()))
+    // A lesson's lists of its terms and formulas ("Key terms: …") are its layout.
+    .filter((l) => !/^\s*(key (terms|words)|keywords|formula|procedure)\s*:/i.test(l))
     // A box's label ("Definition 3.1 — Mass of the Cuts (Smith 2002).") names it; its text says what it is.
-    .map((l) => l.replace(/^\s*(definition|theorem|lemma|corollary|proposition|keypoint|key point|example|remark)\s+[\d.]+\s*[—–-]\s*.{1,120}?\.(?=\s+\p{Lu})\s*/iu, ""))
+    .map((l) => l.replace(/^\s*(definition|theorem|lemma|corollary|proposition|keypoint|key point|example|remark|intuition)\s+[\d.]+\s*[—–-]\s*.{1,120}?\.(?=\s+\p{Lu})\s*/iu, ""))
     .join("\n")
     .replace(/--- Page \d+ ---/g, " ")
     // Headings (a title, the author line under it) aren't sentences of the text, but they end one.
     .replace(/^\s*#{1,6}\s+.*$/gm, "\u0000")
-    .replace(/^\s*([-*]\s+|slide \d+:\s*)/gim, "");
+    // A list item is a sentence of its own, whether or not it ends with a stop.
+    .replace(/^\s*[-*]\s+/gm, "\u0000")
+    .replace(/^\s*slide \d+:\s*/gim, "")
+    // A sentence broken only at a comma reads on without its equation ("… internal energy U, with e the energy density.").
+    .replace(/((?:[^.!?\u0000\u0001]|[.!?](?!\s+\p{Lu}))*),\s*(?:\u0001\s*)+((?:with|and|so|which|while|giving|i\.e\.)\s(?:[^.!?\u0000\u0001]|[.!?](?!\s|$))*[.!?])/gu, "$1, $2")
+    .replace(/(?:[^.!?\u0000\u0001]|[.!?](?!\s+\p{Lu}))*(?:\u0001\s*)+(?:\p{Ll}(?:[^.!?\u0000\u0001]|[.!?](?!\s|$))*[.!?]*)?/gu, "\u0000");
   // A sentence ends at a stop followed by a space, not at the dot of "3.1" or "e.g.,".
   const parts = s
     .split("\u0000")
@@ -407,7 +569,9 @@ function firstSentences(text: string, n: number) {
     .filter(Boolean)
     .flatMap((x) => x.match(/(?:[^.!?]|[.!?](?=\S))+[.!?]+(?=\s|$)|(?:[^.!?]|[.!?](?=\S))+$/g) ?? [])
     .filter((x) => /\p{L}{3}/u.test(x));
-  return truncate(parts.slice(0, n).map((x) => x.trim()).join(" "), 300);
+  // A section that is all equations and their lead-ins is still summed up by them.
+  if (!parts.length && around) return firstSentences(text, n, false);
+  return truncate(parts.slice(0, n).map((x) => x.trim().replace(/[\p{L}\p{N})]$/u, "$&.")).join(" "), 300);
 }
 
 export { toFlowchart, toMindmap } from "./mermaid";

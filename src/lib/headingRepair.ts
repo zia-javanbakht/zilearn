@@ -33,6 +33,35 @@ export function headingRepairer(text: string): (heading: string) => string {
     return w;
   };
 
+  // Words too garbled for one slip ("Enkanwd srrainjfield"): the phrase the document uses that reads closest.
+  let phrases: Map<string, string> | null = null;
+  const mendPhrase = (h: string): string => {
+    const words = h.split(/\s+/);
+    const bad = words.map((w) => /^[A-Za-z]{4,}$/.test(w) && !known(w.toLowerCase()));
+    const from = bad.indexOf(true);
+    // One unknown word may be a real one the document uses once ("Derivation"); two side by side are a misread.
+    if (from < 0 || !bad[from + 1]) return h;
+    const to = bad.lastIndexOf(true);
+    phrases ??= phrasesOf(text, known);
+    // The garbled run, with a word either side of it the phrase can share.
+    for (const [a, b] of [[from, to + 1], [from, to + 2], [from - 1, to + 1], [from - 1, to + 2]]) {
+      if (a < 0 || b > words.length) continue;
+      const run = words.slice(a, b).join("").toLowerCase();
+      let best: string | null = null;
+      let bestD = Math.floor(run.length * 0.3) + 1;
+      for (const [flat, phrase] of phrases) {
+        if (flat[0] !== run[0] || Math.abs(flat.length - run.length) > 3) continue;
+        const d = distance(run, flat, bestD);
+        if (d < bestD) (bestD = d), (best = phrase);
+      }
+      if (best) {
+        const fixed = words[a] && /^[A-Z]/.test(words[a]) ? best[0].toUpperCase() + best.slice(1) : best;
+        return [...words.slice(0, a), fixed, ...words.slice(b)].join(" ");
+      }
+    }
+    return h;
+  };
+
   return (heading: string) => {
     let h = heading.replace(/\b(appendix|problem|part|example|chapter|section)\s+(1{1,3})\b/gi, (m, label: string, ones: string) => (roman.has(label.toLowerCase()) ? `${label} ${"I".repeat(ones.length)}` : m));
     // A word split by a stray space: join when the joined word is known and a half isn't.
@@ -40,6 +69,35 @@ export function headingRepairer(text: string): (heading: string) => string {
       const joined = (a + b).toLowerCase();
       return known(joined) && (!known(a.toLowerCase()) || !known(b.toLowerCase())) ? a + b : m;
     });
-    return h.replace(/[A-Za-z0-9]+/g, (w, at: number) => mendWord(w, at === 0));
+    h = h.replace(/[A-Za-z0-9]+/g, (w, at: number) => mendWord(w, at === 0));
+    // A scan's stray space before a colon or comma ("Example I : A plane …").
+    return mendPhrase(h).replace(/(\S)\s+([:;,])(?=\s)/g, "$1$2");
   };
+
+}
+
+/** Phrases of two to four known words the text uses at least twice, by their letters without spaces. */
+function phrasesOf(text: string, known: (w: string) => boolean): Map<string, string> {
+  const counts = new Map<string, number>();
+  for (const line of text.toLowerCase().split(/[.\n;:,()]+/)) {
+    const w = line.split(/\s+/).filter((x) => /^[a-z]+$/.test(x));
+    for (let n = 2; n <= 4; n++) for (let i = 0; i + n <= w.length; i++) if (w.slice(i, i + n).every(known)) counts.set(w.slice(i, i + n).join(" "), (counts.get(w.slice(i, i + n).join(" ")) ?? 0) + 1);
+  }
+  return new Map([...counts].filter(([, k]) => k >= 2).map(([p]) => [p.replace(/ /g, ""), p]));
+}
+
+/** Edit distance, given up once it reaches `cap`. */
+function distance(a: string, b: string, cap: number): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let low = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      low = Math.min(low, cur[j]);
+    }
+    if (low >= cap) return cap;
+    prev = cur;
+  }
+  return prev[b.length];
 }

@@ -76,7 +76,7 @@ describe("brainmap", () => {
     const notes = "# Balance Laws\n### Zia Javanbakht\nSchool of Engineering\n### 1 Overview\nThe balance laws considered are:\n- Conservation of mass\n### 2 Tools\nDefinition 2.1 — Cauchy Theorem (Gurtin 1981). The traction depends on the normal only, and linearly so.\n### 3 Mass\nMass is conserved in a closed system.\n### References I\nCook, RD (2002).";
     const topics = heuristicTopics([m("m1", "bal", notes)]);
     expect(topics.map((t) => t.title)).toEqual(["Balance Laws", "Overview", "Tools", "Mass"]);
-    expect(topics[0].summary).toBe("The balance laws considered are: Conservation of mass The traction depends on the normal only, and linearly so.");
+    expect(topics[0].summary).toBe("The balance laws considered are: Conservation of mass.");
     expect(topics[2].summary).toBe("The traction depends on the normal only, and linearly so.");
   });
 

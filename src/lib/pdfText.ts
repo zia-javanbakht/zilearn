@@ -13,15 +13,24 @@ export interface PdfLine {
   size: number;
   /** The line started with a list bullet (a Beamer triangle, "•"), now written as "- ". */
   bullet?: boolean;
+  /** Its font is italic and not bold: a journal sets its subsection titles so, at the size of its section titles. */
+  italic?: boolean;
 }
 
-type Pdf = { numPages: number; getPage(n: number): Promise<{ getTextContent(): Promise<{ items: unknown[] }> }> };
-type Item = { str?: string; transform?: number[]; hasEOL?: boolean };
+type Pdf = {
+  numPages: number;
+  getPage(n: number): Promise<{ getTextContent(): Promise<{ items: unknown[] }>; getOperatorList?(): Promise<unknown>; commonObjs?: { get(id: string): unknown } }>;
+};
+type Item = { str?: string; transform?: number[]; width?: number; hasEOL?: boolean; fontName?: string };
 
 const BULLETS = /^[•●⚫▪■▶►▸‣◆◦○➤✓✗]$/;
 
 /** A line from its items: the text, its size, and a leading bullet glyph turned into "- ". */
-function lineOf(items: Item[]): PdfLine {
+function lineOf(items: Item[], fontOf: (font?: string) => string = () => ""): PdfLine {
+  const italic = (font?: string) => {
+    const name = fontOf(font);
+    return /(italic|oblique|[.-]I(?:t)?(?:[+.]|$)|-?It$)/i.test(name) && !/(bold|black|heavy|[.-]B(?:I)?(?:[+.]|$)|Bd)/i.test(name);
+  };
   const sizeOf = (it: Item) => (it.transform ? Math.round(Math.hypot(it.transform[2], it.transform[3]) * 10) / 10 : 0);
   const text = items.filter((it) => it.str?.trim());
   // A bullet: a bullet character opening the line, or a lone glyph set larger than the word after it
@@ -31,47 +40,122 @@ function lineOf(items: Item[]): PdfLine {
     !!first &&
     text.length > 1 &&
     first.str!.trim().length === 1 &&
-    (BULLETS.test(first.str!.trim()) || (sizeOf(first) > sizeOf(text[1]) * 1.1 && /^\s*\p{Lu}\p{Ll}{2,}/u.test(text[1].str!)));
-  const rest = bullet ? items.slice(items.indexOf(first) + 1) : items;
+    (BULLETS.test(first.str!.trim()) ||
+      // An icon font's glyph ("n" from FontAwesome) is a bullet whatever its size.
+      (/fontawesome|dingbat|wingding/i.test(fontOf(first.fontName)) && /^\s*\p{Lu}/u.test(text[1].str!)) ||
+      (sizeOf(first) > sizeOf(text[1]) * 1.1 && /^\s*\p{Lu}\p{Ll}{2,}/u.test(text[1].str!)));
+  const rest = fractions(bullet ? items.slice(items.indexOf(first) + 1) : items, sizeOf);
   // Exponents: a short piece raised above the maths symbol before it ("𝑱" then "−1" a little higher is 𝑱^{−1}).
   // A raised number after a word or a full stop is a citation ("study,8"), which stays as it is, and so
   // is a raised number of two digits or more after a bracket ("(Figure A1)16").
   let str = "";
-  let exp: { y: number; text: string; tail: string } | null = null;
+  let exp: { y: number; text: string; tail: string; x: number; base: Item | undefined; sub: string } | null = null;
+  const group = (x: string) => (x.length > 1 ? `{${x}}` : x);
   const close = () => {
-    if (exp) str += `^${exp.text.length > 1 ? `{${exp.text}}` : exp.text}${exp.tail}`;
+    if (exp) str += `${exp.sub ? `_${group(exp.sub)}` : ""}^${group(exp.text)}${exp.tail}`;
     exp = null;
   };
+  // "\u0001" is a minus from a broken symbol font, put back later.
+  const at = new Map<number, number>();
+  for (const it of rest) if (it.str?.trim() && it.transform) at.set(Math.round(it.transform[5]), (at.get(Math.round(it.transform[5])) ?? 0) + it.str.trim().length);
+  const lineBase = at.size ? [...at].sort((a, b) => b[1] - a[1])[0][0] : null;
+  const SCRIPT = /^[\p{L}\p{N}+−\-′*/\u0001þ]{1,6}\s?$/u;
   rest.forEach((it, k) => {
     const t = it.str ?? "";
     const h = sizeOf(it);
     const y = it.transform?.[5] ?? 0;
     // Pieces of one exponent set separately ("−", "1") stay together.
-    if (exp && t.trim() && !/^\s/.test(t) && !exp.tail && Math.abs(y - exp.y) < 0.15 * h && /^[\p{L}\p{N}+−\-′*/]{1,6}\s?$/u.test(t)) {
+    if (exp && t.trim() && !/^\s/.test(t) && !exp.tail && !exp.sub && Math.abs(y - exp.y) < 0.15 * h && SCRIPT.test(t)) {
       exp.text += t.trim();
       exp.tail = /\s$/.test(t) ? " " : "";
       return;
     }
+    // A subscript set under the exponent, back at its x ("U" with "j+" over "i"): U_i^{j+}.
+    const by = exp?.base?.transform?.[5];
+    if (exp && by != null && t.trim() && SCRIPT.test(t) && h <= 0.85 * sizeOf(exp.base!) && by - y > 0.1 * h && by - y < 0.6 * sizeOf(exp.base!) && it.transform![4] <= exp.x + 0.5 * h) {
+      exp.sub += t.trim();
+      exp.tail = /\s$/.test(t) ? " " : exp.tail;
+      return;
+    }
+    if (exp && t === "") return;
+    if (exp && !t.trim() && exp.sub) {
+      if (/\s/.test(t)) exp.tail = " ";
+      return;
+    }
     close();
-    const prev = rest[k - 1];
+    const prev = [...rest.slice(0, k)].reverse().find((p) => p.str?.trim());
     const before = prev?.str ?? "";
     // Raised against the symbol it follows, not the line: in a stacked fraction the line has no one baseline.
-    const raised = prev?.transform ? y - prev.transform[5] : 0;
+    // After a big bracket (set high, from a symbol font), against the line's baseline: "(σ11/XT)" then "2".
+    const tall = !!prev && /^[\u0010-\u0017]$/.test(before.trim());
+    const raised = tall && lineBase != null ? y - lineBase : prev?.transform ? y - prev.transform[5] : 0;
     const piece = t.trim();
+    const smaller = !!prev && h <= 0.85 * sizeOf(prev);
     const isExp =
       h > 0 &&
       raised > 0.25 * h &&
-      raised < 0.8 * h &&
+      raised < (tall ? 2.2 : 0.8) * h &&
       /^[\p{L}\p{N}+−\-′*/]{1,6}\s?$/u.test(t) &&
-      /[\u{1d400}-\u{1d7ff}\u0370-\u03ff\u2100-\u214f)\]]$/u.test(before) &&
-      /[\d+−\u{1d400}-\u{1d7ff}]/u.test(piece) &&
+      ((/[\u{1d400}-\u{1d7ff}\u0370-\u03ff\u2100-\u214f)\]\u0011\u0013\u0015]$/u.test(before) && /[\d+−\u{1d400}-\u{1d7ff}]/u.test(piece)) ||
+        // Set smaller after a symbol or a capital standing for one (pdfTeX's "F" then "T": Fᵀ; "(QF)" then "T").
+        (smaller && /^[\p{L}\p{N}+−′*]{1,4}$/u.test(piece) && /(?:^|[\s(=+−,⋅·])[A-Z]{1,3}\s?$|[)\]\u0370-\u03ff\u{1d400}-\u{1d7ff}]$/u.test(before))) &&
       !(/[)\]]$/.test(before) && /^\d{2,}$/.test(piece));
-    if (isExp) exp = { y, text: piece, tail: /\s$/.test(t) ? " " : "" };
+    // A subscript: set smaller and a little lower after a symbol ("ϵ" then "ik": ϵ_{ik}).
+    const lowered = prev?.transform ? prev.transform[5] - y : 0;
+    const isSub =
+      !isExp && smaller && lowered > 0.1 * h && lowered < 0.6 * sizeOf(prev!) && /^[\p{L}\p{N}]{1,4}\s?$/u.test(t) && /[\u{1d400}-\u{1d7ff}\u0370-\u03ff]\s?$|(?:^|[\s(=+−,⋅·])[A-Z]\s?$/u.test(before);
+    if (isExp) {
+      // The exponent sits on the symbol, not after the space pdf.js put behind it.
+      if (/\s$/.test(before)) str = str.replace(/\s$/, "");
+      exp = { y, text: piece, tail: /\s$/.test(t) ? " " : "", x: it.transform?.[4] ?? 0, base: prev, sub: "" };
+    } else if (isSub) str = `${str.replace(/\s$/, "")}_${group(piece)}${/\s$/.test(t) ? " " : ""}`;
     else str += t;
   });
   close();
   const size = Math.max(0, ...rest.filter((it) => it.str?.trim()).map(sizeOf));
-  return { text: bullet ? `- ${str.trim()}` : str, size, ...(bullet ? { bullet } : {}) };
+  const lead = rest.find((it) => it.str?.trim());
+  return { text: bullet ? `- ${str.trim()}` : str, size, ...(bullet ? { bullet } : {}), ...(lead && italic(lead.fontName) ? { italic: true } : {}) };
+}
+
+/**
+ * A fraction set as a numerator raised above the line and a denominator below it ("∂Ψ" over "∂F") as one
+ * piece on the baseline: "∂Ψ/∂F", or "(a + b)/(c)" when either part has spaces.
+ */
+function fractions(items: Item[], sizeOf: (it: Item) => number): Item[] {
+  const text = items.filter((it) => it.str?.trim() && it.transform);
+  if (text.length < 3) return items;
+  // The baseline: the height most of the line's characters sit at.
+  const at = new Map<number, number>();
+  for (const it of text) at.set(Math.round(it.transform![5]), (at.get(Math.round(it.transform![5])) ?? 0) + it.str!.trim().length);
+  const base = [...at].sort((a, b) => b[1] - a[1])[0][0];
+  const out: Item[] = [];
+  for (let k = 0; k < items.length; k++) {
+    const it = items[k];
+    const h = sizeOf(it);
+    const dy = (x: Item) => (x.transform ? x.transform[5] - base : 0);
+    if (!it.str?.trim() || !it.transform || !(dy(it) > 0.25 * h && dy(it) < 1.1 * h)) {
+      out.push(it);
+      continue;
+    }
+    // The numerator: pieces at its height; then the denominator: pieces as far below.
+    let j = k;
+    let num = "";
+    while (j < items.length && (!items[j].str?.trim() || (items[j].transform && Math.abs(dy(items[j]) - dy(it)) < 0.15 * h))) num += items[j++].str ?? "";
+    const x0 = it.transform[4];
+    let den = "";
+    const d0 = items[j];
+    if (d0?.transform && dy(d0) < -0.25 * h && dy(d0) > -1.1 * h && d0.transform[4] >= x0 - h && sizeOf(d0) >= 0.85 * h) {
+      while (j < items.length && (!items[j].str?.trim() || (items[j].transform && Math.abs(dy(items[j]) - dy(d0)) < 0.15 * h))) den += items[j++].str ?? "";
+    }
+    if (!num.trim() || !den.trim() || sizeOf(it) < 0.85 * Math.max(...text.map(sizeOf))) {
+      out.push(it);
+      continue;
+    }
+    const part = (x: string) => (/\s/.test(x.trim()) ? `(${x.trim()})` : x.trim());
+    out.push({ ...it, str: `${part(num)}/${part(den)}`, transform: [...it.transform.slice(0, 5), base] });
+    k = j - 1;
+  }
+  return out;
 }
 
 /**
@@ -82,30 +166,81 @@ function lineOf(items: Item[]): PdfLine {
 export async function pdfLines(pdf: Pdf): Promise<PdfLine[][]> {
   const pages: PdfLine[][] = [];
   for (let n = 1; n <= pdf.numPages; n++) {
-    const { items } = await (await pdf.getPage(n)).getTextContent();
+    const page = await pdf.getPage(n);
+    const { items } = await page.getTextContent();
+    // The fonts' names say which are italic ("…-Italic", "….I"); pdf.js loads them while reading the page's drawing.
+    const fonts = new Map<string, string>();
+    if (page.getOperatorList && page.commonObjs && (items as Item[]).some((it) => it.str?.trim()))
+      await page.getOperatorList().catch(() => null);
+    const fontOf = (font?: string) => {
+      if (!font || !page.commonObjs) return "";
+      if (!fonts.has(font)) {
+        let name = "";
+        try {
+          name = String((page.commonObjs.get(font) as { name?: string } | null)?.name ?? "");
+        } catch {
+          name = "";
+        }
+        fonts.set(font, name);
+      }
+      return fonts.get(font)!;
+    };
     const lines: PdfLine[] = [];
     let cur: Item[] = [];
     let y: number | null = null;
     let size = 0;
     const flush = (eol = false) => {
-      if (eol || cur.some((it) => it.str)) lines.push(lineOf(cur));
+      if (eol || cur.some((it) => it.str)) lines.push(lineOf(cur, fontOf));
       cur = [];
       y = null;
       size = 0;
     };
+    // pdf.js ends a line after a fraction's numerator; the line goes on if its denominator comes next.
+    let eol = false;
     for (const it of items as Item[]) {
       if (it.str == null) continue;
       if (it.str.trim() && it.transform) {
         const h = Math.hypot(it.transform[2], it.transform[3]);
-        // Against the piece before, so a fraction's numerator after its denominator doesn't break the line.
-        if (y != null && Math.abs(it.transform[5] - y) > 1.2 * Math.max(size, h)) flush();
+        // Against the piece before, so a fraction's numerator after its denominator doesn't break the line,
+        // nor does its denominator after its numerator (raised above the line's baseline, then set below it).
+        // The baseline is where the line's first full-size piece sits; the numerator is raised above it and the
+        // denominator starts under it. Full-size pieces only: a superscript over a subscript ("F" with "t" over "f") is smaller.
+        const full = cur.filter((c) => c.str?.trim() && c.transform && Math.hypot(c.transform[2], c.transform[3]) >= 0.85 * size);
+        const base = full[0]?.transform?.[5];
+        const ny = it.transform[5];
+        const numX = base == null ? undefined : full.find((c) => c.transform![5] - base > 0.25 * h)?.transform?.[4];
+        const stacked =
+          base != null && y != null && numX != null && h >= 0.85 * size && y - base > 0.25 * h && y - base < 1.1 * h && base - ny > 0.25 * h && base - ny < 1.1 * h && it.transform[4] >= numX - h;
+        // pdf.js also ends the line after an exponent with a subscript under it still to come ("U", "j+", then "i").
+        const last = [...cur].reverse().find((c) => c.str?.trim() && c.transform);
+        const under =
+          base != null && last?.transform != null && h <= 0.85 * size && Math.hypot(last.transform[2], last.transform[3]) <= 0.85 * size && last.transform[5] - base > 0.2 * size && base - ny > 0 && base - ny < 0.6 * size && Math.abs(it.transform[4] - last.transform[4]) < 1.5 * size;
+        // A display equation's tall pieces (a big bracket, a fraction's numerator) are raised a little and go on
+        // to the right of the piece before; a new line starts back at the left, or lower down.
+        // Only where the line is set in a symbol font whose glyphs come out as control characters ("¼" for "="):
+        // pdfTeX's cmex lines (Thompson) keep their own handling.
+        const maths = /[\u0000-\u001f¼þ]/u;
+        const onward =
+          base != null &&
+          last?.transform != null &&
+          it.transform[4] >= last.transform[4] + (last.width ?? 0) - 0.5 &&
+          it.str.trim().length <= 4 &&
+          // cmex's big glyphs come out as letters ("Z" is ∫, "n" a brace): those are put back later, line by line.
+          !/^[A-Za-z]$/.test(it.str.trim()) &&
+          !/^[A-Za-z]$/.test(last.str!.trim()) &&
+          ny - base < 1.6 * size &&
+          ny - base > 0.25 * size &&
+          cur.some((c) => maths.test(c.str ?? ""));
+        if (eol && !stacked && !under && !onward) flush(true);
+        else if (y != null && !stacked && !under && !onward && Math.abs(ny - y) > 1.2 * Math.max(size, h)) flush();
+        eol = false;
         y = it.transform[5];
         size = Math.max(size, h);
       }
       cur.push(it);
-      if (it.hasEOL) flush(true);
+      if (it.hasEOL) eol = true;
     }
-    flush();
+    flush(eol);
     pages.push(lines);
   }
   return pages;
@@ -317,7 +452,9 @@ export function headingLevel(line: PdfLine, body: number, sizes: number[]): numb
   if (t.split(/\s+/).length > 14 || /^[a-z]/.test(t) || /\b(of|the|and|to|in|a|an|by|with|for|from|on)$/i.test(t)) return 0;
   // A line of bold maths ("𝝈 ⋅⋅ 𝑫 d𝑣. Then") is set large but isn't a title.
   if ((t.match(/[\u{1d400}-\u{1d7ff}]/gu) ?? []).length >= 2 && (t.match(/\b[A-Za-z][a-z]{2,}\b/g) ?? []).length < 2) return 0;
-  return sizes.length > 1 && line.size >= sizes[sizes.length - 1] * 0.98 && line.size < sizes[0] ? 3 : 2;
+  const level = sizes.length > 1 && line.size >= sizes[sizes.length - 1] * 0.98 && line.size < sizes[0] ? 3 : 2;
+  // Italic at a section title's size: a subsection.
+  return line.italic ? level + 1 : level;
 }
 
 /**
@@ -387,7 +524,7 @@ export function shatteredMatrices(lines: string[], page: number): string[] {
     if (/^\s*[⎡⎛]\s*$/.test(lines[i])) {
       const close = lines.findIndex((l, j) => j > i && /^\s*[⎦⎠]\s*$/.test(l));
       if (close > 0 && close - i <= 60) {
-        out.push(`[matrix, see PDF page ${page}]`);
+        out.push(matrixOf(lines.slice(i + 1, close)) ?? `[matrix, see PDF page ${page}]`);
         i = close;
         continue;
       }
@@ -398,6 +535,23 @@ export function shatteredMatrices(lines: string[], page: number): string[] {
 }
 
 /**
+ * A small square matrix whose entries came out one per line, in reading order: four or nine entries, or
+ * as many fractions set as numerator and denominator lines ("∂x", "∂ξ"). Anything else is null.
+ */
+function matrixOf(inner: string[]): string | null {
+  const cells = inner.map((l) => l.trim()).filter((l) => l && !/^[⎡⎢⎣⎤⎥⎦⎛⎜⎝⎞⎟⎠]+$/.test(l));
+  if (cells.some((c) => c.length > 12 || /\$\$|\s{2}/.test(c) || /\p{L}{4,}/u.test(c))) return null;
+  const square = (n: number) => (n === 4 ? 2 : n === 9 ? 3 : 0);
+  // Fractions when the lines pair up and every denominator is a derivative or a plain symbol.
+  const fractions = cells.length % 2 === 0 && square(cells.length / 2) && cells.every((c) => /^[∂𝜕d]/u.test(c));
+  const entries = fractions ? cells.flatMap((c, k) => (k % 2 ? [] : [`${c}/${cells[k + 1]}`])) : cells;
+  const n = square(entries.length);
+  if (!n) return null;
+  const rows = Array.from({ length: n }, (_, r) => entries.slice(r * n, r * n + n).join(" & "));
+  return `\\begin{bmatrix} ${rows.join(" \\\\ ")} \\end{bmatrix}`;
+}
+
+/**
  * A drawn figure's labels come out as a run of short lines ("Gauss", "Quadrature", "𝑲𝑼 = 𝒇", "(reduced)")
  * just before its caption; read as prose they are noise, so the run is pointed to instead. A run is at least
  * four lines of at most five plain words with no sentence end, stopping at a heading, list item, blank line
@@ -405,7 +559,7 @@ export function shatteredMatrices(lines: string[], page: number): string[] {
  */
 export function figureLabels(lines: string[], page: number): string[] {
   const words = (l: string) => (l.match(/[A-Za-z]{2,}/g) ?? []).length;
-  const label = (l: string) => l.trim() !== "" && !/^\s*(#|- |\d+\.\s|\[matrix)/.test(l) && !/[.;:]$/.test(l.trim()) && words(l) <= 5;
+  const label = (l: string) => l.trim() !== "" && !/^\s*(#|- |\d+\.\s|\[matrix)/.test(l) && !/[.;:]$/.test(l.trim()) && (words(l) <= 5 || (l.trim().length <= 50 && words(l) <= 7));
   const out = [...lines];
   for (let i = out.length - 1; i > 0; i--) {
     if (!/^\s*(Figure|Fig\.)\s*\d+[.:]/.test(out[i])) continue;

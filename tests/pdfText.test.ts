@@ -138,6 +138,8 @@ describe("slides and book furniture", () => {
 
   it("points to a matrix shattered into bracket pieces", () => {
     expect(shatteredMatrices(["J =", "⎡", "⎢", "⎣", "∂x", "∂ξ", "⎤", "⎥", "⎦", "i.e. local."], 5)).toEqual(["J =", "[matrix, see PDF page 5]", "i.e. local."]);
+    // A 2×2 of fractions, one numerator or denominator per line, is rebuilt.
+    expect(shatteredMatrices(["J =", "⎡", "⎢", "⎣", "∂x", "∂ξ", "∂y", "∂ξ", "∂x", "∂η", "∂y", "∂η", "⎤", "⎥", "⎦"], 5)).toEqual(["J =", "\\begin{bmatrix} ∂x/∂ξ & ∂y/∂ξ \\\\ ∂x/∂η & ∂y/∂η \\end{bmatrix}"]);
   });
 
   it("reads bullets, exponents and a title run into a figure's labels from the items' positions", async () => {
