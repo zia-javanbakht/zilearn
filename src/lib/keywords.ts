@@ -344,7 +344,8 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
     .join(" | ");
   // A word written in lower case anywhere is an ordinary word; one that never is (Weibull, Jacobian) is a name.
   const lower = new Set(sentences.flatMap((s) => s.text.match(/(?<![.!?]\s)\b\p{Ll}[\p{L}’'-]*/gu) ?? []).map((w) => w.toLowerCase()));
-  const named = new Set(sentences.flatMap((s) => s.text.match(/(?<=\p{L}[,;]?\s)\p{Lu}\p{Ll}[\p{L}’'-]*/gu) ?? []));
+  // A name is capitalised after a word in lower case, not just inside a Title Case label.
+  const named = new Set(sentences.flatMap((s) => s.text.match(/(?<=(?:^|\s)(?!(?:of|and|or|the|a|an|in|for|to|on|by|with|from|at|vs)\s)\p{Ll}[\p{L}’'-]*[,;]?\s)\p{Lu}\p{Ll}[\p{L}’'‐‑–-]*/gu) ?? []).map((w) => w.replace(/[’']s$/, "").replace(/[‐‑–]/g, "-")));
 
   const cands = new Map<string, Candidate>();
   const add = (words: string[], i: number, prev?: string, next?: string) => {
@@ -353,7 +354,8 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
     if (!c) cands.set(key, (c = { key, prev: new Map(), next: new Map(), forms: new Map(), count: 0, sentences: new Set(), first: i, aliases: new Set(), boost: 1 }));
     if (prev && prev !== "of") c.prev.set(wordKey(prev), (c.prev.get(wordKey(prev)) ?? 0) + 1);
     if (next && next !== "of") c.next.set(wordKey(next), (c.next.get(wordKey(next)) ?? 0) + 1);
-    const form = words.map((w) => (/^\p{Lu}{2,}/u.test(w) || !lower.has(w.toLowerCase()) ? w : w.toLowerCase())).join(" ");
+    // Spelt as the text spells it mid-sentence: names (Weibull, Jacobian) and acronyms keep their capitals.
+    const form = words.map((w) => (/^\p{Lu}{2,}/u.test(w) || (!lower.has(w.toLowerCase()) && (named.has(w) || !/^\p{Lu}\p{Ll}/u.test(w))) ? w : w.toLowerCase())).join(" ");
     c.forms.set(form, (c.forms.get(form) ?? 0) + 1);
     c.count++;
     c.sentences.add(i);
