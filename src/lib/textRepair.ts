@@ -168,7 +168,9 @@ export function repairText(input: string, opts: RepairOptions = {}): { text: str
   });
 
   // 5. OCR letter-shape confusions, judged by the document's own majority spelling.
-  if (opts.ocr) text = fixOcrShapes(text, opts.context, report, note);
+  // Only a rare non-word next to a frequent spelling is changed, so a born-digital text is safe too:
+  // a PDF's own text layer may be an old scan's OCR.
+  text = fixOcrShapes(text, opts.context, report, note);
   return { text, report };
 }
 
@@ -265,6 +267,9 @@ const SHAPES: [RegExp, string][] = [
   [/1/g, "l"],
   [/0/g, "o"],
   [/5/g, "s"],
+  // Scans of old journals: "Jinite", "Jield" for "finite", "field"; "Finany" for "Finally".
+  [/j/g, "f"],
+  [/n/g, "ll"],
 ];
 
 /** A rare spelling one OCR confusion away from a frequent one is the frequent one misread. */
@@ -273,7 +278,7 @@ function fixOcrShapes(text: string, context: string | undefined, report: RepairR
   for (const w of `${context ?? ""}\n${text}`.toLowerCase().match(/[a-z0-9]+/g) ?? []) counts.set(w, (counts.get(w) ?? 0) + 1);
   const fixes = new Map<string, string>();
   for (const [w, n] of counts) {
-    if (n > 2 || w.length < 4 || (w.match(/[a-z]/g) ?? []).length < 3 || isWord(w)) continue;
+    if (n > 5 || w.length < 4 || (w.match(/[a-z]/g) ?? []).length < 3 || isWord(w)) continue;
     let best: { v: string; n: number } | null = null;
     for (const [re, to] of SHAPES) {
       for (const m of w.matchAll(new RegExp(re.source, "g"))) {
@@ -289,7 +294,8 @@ function fixOcrShapes(text: string, context: string | undefined, report: RepairR
     const to = fixes.get(w.toLowerCase());
     if (!to) return w;
     report.ocr++;
-    const fixed = likeCase(w, to);
+    // A capital J misread for f keeps the word's own case ("Jield" is "field").
+    const fixed = /^J[a-z]/.test(w) && to[0] === "f" ? to : likeCase(w, to);
     note(w, fixed);
     return fixed;
   });

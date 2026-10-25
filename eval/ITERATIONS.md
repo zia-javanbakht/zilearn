@@ -27,3 +27,5 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 18a | A term goes to the section named after it | 87.41 | 71.41 | no |
 | 18 | A term a section is named after merges into that section's branch (no duplicate node) | 87.41 | 72.19 | yes |
 | 19 | A numbered title with a colon ("4.2. Example 1: A plane element") stays one heading | 87.41 | 72.32 | yes |
+| 20 | Headings (or exercise titles) count as a mention of the terms they name | 87.41 | 72.23 | no |
+| 21 | OCR shape fixes (J for f, n for ll) also run on a PDF's own text layer, which may be an old scan's OCR | 87.67 | 72.36 | yes |

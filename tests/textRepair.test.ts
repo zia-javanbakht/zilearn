@@ -44,7 +44,9 @@ describe("repairText", () => {
   it("undoes OCR letter-shape confusions by the majority spelling", () => {
     const t = "The modal mass. The modal shape. The modal damping. The rnodal mass. The c1assic modal form.";
     expect(fix(t, { ocr: true })).toContain("The modal mass. The modal shape. The modal damping. The modal mass.");
-    expect(fix(t)).toContain("rnodal");
+    // A PDF's own text layer can be an old scan's OCR, so it gets the same repair; real words stay.
+    expect(fix(t)).toContain("The modal mass. The c1assic");
+    expect(fix("The modern view. The modern way. The modern form. A modem.")).toContain("A modem.");
   });
 
   it("reports what it fixed", () => {
