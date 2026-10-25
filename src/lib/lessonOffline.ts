@@ -193,7 +193,14 @@ function formulas(u: Unit): { lead: string; math: string }[] {
     while (!(math.length > 2 && math.endsWith("$$")) && i + 1 < lines.length) math += "\n" + lines[++i];
     let k = i - math.split("\n").length;
     while (k >= 0 && !lines[k].trim()) k--;
-    const lead = k >= 0 && !lines[k].trim().startsWith("$$") ? lines[k].trim() : "";
+    // The sentence that leads into it, which a PDF's text wraps over several lines ("… whose dependence" / "is linear:").
+    const run: string[] = [];
+    while (k >= 0 && run.length < 4 && lines[k].trim() && !/^(\$\$|#)/.test(lines[k].trim())) {
+      if (!/^--- Page \d+ ---$/.test(lines[k].trim())) run.unshift(lines[k].trim());
+      if (k > 0 && /[.!?]["”)]?$/.test(lines[k - 1].trim())) break;
+      k--;
+    }
+    const lead = (run.join(" ").split(/(?<=[.!?])\s+(?=\p{Lu})/u).pop() ?? "").trim();
     out.push({ lead, math: math.trim() });
   }
   return out;

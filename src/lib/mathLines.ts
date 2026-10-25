@@ -56,9 +56,14 @@ export function markDisplayMaths(text: string): string {
   const out: string[] = [];
   // Subscripts are marked for equations; in a sentence the symbol reads as the PDF wrote it ("𝑆𝑝").
   const prose = (l: string) => l.replace(/_\{([^{}$]{1,6})\}|_([^\s{}$])/gu, "$1$2");
+  // A figure's caption runs on to its first stop; its lines are never an equation ("(c) width = 0.2 mm").
+  let caption = false;
   for (let i = 0; i < lines.length; i++) {
-    if (!isMathLine(lines[i])) {
+    const t = lines[i].trim();
+    if (/^(figure|fig\.|table)\s*\d+[.:]/i.test(t)) caption = true;
+    if (caption || !isMathLine(lines[i])) {
       out.push(prose(lines[i]));
+      if (caption && (!t || /[.!?]$/.test(t))) caption = false;
       continue;
     }
     const run: string[] = [];

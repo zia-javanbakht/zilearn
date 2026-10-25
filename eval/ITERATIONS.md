@@ -73,3 +73,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 62 | Held-out lessons: a lesson's map, key-term lists and takeaways don't decide where a term belongs; Map/Where this fits aren't title page; objectives aren't quoted first | 89.1 | 79.03 | yes |
 | 63 | Held-out lessons: example and intuition titles that narrate, and step labels, aren't terms; a lesson's Key terms/Connections after its last section is its own context, not a subsection | 89.1 | 79.03 | yes |
 | 64 | Source, glossary and pitfall lines aren't quoted as what a term is | 89.1 | 79.03 | yes |
+| 65 | Formula cards: the lead is the whole sentence into the equation; a caption's lines are never an equation; eval also counts offline formula cards (0 on main, 89 now) | 89.1 | 78.98 | yes |
