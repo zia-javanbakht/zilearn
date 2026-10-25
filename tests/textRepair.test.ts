@@ -54,6 +54,10 @@ describe("repairText", () => {
     expect(fix(t)).toContain("The finite element and the strain field. Modified by");
   });
 
+  it("reads a radical bar drawn as ffi glyphs as the root sign", () => {
+    expect(fix("SH/Kt \uFB03\uFB03\uFB03\uFB03 Vm")).toBe("SH/Kt √ Vm");
+  });
+
   it("reports what it fixed", () => {
     const r = repairText("The e ect is di erent.").report;
     expect(r.ligatures).toBe(2);

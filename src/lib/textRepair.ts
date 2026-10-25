@@ -111,7 +111,8 @@ export function repairText(input: string, opts: RepairOptions = {}): { text: str
   const note = (from: string, to: string) => {
     if (report.examples.length < 8 && !report.examples.some((e) => e.startsWith(`"${from}"`))) report.examples.push(`"${from}" → "${to}"`);
   };
-  let text = normalise(input);
+  // A radical's bar, drawn in some publishers' fonts as a run of ffi glyphs, is the root sign.
+  let text = normalise(input).replace(/(?:ffi){3,}f{0,2}/g, "√");
   const vocab = vocabOf(opts.context ? `${normalise(opts.context)}\n${text}` : text);
 
   // 1. A stray character where the ligature was: pick the ligature that makes a word.
