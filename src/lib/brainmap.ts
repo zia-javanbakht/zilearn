@@ -405,7 +405,8 @@ function sectionGroups(m: Material, terms: string[]): SectionGroup[] | null {
       .slice(0, 8)
       .map(({ sub: _, ...p }) => p);
     const held = members[gi].length + parts.reduce((n, p) => n + p.members.length, 0);
-    if (held < 1 && parts.length < 3) return [];
+    // A paper of a few sections is read section by section, so each is a branch even before a term lands in it.
+    if (held < 1 && parts.length < 3 && gs.filter((x) => !x.context).length > 10) return [];
     return [{ title: clipWords(mend(g.title), 60), summary: firstSentences(g.own, 2) || firstSentences(g.body, 2), members: members[gi], parts }];
   });
   return out.length >= 2 ? out : null;
