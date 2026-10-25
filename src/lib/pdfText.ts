@@ -524,7 +524,7 @@ export function shatteredMatrices(lines: string[], page: number): string[] {
     if (/^\s*[⎡⎛]\s*$/.test(lines[i])) {
       const close = lines.findIndex((l, j) => j > i && /^\s*[⎦⎠]\s*$/.test(l));
       if (close > 0 && close - i <= 60) {
-        out.push(`[matrix, see PDF page ${page}]`);
+        out.push(matrixOf(lines.slice(i + 1, close)) ?? `[matrix, see PDF page ${page}]`);
         i = close;
         continue;
       }
@@ -532,6 +532,23 @@ export function shatteredMatrices(lines: string[], page: number): string[] {
     out.push(lines[i]);
   }
   return out;
+}
+
+/**
+ * A small square matrix whose entries came out one per line, in reading order: four or nine entries, or
+ * as many fractions set as numerator and denominator lines ("∂x", "∂ξ"). Anything else is null.
+ */
+function matrixOf(inner: string[]): string | null {
+  const cells = inner.map((l) => l.trim()).filter((l) => l && !/^[⎡⎢⎣⎤⎥⎦⎛⎜⎝⎞⎟⎠]+$/.test(l));
+  if (cells.some((c) => c.length > 12 || /\$\$|\s{2}/.test(c) || /\p{L}{4,}/u.test(c))) return null;
+  const square = (n: number) => (n === 4 ? 2 : n === 9 ? 3 : 0);
+  // Fractions when the lines pair up and every denominator is a derivative or a plain symbol.
+  const fractions = cells.length % 2 === 0 && square(cells.length / 2) && cells.every((c) => /^[∂𝜕d]/u.test(c));
+  const entries = fractions ? cells.flatMap((c, k) => (k % 2 ? [] : [`${c}/${cells[k + 1]}`])) : cells;
+  const n = square(entries.length);
+  if (!n) return null;
+  const rows = Array.from({ length: n }, (_, r) => entries.slice(r * n, r * n + n).join(" & "));
+  return `\\begin{bmatrix} ${rows.join(" \\\\ ")} \\end{bmatrix}`;
 }
 
 /**

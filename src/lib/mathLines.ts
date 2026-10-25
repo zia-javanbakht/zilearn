@@ -30,6 +30,7 @@ function proseWords(line: string): string[] {
 export function isMathLine(raw: string): boolean {
   const t = raw.trim();
   if (!t || t.length > 160) return false;
+  if (/^\\begin\{bmatrix\}.*\\end\{bmatrix\}$/.test(t)) return true;
   if (/^(#|- |\* |\d+[.)]\s+\p{L}|\$\$|\[(diagram|matrix|figure)|(figure|fig\.|table)\s*\d)/iu.test(t)) return false;
   // An equation's number on its own line.
   if (/^\(\d{1,3}[a-z]?\)$/.test(t)) return true;
@@ -95,12 +96,19 @@ export function markDisplayMaths(text: string): string {
   return out.join("\n");
 }
 
+/** Whether a position falls inside a \begin{bmatrix} … \end{bmatrix}. */
+function inMatrix(t: string, at: number): boolean {
+  const open = t.lastIndexOf("\\begin{bmatrix}", at);
+  return open >= 0 && t.indexOf("\\end{bmatrix}", open) > at;
+}
+
 /** The line as maths KaTeX renders, with LaTeX's special characters escaped; null if it still can't. */
 function renderable(line: string): string | null {
   let t = line
     .replace(/\$/g, "")
     .replace(/\s*\u0338\s*=/g, " ≠")
-    .replace(/[&%#]/g, (c) => `\\${c}`);
+    // A matrix's column breaks are LaTeX's own; any other & is a character.
+    .replace(/[&%#]/g, (c, at: number, all: string) => (c === "&" && inMatrix(all, at) ? c : `\\${c}`));
   // The equation's number, as LaTeX numbers it: "… (12)" is \tag{12}, when it is the block's only one.
   if ((t.match(/\(\d{1,3}[a-z]?\)/g) ?? []).length === 1) t = t.replace(/\s*\((\d{1,3}[a-z]?)\)\s*$/, " \\tag{$1}");
   if ((t.match(/\{/g) ?? []).length !== (t.match(/\}/g) ?? []).length) t = t.replace(/[{}]/g, (c) => `\\${c}`);

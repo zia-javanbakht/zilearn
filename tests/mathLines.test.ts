@@ -23,6 +23,8 @@ describe("display maths in a PDF's text", () => {
     expect(markDisplayMaths("determined as follows:\nσ = σ0[\nln\n( 1\n1 − η\n)] 1\nm\n(1)\nwhere η is a random number.")).toBe("determined as follows:\n$$σ = σ0[ ln ( 1 1 − η )] 1 m \\tag{1}$$\nwhere η is a random number.");
     // An exercise's part is a sentence about maths.
     expect(markDisplayMaths("Exercise.\n(a) Derive S = ∂Ψ/∂E and K = dR/dd. Verify P = λS independently.")).toBe("Exercise.\n(a) Derive S = ∂Ψ/∂E and K = dR/dd. Verify P = λS independently.");
+    // A rebuilt matrix keeps its column breaks.
+    expect(markDisplayMaths("the Jacobian is\nJ =\n\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}\ni.e., local.")).toBe("the Jacobian is\n$$J = \\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}$$\ni.e., local.");
     // A lone equation number is LaTeX's tag.
     expect(markDisplayMaths("Text before.\nE = mc^2 (3)")).toBe("Text before.\n$$E = mc^2 \\tag{3}$$");
     // Text that already has maths blocks (an AI transcription) is left alone.
