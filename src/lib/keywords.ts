@@ -587,6 +587,7 @@ export function keywordMap(text: string, opts: { mains?: number; children?: numb
   const rest = terms.filter((t) => !main.includes(t));
   const kids = new Map<string, KeyTerm[]>(main.map((m) => [m.term, []]));
   const words = (t: string) => new Set(t.toLowerCase().split(/\s+/).map(wordKey));
+  const weak = new Map<string, string>();
   for (const t of rest) {
     let best: { m: KeyTerm; a: number } | null = null;
     for (const m of main) {
@@ -599,7 +600,18 @@ export function keywordMap(text: string, opts: { mains?: number; children?: numb
       if ([...words(t.term)].some((w) => words(m.term).has(w))) assoc += 0.25;
       if (assoc > 0 && (!best || assoc > best.a)) best = { m, a: assoc };
     }
-    if (best && kids.get(best.m.term)!.length < (opts.children ?? 5)) kids.get(best.m.term)!.push(t);
+    // Nothing shared: the main term the same section or slide talks about ("Skew" in "Element Quality").
+    if (!best) {
+      const at = Math.min(...sets.get(t.term)!);
+      const where = sentences[at]?.where;
+      let near = Infinity;
+      for (const m of main)
+        for (const x of sets.get(m.term)!)
+          if (sentences[x].where === where && Math.abs(x - at) < near) (near = Math.abs(x - at)), (best = { m, a: 0 });
+      if (best) weak.set(t.term, best.m.term);
+      continue;
+    }
+    if (kids.get(best.m.term)!.length < (opts.children ?? 5)) kids.get(best.m.term)!.push(t);
   }
   const all = terms.map((t) => t.term);
   const used = new Set<string>();
@@ -608,23 +620,32 @@ export function keywordMap(text: string, opts: { mains?: number; children?: numb
     if (evidence[0]) used.add(evidence[0].text);
     return { term: t.term, aliases: t.aliases, note: evidence[0]?.text ?? "", evidence, start: evidence[0]?.start ?? null, children };
   };
-  return main
+  // A sub-term the material says nothing new about (its only sentences are already quoted for another
+  // term) is a passing mention, not part of the map.
+  const child = (k: KeyTerm): KeywordNode[] => {
+    const before = new Set(used);
+    const n = node(k, []);
+    const named = k.aliases.some((a) => /^\p{Lu}{2,}/u.test(a));
+    return n.note && (named || !before.has(n.note)) ? [n] : [];
+  };
+  const tree = main
     .sort((a, b) => a.first - b.first)
     .map((m) => {
       const parent = node(m, []);
       parent.children = kids
         .get(m.term)!
         .sort((a, b) => a.first - b.first)
-        .flatMap((k) => {
-          // A sub-term the material says nothing new about (its only sentences are already quoted for
-          // another term) is a passing mention, not part of the map.
-          const before = new Set(used);
-          const n = node(k, []);
-          const named = k.aliases.some((a) => /^\p{Lu}{2,}/u.test(a));
-          return n.note && (named || !before.has(n.note)) ? [n] : [];
-        });
+        .flatMap(child);
       return parent;
     });
+  // Terms placed only by where they are said come last, so they don't take another term's quote.
+  for (const t of rest) {
+    const p = tree.find((n) => n.term === weak.get(t.term));
+    if (!p || p.children.length >= (opts.children ?? 5)) continue;
+    p.children.push(...child(t));
+    p.children.sort((a, b) => terms.find((x) => x.term === a.term)!.first - terms.find((x) => x.term === b.term)!.first);
+  }
+  return tree;
 }
 
 /** A label for a term: its acronym after it when the material uses one ("Representative volume element (RVE)"). */

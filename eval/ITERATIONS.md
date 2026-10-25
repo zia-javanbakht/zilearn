@@ -29,3 +29,5 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 19 | A numbered title with a colon ("4.2. Example 1: A plane element") stays one heading | 87.41 | 72.32 | yes |
 | 20 | Headings (or exercise titles) count as a mention of the terms they name | 87.41 | 72.23 | no |
 | 21 | OCR shape fixes (J for f, n for ll) also run on a PDF's own text layer, which may be an old scan's OCR | 87.67 | 72.36 | yes |
+| 22 | OCR section numbers (2.2.I . → 2.2.1.) and l for slash; headings right, but 6.1 now hides the 6.1.1 Beam bending part | 87.82 | 71.88 | no |
+| 23 | A term sharing no sentence with a main term goes under the nearest main term of its section, after the others take their quotes | 87.67 | 73.09 | yes |
