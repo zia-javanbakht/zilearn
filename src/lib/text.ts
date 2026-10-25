@@ -204,7 +204,8 @@ export function splitSections(text: string): Section[] {
  */
 function runInHeading(line: string): { heading: string; rest: string; level?: number } | null {
   let m = line.match(/^(\d+\.\d+(?:\.\d+)*)\.?\s+([A-Z][^.!?:]{2,80})[.:]\s+(\p{Lu}.*)$/u);
-  if (m && titleLike(m[2], 10)) return { heading: unshout(m[2].trim()), rest: m[3], level: m[1].split(".").length };
+  // "4.2. Example 1: A plane elasticity element" is a title with a colon in it, not a title and a sentence.
+  if (m && titleLike(m[2], 10) && (/[.!?]/.test(m[3]) || m[3].length > 80)) return { heading: unshout(m[2].trim()), rest: m[3], level: m[1].split(".").length };
   m = line.match(/^([A-Z][^.!?:;()]{8,90}):\s+(\p{Lu}.*)$/u);
   if (m && m[1].split(/\s+/).length >= 3 && titleLike(m[1], 12)) return { heading: m[1].trim(), rest: m[2] };
   return null;
