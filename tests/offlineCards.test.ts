@@ -60,3 +60,20 @@ describe("offline mock exams", () => {
     for (const q of exam.questions.filter((x) => x.type !== "mcq")) expect(q.model_answer.length).toBeGreaterThan(20);
   });
 });
+
+describe("offline notes and podcasts", () => {
+  it("reads only sentences of words aloud", async () => {
+    const { speakable } = await import("@/lib/generate");
+    expect(speakable("The linear momentum of the spatial cut 𝑆𝑝 is 𝑳𝑆𝑝 = ∫𝑆𝑝 𝜌𝒗 d𝑣.")).toBeNull();
+    expect(speakable("(20) The **damping ratio** $\\zeta$ says how quickly free vibration dies away.")).toBe("The damping ratio says how quickly free vibration dies away.");
+  });
+
+  it("writes review notes from the definitions and results in the materials", async () => {
+    const { generateNotes } = await import("@/lib/generate");
+    const { course } = dynamicsCourse();
+    const n = await generateNotes(course.id, { kind: "course" }, "concise");
+    expect(n.content).toMatch(/smallest damping/);
+    expect(n.content).toMatch(/\*\(Lecture 3/);
+    expect(n.content).not.toMatch(/\n{3,}/);
+  });
+});

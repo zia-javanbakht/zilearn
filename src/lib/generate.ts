@@ -404,21 +404,19 @@ export async function generateNotes(courseId: string, scope: Scope, style: "conc
     const lines = [`# Review notes: ${ctx.course.name} - ${ctx.label}`, ""];
     const roots = buildTree(listTopics(courseId));
     const ids = new Set(ctx.nodes.map((n) => n.id));
+    // Weak topics get the most: everything found for them; known ones only their definitions.
     const walk = (ns: TopicNode[], depth: number) => {
       for (const n of ns) {
         const inside = ids.has(n.id) || flattenTree(n.children).some((c) => ids.has(c.id));
         if (!inside) continue;
-        lines.push(`${"#".repeat(Math.min(6, depth + 2))} ${n.title}`, "", n.summary, "");
-        if (n.keywords.length) lines.push(`**Key terms:** ${n.keywords.join(", ")}`, "");
-        if (!n.children.length && style !== "cheatsheet") {
-          const ex = excerptsFor(courseId, `${n.title} ${n.keywords.join(" ")}`, 1500, n.material_ids)[0];
-          if (ex) lines.push("> " + truncate(ex, 700).replace(/\n/g, "\n> "), "");
-        }
+        const mark = n.effective_mastery ? ` *(${MASTERY_LABELS[n.effective_mastery]})*` : "";
+        lines.push(`${"#".repeat(Math.min(6, depth + 2))} ${n.title}${style === "cheatsheet" ? "" : mark}`, "");
+        if (ids.has(n.id)) lines.push(...topicNotes(courseId, n, style), "");
         walk(n.children, depth + 1);
       }
     };
     walk(roots, 0);
-    return { title: `${ctx.label} - ${style}`, scope: ctx.label, content: lines.join("\n"), by: "heuristic" as const };
+    return { title: `${ctx.label} - ${style}`, scope: ctx.label, content: lines.join("\n").replace(/\n{3,}/g, "\n\n"), by: "heuristic" as const };
   }
   const styleGuide = {
     concise: "Concise revision notes: the essential definitions, results and how ideas connect. Around 1 page per major branch.",
@@ -440,6 +438,22 @@ The course source material is given above in <course_sources>.
 Format as Markdown with headings that follow the outline. Use LaTeX ($...$) for maths, tables where they help, and at most two small Mermaid diagrams (\`\`\`mermaid) for structure or processes. Spend more space on topics the student doesn't know yet. Finish with a "Most likely exam questions" section.`,
   });
   return { title: `${ctx.label} - ${style}`, scope: ctx.label, content: truncated ? text + CUT_OFF_NOTE : text, by: "claude" as const };
+}
+
+/** One topic's offline notes: its overview, the definitions and results its materials give, and where to read more. */
+function topicNotes(courseId: string, n: TopicNode, style: "concise" | "detailed" | "cheatsheet"): string[] {
+  const f = topicFacts(n.title, n.keywords, sourcesFor(courseId, `${n.title} ${n.keywords.join(" ")}`, 12000, n.material_ids));
+  const summary = plainSummary(n.summary);
+  const weak = n.effective_mastery !== "know";
+  const out: string[] = [];
+  if (style !== "cheatsheet" && summary) out.push(summary, "");
+  for (const d of f.definitions.slice(0, style === "cheatsheet" ? 2 : 4)) out.push(`- ${d.text.replace(/\n+/g, " ")}${style === "cheatsheet" ? "" : ` *(${d.source})*`}`);
+  if (f.definitions.length) out.push("");
+  for (const x of f.formulas.slice(0, style === "detailed" && weak ? 4 : 2)) out.push(...(x.lead && style !== "cheatsheet" ? [x.lead, ""] : []), x.math, "");
+  if (style !== "cheatsheet" && weak) for (const x of f.statements.slice(0, style === "detailed" ? 4 : 2)) out.push(`- ${x.text} *(${x.source})*`);
+  if (style === "cheatsheet" && !f.definitions.length && !f.formulas.length && summary) out.push(summary);
+  if (style !== "cheatsheet" && n.keywords.length) out.push("", `**Key terms:** ${n.keywords.join(", ")}`);
+  return out;
 }
 
 /* ---------------- Podcasts ---------------- */
@@ -478,13 +492,41 @@ Make it engaging and accurate: concrete examples and analogies, recap key points
     { speaker: "A", text: `Welcome to your ziLearn study podcast on ${ctx.course.name}. Today: ${ctx.label}.` },
     { speaker: "B", text: "Great, let's go through it topic by topic." },
   ];
+  const spoken = new Set<string>();
   for (const n of ctx.nodes.slice(0, 30)) {
+    const f = topicFacts(n.title, n.keywords, sourcesFor(courseId, `${n.title} ${n.keywords.join(" ")}`, 8000, n.material_ids));
+    // Read aloud, so only sentences that are words, not symbols.
+    const said = [f.definitions[0]?.text, plainSummary(n.summary), ...f.statements.map((x) => x.text)]
+      .filter((x): x is string => !!x)
+      .map(speakable)
+      // Neighbouring topics share sentences; the episode says each once.
+      .filter((x): x is string => !!x && !spoken.has(x));
+    if (!said.length) continue;
+    said.slice(0, 2).forEach((x) => spoken.add(x));
     segments.push({ speaker: "B", text: `So what is ${n.title} about?` });
-    segments.push({ speaker: "A", text: n.summary || `It covers ${n.keywords.join(", ")}.` });
-    if (n.keywords.length) segments.push({ speaker: "B", text: `The key terms to remember are ${n.keywords.slice(0, 5).join(", ")}.` });
+    segments.push({ speaker: "A", text: said[0] });
+    if (said[1]) {
+      segments.push({ speaker: "B", text: "And what else should I remember about it?" });
+      segments.push({ speaker: "A", text: said[1] });
+    }
   }
   segments.push({ speaker: "A", text: "That's the overview. Rebuild this episode after choosing an AI provider in Settings for a full, conversational script." });
   return { title: `${ctx.label}: audio overview`, scope: ctx.label, hosts, segments, by: "heuristic" as const };
+}
+
+/** A sentence fit to be read aloud: Markdown and maths taken out, or null when it is mostly symbols. */
+export function speakable(text: string): string | null {
+  const plain = text
+    .replace(/\$\$[\s\S]*?\$\$|\$[^$]*\$/g, " ")
+    .replace(/[*_`#>]/g, "")
+    .replace(/^\(\d+\)\s*/, "")
+    .replace(/\s+([,.;:])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  const tokens = plain.split(" ");
+  // Maths italic letters (𝑆𝑝) are letters to Unicode, but they are symbols to a listener.
+  const words = tokens.filter((t) => /^[(“"]?\p{L}[\p{L}’'-]+[)”",.;:!?]?$/u.test(t) && !/[\u{1D400}-\u{1D7FF}]/u.test(t)).length;
+  return tokens.length >= 5 && words / tokens.length >= 0.8 ? plain : null;
 }
 
 /* ---------------- Flashcards ---------------- */
