@@ -176,12 +176,12 @@ export function checkCitations(text: string, count: number): { text: string; use
       else nums.push(range[0]);
     }
     const ok = nums.filter((k) => k >= 1 && k <= count);
-    // A bracketed number that isn't a passage ("see [12]" in an equation) is left as it was.
-    if (!ok.length) return all;
+    // A mark for a passage that doesn't exist cites nothing: it goes.
+    if (!ok.length) return "";
     ok.forEach((k) => used.add(k));
     return ok.map((k) => `[${k}]`).join("");
   });
-  return { text: cleaned, used: [...used].sort((a, b) => a - b) };
+  return { text: cleaned.replace(/[ \t]+([.,;:!?])/g, "$1"), used: [...used].sort((a, b) => a - b) };
 }
 
 export const NOT_FOUND =
@@ -206,7 +206,8 @@ export async function answerQuestion(
     return { text: `From your materials, the closest passages say:\n\n${checked.text}`, citations: cite(checked.used), by: "heuristic" };
   }
 
-  const recent = history.slice(-6).map((m) => `${m.role === "user" ? "Student" : "You"}: ${truncate(m.content, 1500)}`);
+  // Earlier answers' [n] marks pointed at earlier passages; left in, they'd be read as these ones.
+  const recent = history.slice(-6).map((m) => `${m.role === "user" ? "Student" : "You"}: ${truncate(m.content.replace(/\s*\[\d+\]/g, ""), 1500)}`);
   const { text } = await generateText({
     effort: "low",
     maxTokens: 3000,

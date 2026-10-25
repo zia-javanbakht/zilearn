@@ -696,5 +696,6 @@ export function cardsFromMistakes(questions: ExamQuestion[], grades: ExamGrade[]
       front: q.type === "mcq" ? `${q.prompt}\n\n${q.options.map((o, i) => `- **${String.fromCharCode(65 + i)}.** ${o}`).join("\n")}` : q.prompt,
       back: q.type === "mcq" ? `**${String.fromCharCode(65 + (q.answer_index ?? 0))}.** ${q.options[q.answer_index ?? 0]}` : q.model_answer,
       topic_id: q.topic_id,
+      kind: "basic" as const,
     }));
 }

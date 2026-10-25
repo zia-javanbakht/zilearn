@@ -81,7 +81,7 @@ describe("Ask this course", () => {
   });
 
   it("drops citations to passages that don't exist, and leaves maths alone", () => {
-    expect(checkCitations("A [1]. B [7]. C [2, 3]. D $x \\in [0, 1]$.", 3)).toEqual({ text: "A [1]. B [7]. C [2][3]. D $x \\in [0, 1]$.", used: [1, 2, 3] });
+    expect(checkCitations("A [1]. B [7]. C [2, 3]. D $x \\in [0, 1]$.", 3)).toEqual({ text: "A [1]. B. C [2][3]. D $x \\in [0, 1]$.", used: [1, 2, 3] });
   });
 
   it("keeps the conversation per course", async () => {
