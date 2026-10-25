@@ -170,6 +170,7 @@ function headingLevel(line: string): number {
 
 export function splitSections(text: string): Section[] {
   const lines = text.replace(/\r/g, "").split("\n");
+  const marked = (text.match(/^#{2,4}\s/gm) ?? []).length >= 4;
   const sections: Section[] = [];
   let cur: Section | null = null;
   for (const raw of lines) {
@@ -182,7 +183,9 @@ export function splitSections(text: string): Section[] {
       cur = { heading: run.heading, body: run.rest + "\n", level: run.level ?? (parent?.level ?? 1) + 1, runIn: true };
       continue;
     }
-    const h = headingOf(line);
+    // Where the reader marked the headings (by type size), an unmarked numbered line is a list item or a
+    // diagram's label ("3 Designing for decay"), not a heading it missed.
+    const h = marked && !/^#/.test(line) ? null : headingOf(line);
     // A title set over two lines ("A CLASS OF … METHODS AND" / "THE METHOD OF …") is one heading.
     if (h && cur && cur.heading && !cur.body && TRAILING_FUNCTION_WORD.test(cur.heading)) {
       cur.heading += ` ${h}`;

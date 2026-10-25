@@ -26,7 +26,11 @@ type Item = { str?: string; transform?: number[]; width?: number; hasEOL?: boole
 const BULLETS = /^[•●⚫▪■▶►▸‣◆◦○➤✓✗]$/;
 
 /** A line from its items: the text, its size, and a leading bullet glyph turned into "- ". */
-function lineOf(items: Item[], italic: (font?: string) => boolean = () => false): PdfLine {
+function lineOf(items: Item[], fontOf: (font?: string) => string = () => ""): PdfLine {
+  const italic = (font?: string) => {
+    const name = fontOf(font);
+    return /(italic|oblique|[.-]I(?:t)?(?:[+.]|$)|-?It$)/i.test(name) && !/(bold|black|heavy|[.-]B(?:I)?(?:[+.]|$)|Bd)/i.test(name);
+  };
   const sizeOf = (it: Item) => (it.transform ? Math.round(Math.hypot(it.transform[2], it.transform[3]) * 10) / 10 : 0);
   const text = items.filter((it) => it.str?.trim());
   // A bullet: a bullet character opening the line, or a lone glyph set larger than the word after it
@@ -36,7 +40,10 @@ function lineOf(items: Item[], italic: (font?: string) => boolean = () => false)
     !!first &&
     text.length > 1 &&
     first.str!.trim().length === 1 &&
-    (BULLETS.test(first.str!.trim()) || (sizeOf(first) > sizeOf(text[1]) * 1.1 && /^\s*\p{Lu}\p{Ll}{2,}/u.test(text[1].str!)));
+    (BULLETS.test(first.str!.trim()) ||
+      // An icon font's glyph ("n" from FontAwesome) is a bullet whatever its size.
+      (/fontawesome|dingbat|wingding/i.test(fontOf(first.fontName)) && /^\s*\p{Lu}/u.test(text[1].str!)) ||
+      (sizeOf(first) > sizeOf(text[1]) * 1.1 && /^\s*\p{Lu}\p{Ll}{2,}/u.test(text[1].str!)));
   const rest = fractions(bullet ? items.slice(items.indexOf(first) + 1) : items, sizeOf);
   // Exponents: a short piece raised above the maths symbol before it ("𝑱" then "−1" a little higher is 𝑱^{−1}).
   // A raised number after a word or a full stop is a citation ("study,8"), which stays as it is, and so
@@ -162,11 +169,11 @@ export async function pdfLines(pdf: Pdf): Promise<PdfLine[][]> {
     const page = await pdf.getPage(n);
     const { items } = await page.getTextContent();
     // The fonts' names say which are italic ("…-Italic", "….I"); pdf.js loads them while reading the page's drawing.
-    const fonts = new Map<string, boolean>();
+    const fonts = new Map<string, string>();
     if (page.getOperatorList && page.commonObjs && (items as Item[]).some((it) => it.str?.trim()))
       await page.getOperatorList().catch(() => null);
-    const italic = (font?: string) => {
-      if (!font || !page.commonObjs) return false;
+    const fontOf = (font?: string) => {
+      if (!font || !page.commonObjs) return "";
       if (!fonts.has(font)) {
         let name = "";
         try {
@@ -174,7 +181,7 @@ export async function pdfLines(pdf: Pdf): Promise<PdfLine[][]> {
         } catch {
           name = "";
         }
-        fonts.set(font, /(italic|oblique|[.-]I(?:t)?(?:[+.]|$)|-?It$)/i.test(name) && !/(bold|black|heavy|[.-]B(?:I)?(?:[+.]|$)|Bd)/i.test(name));
+        fonts.set(font, name);
       }
       return fonts.get(font)!;
     };
@@ -183,7 +190,7 @@ export async function pdfLines(pdf: Pdf): Promise<PdfLine[][]> {
     let y: number | null = null;
     let size = 0;
     const flush = (eol = false) => {
-      if (eol || cur.some((it) => it.str)) lines.push(lineOf(cur, italic));
+      if (eol || cur.some((it) => it.str)) lines.push(lineOf(cur, fontOf));
       cur = [];
       y = null;
       size = 0;

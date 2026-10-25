@@ -211,9 +211,11 @@ function groundedTerms(terms: string[], sources: string): string[] {
 }
 
 /** Exercises, hints, answers and quizzes: practice on the material, not a part of its content. */
-const DRILL_SECTION = /^((multiple[- ]choice\s+)?(concept\s+)?quiz(zes)?|exercises?|hints?|answers?|questions and answers|answer checks|self[- ]?tests?|review questions|practice (problems|questions)|problems|solutions)\b/i;
+const DRILL_SECTION = /^((multiple[- ]choice\s+)?(concept\s+)?quiz(zes)?|exercises?|hints?|answers?|questions and answers|answer checks|self[- ]?tests?|review questions|practice (problems|questions)|problems|solutions|warm[- ]?up|check yourself|your turn|try (it|this))\b/i;
 
-const CONTEXT_SECTION = /^(introduction( and motivation)?|motivation|background|conclusions?|concluding remarks|summary( and conclusions?)?|discussion and conclusions?|closing remarks|outlook)$/i;
+// A lesson's scaffolding ("Where this fits", "Key terms", "Takeaways") frames its sections the same way.
+const CONTEXT_SECTION =
+  /^(introduction( and motivation)?|motivation|background|conclusions?|concluding remarks|summary( and conclusions?)?|discussion and conclusions?|closing remarks|outlook|map of this (lesson|topic|chapter)|where this fits|key (terms|ideas|points)|common (mistakes|errors|pitfalls)|connections|takeaways|key takeaways|learning (objectives|outcomes)|objectives|recap|what('|’)s next|further reading)$/i;
 
 const keywordMapOf = (m: Material) => (m.digest && (m.digest.basis === "keywords" || m.digest.edited) && m.digest.topics.length ? m.digest : null);
 
@@ -530,8 +532,10 @@ function firstSentences(text: string, n: number) {
     // A figure's labels ("1 2", "Natural / Parent") and a line of symbols say nothing on their own:
     // keep lines of words, list items and headings.
     .filter((l) => (l.match(/(?:^|\s)[A-Za-z][a-z]{2,}[,.;:)]?(?=\s|$)/g) ?? []).length >= 3 || /^\s*-\s+\S/.test(l) || /^#/.test(l.trim()))
+    // A lesson's lists of its terms and formulas ("Key terms: …") are its layout.
+    .filter((l) => !/^\s*(key (terms|words)|keywords|formula|procedure)\s*:/i.test(l))
     // A box's label ("Definition 3.1 — Mass of the Cuts (Smith 2002).") names it; its text says what it is.
-    .map((l) => l.replace(/^\s*(definition|theorem|lemma|corollary|proposition|keypoint|key point|example|remark)\s+[\d.]+\s*[—–-]\s*.{1,120}?\.(?=\s+\p{Lu})\s*/iu, ""))
+    .map((l) => l.replace(/^\s*(definition|theorem|lemma|corollary|proposition|keypoint|key point|example|remark|intuition)\s+[\d.]+\s*[—–-]\s*.{1,120}?\.(?=\s+\p{Lu})\s*/iu, ""))
     .join("\n")
     .replace(/--- Page \d+ ---/g, " ")
     // Headings (a title, the author line under it) aren't sentences of the text, but they end one.

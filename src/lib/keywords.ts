@@ -68,7 +68,7 @@ function boxName(label: string): string | null {
 
 const STAMP = /\[((?:\d{1,2}:)?\d{1,2}:\d{2})\]/;
 const AFFILIATION = /\b(prepared (for|by)|department|university|institute|school of|faculty of|laborator(y|ies)|college|e-?mail|corresponding author|received\b.*\d{4}|accepted\b.*\d{4}|doi:|https?:\/\/|orcid|©|copyright|creative commons|licen[cs]e)\b|@/i;
-const KEYWORDS_LABEL = /^(?:#{1,6}\s*)?(key\s*words?|index terms)\b[\s:.—–-]*/i;
+const KEYWORDS_LABEL = /^(?:#{1,6}\s*)?(key\s*words?|index terms|key terms(?=:))\b[\s:.—–-]*/i;
 
 /** Words that say nothing on their own about a subject: never a key term alone, never the end of one. */
 const GENERIC = new Set(
@@ -115,9 +115,11 @@ function wordKey(w: string): string {
   return stem(w.toLowerCase().replace(/[’']s?$/, "").replace(/[-‐‑–]/g, ""));
 }
 
-const DRILL = /^((multiple[- ]choice\s+)?(concept\s+)?quiz(zes)?|exercises?|hints?|answers?|answer checks|self[- ]?tests?|review questions|practice (problems|questions)|problems|solutions)\b/i;
+const DRILL = /^((multiple[- ]choice\s+)?(concept\s+)?quiz(zes)?|exercises?|hints?|answers?|answer checks|self[- ]?tests?|review questions|practice (problems|questions)|problems|solutions|warm[- ]?up|check yourself|your turn|try (it|this))\b/i;
 
 const DRILL_WEIGHT = 0.5;
+/** A list item's label that is the layout's, not a term: "Key terms: …", "Formula: …", "Hint: …". */
+const SCAFFOLD = /^(key (terms?|ideas?|points?)|formulas?|hints?|answers?|notes?|examples?|solutions?|summary|warning|tips?|remember|recall|check|result|given|find|goal|why|how)$/i;
 const VERB = /^(ensures?|gives|requires|yields|implies|enters|becomes|remains|provides|allows|makes|takes|shows|leads|means|uses|includes|contains|defines|describes|follows|holds|produces|reduces|increases|decreases|depends|satisfies|states|equals|governs|controls|determines)$/;
 
 /** The material's teaching text: no title page, affiliations, references, funding or declarations. */
@@ -205,7 +207,7 @@ function sentencesOf(text: string, drills = false): Sentence[] {
       // A list item that names what it explains ("- Jacobian ratio: the uniformity of …") defines that name.
       const item = u.match(/^(?:[-*+•·]|\d+[.)])\s+([\p{L}][\p{L}\p{N} ,'’()/‐‑–-]{2,70}?):\s+(\S.*)$/u);
       const label = item ? boxName(item[1]) : null;
-      if (label && !SENTENCE_LIKE.test(label) && !/\b(of|the|and|to|in|a|an|by|with|for|from|on)$/i.test(label)) boxes.push({ name: label, at: out.length });
+      if (label && !SENTENCE_LIKE.test(label) && !/\b(of|the|and|to|in|a|an|by|with|for|from|on)$/i.test(label) && !SCAFFOLD.test(label)) boxes.push({ name: label, at: out.length });
       // Superscript citations stick to the stop ("industries.1 However", "et al.15 used").
       const clean = u
         .replace(/([a-z)\]])[.](\d+(?:[,–-]\d+)*)(?=\s+\p{Lu})/gu, "$1.")
@@ -419,7 +421,14 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
       c.boost *= 2;
     }
   }
-  for (const t of authors) {
+  // A lesson lists each section's key terms ("Key terms: initial conditions 𝑢(0) · decay envelope · …").
+  const listed = [...text.matchAll(/^Key terms:\s*(.+)$/gim)].flatMap((m) =>
+    m[1]
+      .split(/\s*·\s*|\s*;\s*/)
+      .map((x) => (x.match(/^[\p{L}][\p{L}'’-]*(?:\s+[\p{L}][\p{L}'’-]*){0,4}/u)?.[0] ?? "").trim())
+      .filter((x) => x.length >= 4),
+  );
+  for (const t of new Set([...authors, ...listed])) {
     const c = cands.get(keyOf(t.split(/\s+/)));
     if (c) c.boost *= 3;
   }
