@@ -24,3 +24,5 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 15 | Stacked fractions (numerator over denominator) are read as a/b on one line, e.g. P = ∂Ψ/∂F | 87.41 | 68.81 | yes |
 | 16 | A document's sections gather its terms from 6 main terms up (was 9) | 87.41 | 69.43 | yes |
 | 17 | Within a section branch, its subsections are branches too, holding the terms they discuss most | 87.41 | 72.21 | yes |
+| 18a | A term goes to the section named after it | 87.41 | 71.41 | no |
+| 18 | A term a section is named after merges into that section's branch (no duplicate node) | 87.41 | 72.19 | yes |

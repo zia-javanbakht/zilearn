@@ -283,7 +283,20 @@ function keywordBranches(mapped: Material[], gather = true): NewTopic[] | null {
     topics.push({ ref, parent_ref: groupOf.get(j) ?? null, title: truncate(b.title, 80), summary: b.summary, keywords: [b.title, ...subs.map((x) => x.title)].map(bareTerm).slice(0, 8), material_ids: b.ids, importance: subs.length >= 2 || b.ids.length > 1 ? 3 : 2 });
     subs.forEach((st, k) => topics.push({ ref: `${ref}.${k}`, parent_ref: ref, title: truncate(st.title, 80), summary: st.summary, keywords: [bareTerm(st.title)], material_ids: st.ids, importance: 2 }));
   });
-  return orderByDocument(topics, groups);
+  return orderByDocument(mergeNamesakes(topics), groups);
+}
+
+/** A term a section is named after ("Stress measures" in "Stress Measures") is that section's branch: its sub-terms move up to it. */
+function mergeNamesakes(topics: NewTopic[]): NewTopic[] {
+  const drop = new Set<string>();
+  for (const t of topics) {
+    if (!t.ref.startsWith("K") || !t.parent_ref?.startsWith("S")) continue;
+    const parent = topics.find((p) => p.ref === t.parent_ref)!;
+    if (termKey(parent.title) !== termKey(t.title)) continue;
+    drop.add(t.ref);
+    for (const c of topics) if (c.parent_ref === t.ref) c.parent_ref = parent.ref;
+  }
+  return topics.filter((t) => !drop.has(t.ref));
 }
 
 /** Groups first where they start; a term outside every group stays where the keyword map put it. */
