@@ -319,7 +319,7 @@ function sectionGroups(m: Material, terms: string[]): SectionGroup[] | null {
   const text = m.text ?? "";
   const sections = studySections(text).filter((s) => s.heading && !/^(abstract|summary|keywords?)$/i.test(s.heading));
   const lvl = Math.min(...sections.map((s) => s.level ?? 1).filter((l) => l > 0));
-  type Part = { title: string; body: string };
+  type Part = { title: string; body: string; subs: { title: string; body: string }[] };
   type G = { title: string; body: string; own: string; context: boolean; parts: Part[] };
   const gs: G[] = [];
   for (const s of sections) {
@@ -329,8 +329,13 @@ function sectionGroups(m: Material, terms: string[]): SectionGroup[] | null {
       const g = gs[gs.length - 1];
       g.body += `\n${s.heading}\n${s.body}`;
       // Its subsections, one level down; deeper ones belong to theirs.
-      if ((s.level ?? 1) === lvl + 1 || !g.parts.length) g.parts.push({ title: s.heading, body: s.body });
-      else g.parts[g.parts.length - 1].body += `\n${s.heading}\n${s.body}`;
+      if ((s.level ?? 1) === lvl + 1 || !g.parts.length) g.parts.push({ title: s.heading, body: s.body, subs: [] });
+      else {
+        const p = g.parts[g.parts.length - 1];
+        p.body += `\n${s.heading}\n${s.body}`;
+        if ((s.level ?? 1) === lvl + 2 || !p.subs.length) p.subs.push({ title: s.heading, body: s.body });
+        else p.subs[p.subs.length - 1].body += `\n${s.heading}\n${s.body}`;
+      }
     }
   }
   if (gs.length < 2) return null;
@@ -341,6 +346,7 @@ function sectionGroups(m: Material, terms: string[]): SectionGroup[] | null {
   };
   const members = gs.map(() => [] as number[]);
   const partOf = gs.map((g) => g.parts.map(() => [] as number[]));
+  const subOf = gs.map((g) => g.parts.map((p) => p.subs.map(() => [] as number[])));
   terms.forEach((t, i) => {
     let best = -1;
     let score = 0;
@@ -353,8 +359,13 @@ function sectionGroups(m: Material, terms: string[]): SectionGroup[] | null {
     const g = gs[best];
     const inPart = g.parts.map((p) => count(p.body, t));
     const k = inPart.indexOf(Math.max(0, ...inPart));
-    if (k >= 0 && inPart[k] >= 1 && inPart[k] >= 0.5 * count(g.body, t)) partOf[best][k].push(i);
-    else members[best].push(i);
+    if (k >= 0 && inPart[k] >= 1 && inPart[k] >= 0.5 * count(g.body, t)) {
+      // And within it, a sub-subsection the same way: that one is listed beside its subsection.
+      const inSub = g.parts[k].subs.map((x) => count(x.body, t));
+      const j = inSub.indexOf(Math.max(0, ...inSub));
+      if (j >= 0 && inSub[j] >= 1 && inSub[j] >= 0.5 * inPart[k]) subOf[best][k][j].push(i);
+      else partOf[best][k].push(i);
+    } else members[best].push(i);
   });
   const mend = headingRepairer(text);
   const out: SectionGroup[] = gs.flatMap((g, gi) => {
@@ -362,9 +373,13 @@ function sectionGroups(m: Material, terms: string[]): SectionGroup[] | null {
     if (g.context) return [];
     // Subsections that name a part of the content, or hold a term.
     const parts = g.parts
-      .map((p, k) => ({ title: clipWords(mend(p.title), 60), summary: firstSentences(p.body, 2), members: partOf[gi][k] }))
-      .filter((p) => p.members.length || (!DRILL_SECTION.test(p.title) && !CONTEXT_SECTION.test(p.title) && p.title.split(/\s+/).length <= 8 && !/[?]$/.test(p.title)))
-      .slice(0, 8);
+      .flatMap((p, k) => [
+        { title: clipWords(mend(p.title), 60), summary: firstSentences(p.body, 2), members: partOf[gi][k], sub: false },
+        ...p.subs.map((x, j) => ({ title: clipWords(mend(x.title), 60), summary: firstSentences(x.body, 2), members: subOf[gi][k][j], sub: true })).filter((x) => x.members.length),
+      ])
+      .filter((p) => p.members.length || (!p.sub && !DRILL_SECTION.test(p.title) && !CONTEXT_SECTION.test(p.title) && p.title.split(/\s+/).length <= 8 && !/[?]$/.test(p.title)))
+      .slice(0, 8)
+      .map(({ sub: _, ...p }) => p);
     const held = members[gi].length + parts.reduce((n, p) => n + p.members.length, 0);
     if (held < 2 && !(held >= 1 && parts.length) && parts.length < 3) return [];
     return [{ title: clipWords(mend(g.title), 60), summary: firstSentences(g.own, 2) || firstSentences(g.body, 2), members: members[gi], parts }];
