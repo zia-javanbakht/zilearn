@@ -109,6 +109,6 @@ describe("the course map follows the student's keyword map", () => {
     const dropped = d.topics.slice(2).map((t) => t.title);
     expect(topics.filter((t) => dropped.includes(t.title))).toEqual([]);
     // Notes say where the paper says it.
-    expect(topics.find((t) => t.title === kept[0].title)?.summary).toMatch(/\((Abstract|Introduction|[A-Z][^)]+)\)$/);
+    expect(topics.find((t) => t.title === kept[0].title)?.summary).toMatch(/ \(see “[A-Z][^”]+”\)$/);
   });
 });

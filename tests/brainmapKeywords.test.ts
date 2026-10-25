@@ -44,7 +44,7 @@ describe("the course brainmap is built from key terms", () => {
     const pdc = tops.find((t) => /^Pseudo-ductile composites/.test(t.title))!;
     expect(topics.filter((t) => t.parent_ref === pdc.ref).length).toBeGreaterThanOrEqual(2);
     // Each branch says what the paper says about the term, and where.
-    expect(pdc.summary).toMatch(/\((Abstract|[A-Z][^)]*)\)$/);
+    expect(pdc.summary).toMatch(/ \(see “[A-Z][^”]*”\)$/);
   });
 
   it("merges a term two items share into one branch that cites both", () => {

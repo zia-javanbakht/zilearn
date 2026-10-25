@@ -17,27 +17,38 @@ interface Sentence {
   source: string; // "Lecture 3 recording [05:05]" or "Lecture 3 notes, Logarithmic decrement"
   stamp: string | null;
   lead: boolean; // ends with ":" (introduces a formula or list), so not a statement on its own
+  own: boolean; // from one of the topic's own materials
 }
 
 interface Unit {
   title: string; // source title
   section: string | null; // nearest Markdown heading
   lines: string[];
+  own: boolean;
 }
 
 const STAMP = /\[(\d{1,2}:\d{2}(?::\d{2})?)\]/;
 
+/** What the PDF reader leaves where it couldn't read a matrix or a diagram ("[matrix, see PDF page 5]"). */
+const PLACEHOLDER = /\[(?:matrix|diagram|figure|table)[^\]]*see PDF page \d+\]/gi;
+
+/** A box's label on its own ("Keypoint 1.1 — Role of the Jacobian."): it names a box, it doesn't say anything. */
+const BOX_LABEL = /^(definition|theorem|lemma|corollary|proposition|keypoint|key point|example|remark|note)\s+[\d.]+\s*[—–-]\s*[^.]{1,80}\.?$/i;
+
 /** Splits sources into sections by their Markdown headings. */
 function units(sources: Source[]): Unit[] {
   const out: Unit[] = [];
+  // Without any of the topic's own materials, whatever the search found is all there is.
+  const anyOwn = sources.some((s) => s.own);
   for (const s of sources) {
-    let cur: Unit = { title: s.title, section: null, lines: [] };
+    const own = !anyOwn || !!s.own;
+    let cur: Unit = { title: s.title, section: null, lines: [], own };
     for (const line of s.text.split("\n")) {
       // "References" on a line of its own starts the back matter even when it wasn't marked as a heading.
       const h = line.match(/^#{1,6}\s+(.*)$/) ?? (BACK_MATTER.test(line.trim()) ? ["", line.trim()] : null);
       if (h) {
         if (cur.lines.some((l) => l.trim())) out.push(cur);
-        cur = { title: s.title, section: h[1].replace(/^(lecture|week|tutorial|chapter)\s*\d+\s*[:.-]\s*/i, "").trim(), lines: [] };
+        cur = { title: s.title, section: h[1].replace(/^(lecture|week|tutorial|chapter)\s*\d+\s*[:.-]\s*/i, "").trim(), lines: [], own };
       } else cur.lines.push(line);
     }
     if (cur.lines.some((l) => l.trim())) out.push(cur);
@@ -84,16 +95,20 @@ function sentences(u: Unit): Sentence[] {
       for (const raw of joinAbbreviations(piece.split(/(?<=[.!?])\s+(?=[A-Z$(])/))) {
         // A clause continuing a display equation ("where ... is ...") reads as a sentence without its first word.
         let text = raw.replace(/\s+/g, " ").trim().replace(/^(where|and so|and|so|which)\s+(?=\$)/i, "");
-        if (!text) continue;
+        // Text that starts in the middle of a sentence ("exactly but cannot ...") lost its beginning to a
+        // page or column break: it can't stand on its own.
+        if (!text || /^[a-z]{2,}\b(?!\.)/.test(text)) continue;
+        // "= [matrix, see PDF page 5] = [matrix, see PDF page 5]" says it once.
+        text = text.replace(/(\[(?:matrix|diagram)[^\]]*\])(\s*=\s*\1)+/g, "$1");
         text = text[0].toUpperCase() + text.slice(1);
         if ((text.length < 18 && !text.endsWith("?")) || text.length > 400 || BOILERPLATE.test(text)) continue;
-        out.push({ text, source: stamp ? `${u.title} [${stamp}]` : u.section ? `${u.title}, ${u.section}` : u.title, stamp, lead: /[:,]$/.test(text) });
+        out.push({ text, source: stamp ? `${u.title} [${stamp}]` : u.section ? `${u.title}, ${u.section}` : u.title, stamp, lead: /[:,]$/.test(text), own: u.own });
       }
     }
   return out;
 }
 
-const stems = (s: string) => new Set(tokenize(s).map(stem));
+const stems = (s: string) => new Set(tokenize(s.replace(PLACEHOLDER, " ")).map(stem));
 
 /** How strongly a text is about the topic: shared stems with the topic's terms. */
 function relevance(text: string, terms: Set<string>): number {
@@ -160,7 +175,7 @@ export function isPrompt(text: string): boolean {
 
 /** A statement, as opposed to a heading or label that ended up on its own line ("Tutorial 3: Regularisation"). */
 function isStatement(text: string): boolean {
-  return text.split(/\s+/).length >= 6 && !isPrompt(text) && !/:$/.test(text);
+  return text.split(/\s+/).length >= 6 && !isPrompt(text) && !/:$/.test(text) && !BOX_LABEL.test(text.trim());
 }
 
 function take<T>(xs: T[], n: number): T[] {
@@ -245,7 +260,11 @@ export function offlineLesson(
   const map: LessonMap = head.map;
   const terms = stems(`${t} ${info.keywords.join(" ")} ${map.children.map((c) => c.title).join(" ")}`);
   const us = units(sources);
-  const all = dedupe(us.flatMap(sentences)).map((s) => ({ ...s, score: relevance(s.text, terms) }));
+  // Passages the search found in other materials only count where they name the topic: a sentence that
+  // merely shares a word with it ("form", "field") is about something else.
+  const all = dedupe(us.flatMap(sentences))
+    .map((s) => ({ ...s, score: relevance(s.text, terms) }))
+    .filter((s) => s.own || mentions(s.text, t));
   const relevant = all.filter((s) => s.score > 0);
   const byScore = [...relevant].sort((a, b) => b.score - a.score);
   // A summary of a question sheet is its questions; that isn't something to teach from.
@@ -263,7 +282,7 @@ export function offlineLesson(
   // word must come up a few times), then the phrases the relevant material repeats most.
   const uses = (k: string) => relevant.filter((x) => mentions(x.text, k)).length;
   const fromKeywords = [...new Set(info.keywords)].filter((k) => !GENERIC.test(k) && !titleOnly(k) && uses(k) >= (k.includes(" ") ? 1 : 3) && (k.includes(" ") || !fragment(k, relevant.map((x) => x.text))));
-  const fromText = topPhrases(relevant.map((x) => x.text.replace(/\$[^$]*\$/g, " ")).join(".\n"), 8)
+  const fromText = topPhrases(relevant.map((x) => x.text.replace(/\$[^$]*\$/g, " ").replace(PLACEHOLDER, " ")).join(".\n"), 8)
     .filter((p) => p.count >= 2 && !GENERIC.test(p.phrase) && !titleOnly(p.phrase) && !fromKeywords.some((k) => mentions(k, p.phrase) || mentions(p.phrase, k)))
     .map((p) => p.phrase);
   const candidates = [...fromKeywords, ...fromText].slice(0, 6).map((k) => asWritten(k, relevant.map((x) => x.text)));
@@ -278,15 +297,23 @@ export function offlineLesson(
   }
 
   // An analogy, with the sentence after it when it is short ("Think of a door closer. A good one ...").
+  // It must be about the topic: an example from elsewhere in the notes pictures something else.
   const intuitions = all
     .map((s, i) => ({ ...s, i }))
     .filter((s) => ANALOGY.test(s.text) && !s.lead && !used.has(s.text))
-    .slice(0, 2)
-    .map((s) => (s.text.length < 80 && all[s.i + 1] && all[s.i + 1].source === s.source ? { ...s, text: `${s.text} ${all[s.i + 1].text}` } : s));
-  const warnings = all.filter((s) => WARNING.test(s.text) && !s.lead);
+    .map((s) => (s.text.length < 80 && all[s.i + 1] && all[s.i + 1].source === s.source ? { ...s, text: `${s.text} ${all[s.i + 1].text}` } : s))
+    .map((s) => ({ ...s, score: relevance(s.text, terms) }))
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score || a.i - b.i)
+    .slice(0, 2);
+  const warnings = all.filter((s) => WARNING.test(s.text) && !s.lead && s.score > 0);
 
   // Formulas from the units most about the topic.
-  const rankedUnits = us.map((u) => ({ u, score: relevance(`${u.section ?? ""} ${u.lines.join(" ")}`, terms) })).filter((x) => x.score > 1).sort((a, b) => b.score - a.score);
+  const rankedUnits = us
+    .filter((u) => u.own || mentions(`${u.section ?? ""} ${u.lines.join(" ")}`, t))
+    .map((u) => ({ u, score: relevance(`${u.section ?? ""} ${u.lines.join(" ")}`, terms) }))
+    .filter((x) => x.score > 1)
+    .sort((a, b) => b.score - a.score);
   const eqs = rankedUnits.flatMap(({ u }) => formulas(u).map((f) => ({ ...f, source: u.section ? `${u.title}, ${u.section}` : u.title })));
   const lists = rankedUnits.flatMap(({ u }) => listsAndTables(u).map((md) => ({ md, source: u.section ? `${u.title}, ${u.section}` : u.title, section: u.section })));
   const practice = questions(sources, terms);
@@ -315,7 +342,7 @@ export function offlineLesson(
   }));
   // Assumptions and limits, for the mastery level: where the model stops describing reality.
   const limits: LessonBlock[] = all
-    .filter((s) => LIMIT.test(s.text) && !s.lead && !WARNING.test(s.text) && isStatement(s.text))
+    .filter((s) => LIMIT.test(s.text) && !s.lead && !WARNING.test(s.text) && isStatement(s.text) && s.score > 0)
     .slice(0, 3)
     .map((s) => ({ kind: "keypoint" as const, title: "An assumption to keep in mind", body: s.text, source: s.source }));
   for (const b of limits) used.add(b.body);
@@ -490,7 +517,11 @@ export function offlineLesson(
     )[d],
     // Statements from notes and readings (not questions, not the lecturer's spoken asides).
     takeaways: dedupe([...(summary && d > 1 ? [{ text: summary }] : []), ...byScore.filter((s) => !s.lead && !s.stamp && !used.has(s.text) && isStatement(s.text) && !practiceTitles.has(s.source.split(",")[0]))].slice(0, 3)).map((x) => x.text).slice(0, 4),
-    read: sources.slice(0, 4).map((s) => ({ title: s.title, focus: focusIn(s.title, relevant, rankedUnits.map((x) => x.u)) })),
+    // Only the sources the lesson drew on: the topic's own materials and any other that names it.
+    read: sources
+      .filter((s) => all.some((x) => x.source.startsWith(s.title)) || rankedUnits.some((x) => x.u.title === s.title))
+      .slice(0, 4)
+      .map((s) => ({ title: s.title, focus: focusIn(s.title, relevant, rankedUnits.map((x) => x.u)) })),
   };
 }
 

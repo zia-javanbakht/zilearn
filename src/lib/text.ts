@@ -75,6 +75,14 @@ export function truncate(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 1) + "…";
 }
 
+/** Where a topic's note comes from, as the offline brainmap appends it: "… (see “Element quality”)". */
+export const SEE_WHERE = / \(see “[^”]*”\)$/;
+
+/** A topic summary without the pointer to where it comes from, to teach or quiz from. */
+export function plainSummary(s: string | null | undefined): string {
+  return (s ?? "").replace(SEE_WHERE, "").trim();
+}
+
 /* ---------- TF-IDF similarity used by the knowledge base ---------- */
 
 export type Vector = Map<string, number>;

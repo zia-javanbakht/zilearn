@@ -351,10 +351,10 @@ export function heuristicTopics(materials: Material[]): NewTopic[] {
 /** "Representative volume element (RVE)" as a key term: "Representative volume element". */
 const bareTerm = (t: string) => t.replace(/\s*\([^)]*\)$/, "").trim();
 
-/** A term's note, with where the material says it ("Material properties: …"). */
+/** A term's note, with where the material says it ("… (see “Material properties”)"); see plainSummary. */
 function noteOf(t: DigestTopic): string {
   const where = t.evidence?.find((e) => e.text === t.summary)?.where;
-  return where && t.summary ? `${t.summary} (${where})` : t.summary;
+  return where && t.summary ? `${t.summary} (see “${where.replace(/[“”]/g, "")}”)` : t.summary;
 }
 
 function heuristicSummary(course: Course, materials: Material[]) {
