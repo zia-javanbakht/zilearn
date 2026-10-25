@@ -220,7 +220,8 @@ ${
     if (!factsOf.has(n.id)) factsOf.set(n.id, topicFacts(n.title, n.keywords, sourcesFor(courseId, `${n.title} ${n.keywords.join(" ")}`, 12000, n.material_ids)));
     return factsOf.get(n.id)!;
   };
-  const all = flattenTree(buildTree(listTopics(courseId))).filter((t) => !documentTitles(courseId).has(t.id));
+  const documents = documentTitles(courseId);
+  const all = flattenTree(buildTree(listTopics(courseId))).filter((t) => !documents.has(t.id));
   const questions: ExamQuestion[] = [];
   for (let i = 0; i < nMcq; i++) {
     const n = pick();
@@ -579,7 +580,10 @@ Good flashcards:
 
   // Offline: cards from what the materials state about each topic (its definitions and formulas), weak
   // topics first and taking turns, so a small deck still covers many topics.
-  const order = [...pool].sort((a, b) => WEIGHT[b.effective_mastery ?? "dont_know"] - WEIGHT[a.effective_mastery ?? "dont_know"]);
+  // A branch that is a whole item ("Balance Laws in Continuum Mechanics") isn't a term to put on a card.
+  const documents = documentTitles(courseId);
+  const terms = pool.filter((t) => !documents.has(t.id));
+  const order = [...(terms.length ? terms : pool)].sort((a, b) => WEIGHT[b.effective_mastery ?? "dont_know"] - WEIGHT[a.effective_mastery ?? "dont_know"]);
   const decks = order.map((t) => offlineCards(courseId, t));
   const cards: { front: string; back: string; topic_id: string | null }[] = [];
   // A parent's key term is often a subtopic too: the same answer is one card.

@@ -352,7 +352,9 @@ const QuestionRow = memo(function QuestionRow({
     <div className="question">
       <div className="spread small muted">
         <span>
-          Q{index + 1} · {q.type === "mcq" ? "Multiple choice" : q.type === "short" ? "Short answer" : "Long answer"} · {q.topic_title}
+          Q{index + 1} · {q.type === "mcq" ? "Multiple choice" : q.type === "short" ? "Short answer" : "Long answer"}
+          {/* A multiple-choice question often asks for its topic's own term: name the topic once it's marked. */}
+          {q.type !== "mcq" || graded ? ` · ${q.topic_title}` : ""}
         </span>
         <span>
           {g ? `${g.score}/` : ""}
