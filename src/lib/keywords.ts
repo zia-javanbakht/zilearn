@@ -118,6 +118,8 @@ function wordKey(w: string): string {
 const DRILL = /^((multiple[- ]choice\s+)?(concept\s+)?quiz(zes)?|exercises?|hints?|answers?|answer checks|self[- ]?tests?|review questions|practice (problems|questions)|problems|solutions|warm[- ]?up|check yourself|your turn|try (it|this)|map of this (lesson|topic|chapter))\b/i;
 
 const DRILL_WEIGHT = 0.5;
+/** A label that tells or asks rather than names: a step ("Estimate the decrement"), a count ("Over 10 cycles …"), a claim ("Every peak shrinks …"). */
+const NARRATES = /\d|^(estimate|find|compute|calculate|differentiate|integrate|substitute|solve|check|use|apply|write|read|set|take|plug|convert|turn|choose|show|note|recall|how|why|what|when|where|every|each|all|no|always|never)\b|\b(always|never)\b|\s(\p{Ll}+(?<!ss|us|is)s)\s(?:the|a|an|by|its|it)\b/iu;
 /** A list item's label that is the layout's, not a term: "Key terms: …", "Formula: …", "Hint: …". */
 const SCAFFOLD = /^(key (terms?|ideas?|points?)|formulas?|hints?|answers?|notes?|examples?|solutions?|summary|warning|tips?|remember|recall|check|result|given|find|goal|why|how)$/i;
 const VERB = /^(ensures?|gives|requires|yields|implies|enters|becomes|remains|provides|allows|makes|takes|shows|leads|means|uses|includes|contains|defines|describes|follows|holds|produces|reduces|increases|decreases|depends|satisfies|states|equals|governs|controls|determines)$/;
@@ -207,7 +209,7 @@ function sentencesOf(text: string, drills = false): Sentence[] {
       // A list item that names what it explains ("- Jacobian ratio: the uniformity of …") defines that name.
       const item = u.match(/^(?:[-*+•·]|\d+[.)])\s+([\p{L}][\p{L}\p{N} ,'’()/‐‑–-]{2,70}?):\s+(\S.*)$/u);
       const label = item ? boxName(item[1]) : null;
-      if (label && !SENTENCE_LIKE.test(label) && !/\b(of|the|and|to|in|a|an|by|with|for|from|on)$/i.test(label) && !SCAFFOLD.test(label)) boxes.push({ name: label, at: out.length });
+      if (label && !SENTENCE_LIKE.test(label) && !NARRATES.test(label) && !/\b(of|the|and|to|in|a|an|by|with|for|from|on)$/i.test(label) && !SCAFFOLD.test(label)) boxes.push({ name: label, at: out.length });
       // Superscript citations stick to the stop ("industries.1 However", "et al.15 used").
       const clean = u
         .replace(/([a-z)\]])[.](\d+(?:[,–-]\d+)*)(?=\s+\p{Lu})/gu, "$1.")
@@ -236,7 +238,10 @@ function sentencesOf(text: string, drills = false): Sentence[] {
         .replace(/\[(diagram|matrix)[^\]]*\]/g, "")
         .replace(/^\s*\(\d+\)\s*/, "");
       const label = pre.match(BOX);
-      const box = label && /[—–-]/.test(label[0]) ? boxName(label[2]) : null;
+      // An example or an intuition is titled by what happens ("A plucked building always comes to rest"); a
+      // definition, theorem or keypoint by what it names.
+      const named = label && /[—–-]/.test(label[0]) ? boxName(label[2]) : null;
+      const box = named && (!/^(example|remark|intuition)$/i.test(label![1]) || (!SENTENCE_LIKE.test(named) && !NARRATES.test(named))) ? named : null;
       const t = pre
         .replace(BOX, "")
         .replace(/\s+/g, " ")

@@ -71,3 +71,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 60 | A phrase that starts or ends with a verb (ensures, enters, gives) is a clause, not a term | 89.1 | 79.03 | yes |
 | 61 | Held-out lesson PDFs: lesson scaffolding (Where this fits, Key terms, Takeaways, Warm-up, Check yourself) is context, not branches; Key terms: lines boost their terms; icon-font bullets; unmarked numbered lines aren't headings where the reader marked them | 89.1 | 79.03 | yes |
 | 62 | Held-out lessons: a lesson's map, key-term lists and takeaways don't decide where a term belongs; Map/Where this fits aren't title page; objectives aren't quoted first | 89.1 | 79.03 | yes |
+| 63 | Held-out lessons: example and intuition titles that narrate, and step labels, aren't terms; a lesson's Key terms/Connections after its last section is its own context, not a subsection | 89.1 | 79.03 | yes |

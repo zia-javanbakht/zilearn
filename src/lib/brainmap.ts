@@ -331,7 +331,9 @@ function sectionGroups(m: Material, terms: string[]): SectionGroup[] | null {
   const gs: G[] = [];
   for (const s of sections) {
     if ((s.level ?? 1) === 0) continue;
-    if ((s.level ?? 1) <= lvl || !gs.length) gs.push({ title: s.heading, body: s.body, own: s.body, context: CONTEXT_SECTION.test(s.heading) || /^appendix\b/i.test(s.heading) || DRILL_SECTION.test(s.heading), parts: [] });
+    // A lesson's "Key terms", "Connections" or "Check yourself" after its last section isn't part of that section.
+    const scaffold = CONTEXT_SECTION.test(s.heading) || DRILL_SECTION.test(s.heading);
+    if ((s.level ?? 1) <= lvl || !gs.length || scaffold) gs.push({ title: s.heading, body: s.body, own: s.body, context: CONTEXT_SECTION.test(s.heading) || /^appendix\b/i.test(s.heading) || DRILL_SECTION.test(s.heading), parts: [] });
     else {
       const g = gs[gs.length - 1];
       g.body += `\n${s.heading}\n${s.body}`;
