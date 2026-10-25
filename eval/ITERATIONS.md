@@ -108,3 +108,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 97 | Long texts map 48 terms (was 44) | 89.1 | 80.83 | yes |
 | 98 | A verb the text also uses as a participle (oscillates) is not a term | 89.1 | 80.83 | yes |
 | 99 | A keypoint titled by a claim isn't a term; no phrases ending on forever, again, too | 89.1 | 80.83 | yes |
+| 100 | Eval reports the offline deck: cards and complete-the-formula cards | 89.1 | 80.83 | yes |

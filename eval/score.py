@@ -353,6 +353,11 @@ def main():
             if "bm" in r:
                 print("     missing:", r["bm"]["missing"])
                 print("     junk:", r["bm"]["junk"])
+    # The offline deck (one card per answer): how many cards, and how many ask to complete a formula.
+    cards = [c for doc in DOCS if os.path.exists(f"{out}/{doc}.cards.json") for c in json.load(open(f"{out}/{doc}.cards.json"))]
+    if cards:
+        res["_cards"] = {"cards": len(cards), "formula": sum("= \\;?" in c["front"] for c in cards)}
+        print(f"_cards          {res['_cards']['cards']} offline flashcards, {res['_cards']['formula']} complete-the-formula")
     if save:
         json.dump(res, open(save, "w"), indent=1)
 
