@@ -740,6 +740,16 @@ export function reviewCard(id: string, rating: Rating, today: string): Card | nu
   return getCard(id);
 }
 
+export type CardSchedule = Pick<Card, "ease" | "interval" | "reps" | "lapses" | "due" | "last_review">;
+
+/** Put a card's schedule back as it was before a review (the review screen's Undo). */
+export function restoreCard(id: string, s: CardSchedule): Card | null {
+  db()
+    .prepare("UPDATE cards SET ease = ?, interval = ?, reps = ?, lapses = ?, due = ?, last_review = ? WHERE id = ?")
+    .run(s.ease, s.interval, s.reps, s.lapses, s.due, s.last_review, id);
+  return getCard(id);
+}
+
 export function updateCard(id: string, patch: { front?: string; back?: string }) {
   const c = getCard(id);
   if (!c) return null;

@@ -100,3 +100,18 @@ describe("flashcard store", () => {
     expect(mistakes[0].back).toContain("B.");
   });
 });
+
+describe("undoing a review", () => {
+  it("puts the card's schedule back as it was", async () => {
+    const { openDb, setDb } = await import("@/lib/db");
+    const { addCards, createCourse, listCards, restoreCard, reviewCard } = await import("@/lib/store");
+    setDb(openDb(":memory:"));
+    const c = createCourse({ name: "X" });
+    addCards(c.id, [{ front: "Q", back: "A", topic_id: null }], "manual", "student");
+    const before = listCards(c.id)[0];
+    const after = reviewCard(before.id, 1, "2026-10-25")!;
+    expect(after.due).not.toBeNull();
+    const back = restoreCard(before.id, before)!;
+    expect([back.due, back.reps, back.lapses, back.ease, back.interval]).toEqual([before.due, before.reps, before.lapses, before.ease, before.interval]);
+  });
+});
