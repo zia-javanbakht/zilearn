@@ -345,6 +345,17 @@ function sectionGroups(m: Material, terms: string[]): SectionGroup[] | null {
     const words = bareTerm(term).toLowerCase().split(/\s+/).map((w) => esc(w.replace(/s$/, "")) + "s?");
     return (body.toLowerCase().match(new RegExp(`\\b${words.join("[\\s-]+")}\\b`, "g")) ?? []).length;
   };
+  const boxes = new Map<string, Set<string>>();
+  const boxed = (body: string) => {
+    if (!boxes.has(body))
+      boxes.set(
+        body,
+        new Set(
+          [...body.matchAll(/^\s*(?:definition|theorem|lemma|corollary|proposition|keypoint|key point|remark)\s+[\d.]+\s*[—–]\s*([^.\n]{3,80})\./gim)].map((m) => termKey(m[1].replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim())),
+        ),
+      );
+    return boxes.get(body)!;
+  };
   const members = gs.map(() => [] as number[]);
   const partOf = gs.map((g) => g.parts.map(() => [] as number[]));
   const subOf = gs.map((g) => g.parts.map((p) => p.subs.map(() => [] as number[])));
@@ -355,6 +366,9 @@ function sectionGroups(m: Material, terms: string[]): SectionGroup[] | null {
       const n = count(g.body, t) * (g.context ? 0.5 : 1);
       if (n > score) (score = n), (best = gi);
     });
+    // The section whose box defines or states it ("Theorem 2.2 — Divergence (Gauss') Theorem") is its home.
+    const home = gs.findIndex((g) => !g.context && boxed(g.body).has(termKey(t)));
+    if (home >= 0) best = home;
     if (best < 0) return;
     // A term one subsection discusses most of the time goes under that subsection.
     const g = gs[best];
