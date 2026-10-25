@@ -246,7 +246,9 @@ function sentencesOf(text: string, drills = false): Sentence[] {
       // An example or an intuition is titled by what happens ("A plucked building always comes to rest"); a
       // definition, theorem or keypoint by what it names.
       const named = label && /[—–-]/.test(label[0]) ? boxName(label[2]) : null;
-      const box = named && (!/^(example|remark|intuition)$/i.test(label![1]) || (!SENTENCE_LIKE.test(named) && !NARRATES.test(named))) ? named : null;
+      // A keypoint titled by a claim ("Damping lowers the frequency a little") makes it rather than naming a term.
+      const claims = /^(keypoint|key point)$/i.test(label?.[1] ?? "") && !!named && /\s\p{Ll}+(?<!ss|us|is)s\s(?:the|a|an|by|its|it)\b/u.test(` ${named}`);
+      const box = named && !claims && (!/^(example|remark|intuition)$/i.test(label![1]) || (!SENTENCE_LIKE.test(named) && !NARRATES.test(named))) ? named : null;
       const t = pre
         .replace(BOX, "")
         .replace(/\s+/g, " ")
@@ -418,7 +420,7 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
           // A verb ("ensures local invertibility", "nonlinearity enters") makes a clause, not a term.
           if (len > 1 && (VERB.test(first) || VERB.test(last))) continue;
           // A phrase ending on a joining word ("distributed based", "linear plus") is cut from a longer one.
-          if (len > 1 && /^(based|plus|minus|via|versus|times|per|than|such|etc)$/.test(last)) continue;
+          if (len > 1 && /^(based|plus|minus|via|versus|times|per|than|such|etc|forever|again|away|apart|together|alone|here|there|now|then|too|also|only|instead)$/.test(last)) continue;
           // An adverb starts a clause, not a term ("randomly removes units").
           if (/ly$/.test(first) && first.length > 4 && !/^(assembly|family|anomaly|poly|supply|monopoly|butterfly)$/.test(first)) continue;
           if (len > 1 && /^(high|higher|low|lower|large|small|different|various|several|new|proposed|present|good)$/.test(last)) continue;
