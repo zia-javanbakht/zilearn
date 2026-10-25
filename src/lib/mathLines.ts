@@ -39,6 +39,8 @@ export function isMathLine(raw: string): boolean {
   // A sentence opens with a word ("we recover ∫ P : Grad η dV ="); an equation with a symbol or a name.
   const first = t.match(/^\p{L}+/u)?.[0] ?? "";
   if (first.length >= 2 && !MATH_WORDS.has(first.toLowerCase()) && (english(first) || /^(we|it|is|as|so|by|if|an|at|to|be|of|or|no)$/i.test(first)) && words.length >= 1) return false;
+  // An exercise's part or a quiz option ("(a) Derive S = …", "B. K = … only.") is a sentence about maths.
+  if (/^(\([a-h]\)|[A-E]\.)\s/.test(t) && words.length >= 2) return false;
   const tokens = t.split(/\s+/).length;
   // A table's row of numbers isn't an equation.
   if ((t.replace(/\(\d{1,3}[a-z]?\)$/, "").match(/(?<![\p{L}\p{N}.,:])\d+(?:[.,:]\d+)?%?(?![\p{L}])/gu) ?? []).length >= 5 && !OPERATOR.test(t)) return false;

@@ -100,3 +100,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 89 | The paper's leading term, named in its title, is a branch of its own | 89.1 | 80.6 | no |
 | 90 | One term in two word forms (pseudo-ductility/pseudo-ductile behavior) is mapped once | 89.1 | 80.62 | yes |
 | 91 | A built-up formula's pieces on short lines join its block, down to its number | 89.1 | 80.62 | yes |
+| 92 | An exercise's lettered part is a sentence about maths, not an equation | 89.1 | 80.62 | yes |

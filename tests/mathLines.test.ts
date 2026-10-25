@@ -21,6 +21,8 @@ describe("display maths in a PDF's text", () => {
     expect(markDisplayMaths("The angular momentum of the cut-out is H = ∫S\n𝒙 ×\n𝜌𝒗 d𝑣. Its rate of change follows.")).toBe("The angular momentum of the cut-out is H = ∫S\n𝒙 ×\n𝜌𝒗 d𝑣. Its rate of change follows.");
     // A built-up formula's pieces on short lines, down to its number, are one block.
     expect(markDisplayMaths("determined as follows:\nσ = σ0[\nln\n( 1\n1 − η\n)] 1\nm\n(1)\nwhere η is a random number.")).toBe("determined as follows:\n$$σ = σ0[ ln ( 1 1 − η )] 1 m \\tag{1}$$\nwhere η is a random number.");
+    // An exercise's part is a sentence about maths.
+    expect(markDisplayMaths("Exercise.\n(a) Derive S = ∂Ψ/∂E and K = dR/dd. Verify P = λS independently.")).toBe("Exercise.\n(a) Derive S = ∂Ψ/∂E and K = dR/dd. Verify P = λS independently.");
     // A lone equation number is LaTeX's tag.
     expect(markDisplayMaths("Text before.\nE = mc^2 (3)")).toBe("Text before.\n$$E = mc^2 \\tag{3}$$");
     // Text that already has maths blocks (an AI transcription) is left alone.
