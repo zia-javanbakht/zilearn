@@ -38,3 +38,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 27 | Terms sharing only 'of the X' (role of / two uses of the Jacobian) are not pieces of one name | 87.67 | 73.85 | yes |
 | 28 | A box label line (Keypoint 2.2 — …) starts its own paragraph even after chart labels, so its term is read | 87.67 | 74.85 | yes |
 | 29 | A figure caption that names what it shows (Figure 4. Graded mesh: …) is read as a box naming a term | 87.67 | 75.28 | yes |
+| 30 | A longer term isn't dropped for a word that is itself mostly part of phrases (Weibull modulus is kept) | 87.67 | 75.4 | yes |

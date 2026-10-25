@@ -444,18 +444,19 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
   };
   // A longer phrase whose shorter part is used much more often on its own is that part plus a word that
   // isn't part of the term ("learning rate controls", "enhanced strain field" next to "enhanced strain").
+  const pairs = [...cands.values()].filter((c) => c.count >= 2 && c.key.split(" ").length === 2);
+  const inPhrases = (c: Candidate) => pairs.reduce((n, p) => n + (p.key.split(" ").includes(c.key) ? p.count : 0), 0);
   const extended = (c: Candidate) => {
     const words = c.key.split(" ");
     if (words.length < 2 || c.boost > 1) return false;
     for (let len = words.length - 1; len >= 1; len--)
       for (let at = 0; at + len <= words.length; at++) {
         const sub = cands.get(words.slice(at, at + len).join(" "));
-        if (sub && sub !== c && sub.count >= 1.5 * c.count && valid(sub, formOf(sub)) && !qualified(sub)) return true;
+        // A word that is itself mostly part of phrases ("Weibull" in "Weibull modulus") doesn't stand for them.
+        if (sub && sub !== c && sub.count >= 1.5 * c.count && valid(sub, formOf(sub)) && !qualified(sub) && !(len === 1 && sub.boost === 1 && inPhrases(sub) >= 0.5 * sub.count)) return true;
       }
     return false;
   };
-  const pairs = [...cands.values()].filter((c) => c.count >= 2 && c.key.split(" ").length === 2);
-  const inPhrases = (c: Candidate) => pairs.reduce((n, p) => n + (p.key.split(" ").includes(c.key) ? p.count : 0), 0);
   const scored = [...cands.values()]
     .map((c) => ({ c, form: formOf(c) }))
     .filter(({ c }) => !extended(c))
