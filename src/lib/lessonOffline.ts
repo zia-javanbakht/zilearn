@@ -168,7 +168,7 @@ const LIMIT = /\b(assum\w*|only (valid|works|holds|applies)|breaks? down|limitat
 const WARNING = /\b(mistakes?|mix(es|ed)? (this|it|them|these) up|confus\w*|be careful|common (error|slip)|watch out|wrong|trap|pitfall|don't (forget|waste|confuse|mix|use)|do not (forget|confuse|mix|use))\b/i;
 
 /** A question or an instruction to the student ("Compare ...", "Explain ..."), not a statement to teach from. */
-const PROMPT = /^(\(?[a-z]\)|q?\d+[.)]?\s+)?(compare|explain|derive|calculate|compute|show|find|describe|discuss|state|prove|sketch|estimate|determine|write|list|evaluate|give|plot|draw|outline|justify|use|consider|suppose|assume)\b/i;
+const PROMPT = /^(\(?[a-z]\)\s*|q?\d+[.)]?\s+)?(compare|explain|derive|calculate|compute|show|find|describe|discuss|state|prove|sketch|estimate|determine|write|list|evaluate|give|plot|draw|outline|justify|use|consider|suppose|assume)\b/i;
 export function isPrompt(text: string): boolean {
   return text.trim().endsWith("?") || PROMPT.test(text.trim());
 }

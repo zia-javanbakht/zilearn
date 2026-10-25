@@ -42,3 +42,21 @@ describe("cloze", () => {
     expect(cloze("Nothing about it here at all, really nothing.", "Jacobian")).toBeNull();
   });
 });
+
+describe("offline mock exams", () => {
+  it("asks which term fills a gap, offers related terms as distractors, and marks from the materials", async () => {
+    const { generateExam } = await import("@/lib/generate");
+    const { course } = dynamicsCourse();
+    const exam = await generateExam(course.id, { scope: { kind: "course" }, questionCount: 12, mix: { mcq: 6, short: 3, long: 3 }, durationMinutes: 60 });
+    const mcqs = exam.questions.filter((q) => q.type === "mcq");
+    expect(mcqs.length).toBeGreaterThan(0);
+    for (const q of mcqs) {
+      expect(q.prompt).toMatch(/^Which term fills the gap\?/);
+      // The answer isn't in the clue, and neither is any option.
+      for (const o of q.options) expect(q.prompt.toLowerCase()).not.toContain(o.toLowerCase());
+      expect(q.options[q.answer_index!]).toBe(q.topic_title);
+    }
+    // Written questions carry a marking guide from the materials, not an empty summary.
+    for (const q of exam.questions.filter((x) => x.type !== "mcq")) expect(q.model_answer.length).toBeGreaterThan(20);
+  });
+});

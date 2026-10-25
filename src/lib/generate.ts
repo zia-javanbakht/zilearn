@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { aiEnabled, CUT_OFF_NOTE, generateStructured, generateText, UserError } from "./ai";
 import { excerptsFor, sourcesFor } from "./kb";
-import { topicFacts } from "./lessonOffline";
+import { topicFacts, type TopicFacts } from "./lessonOffline";
 import { mentions } from "./lessonTerms";
 import { buildTree, flattenTree, getCourse, listMaterials, listTopics } from "./store";
 import { plainSummary, truncate } from "./text";
@@ -205,8 +205,8 @@ ${
     return { title: out.title || `Mock exam: ${ctx.label}`, questions, by: "claude" as const };
   }
 
-  // Offline: build questions from topic summaries.
-  const weighted = pool.flatMap((n) => Array(WEIGHT[n.effective_mastery ?? "dont_know"]).fill(n) as TopicNode[]);
+  // Offline: questions from what the materials say about each topic, weighted towards weak topics.
+  const weighted = ctx.nodes.flatMap((n) => Array(WEIGHT[n.effective_mastery ?? "dont_know"]).fill(n) as TopicNode[]);
   // Weighted towards weak topics, but without asking about the same topic twice until every topic has had a turn.
   const asked = new Set<string>();
   const pick = () => {
@@ -215,14 +215,22 @@ ${
     asked.add(n.id);
     return n;
   };
+  const factsOf = new Map<string, TopicFacts>();
+  const facts = (n: TopicNode) => {
+    if (!factsOf.has(n.id)) factsOf.set(n.id, topicFacts(n.title, n.keywords, sourcesFor(courseId, `${n.title} ${n.keywords.join(" ")}`, 12000, n.material_ids)));
+    return factsOf.get(n.id)!;
+  };
+  const all = flattenTree(buildTree(listTopics(courseId))).filter((t) => !documentTitles(courseId).has(t.id));
   const questions: ExamQuestion[] = [];
   for (let i = 0; i < nMcq; i++) {
     const n = pick();
-    const others = shuffle(pool.filter((p) => p.id !== n.id)).slice(0, 3);
-    const clue = blank(n.summary ?? "", n.title);
-    // A clue that is mostly blanks (or a recording's noise) gives nothing to reason from; ask for an explanation instead.
-    if (!clue || others.length < 1 || clue.split(/\s+/).filter((w) => !w.includes("____")).length < 6) {
-      questions.push(shortQ(n, 2));
+    const clue = all.some((t) => t.id === n.id) ? [...facts(n).definitions.filter((d) => d.term === n.title).map((d) => d.text.replace(/\*\*/g, "")), plainSummary(n.summary), ...facts(n).statements.map((x) => x.text)]
+          .map((x) => cloze(x, n.title))
+          .find(Boolean) : null;
+    const others = distractors(n, all, clue ?? "").slice(0, 3);
+    // Without a sentence to work from, or enough other terms to choose between, it's a written question.
+    if (!clue || others.length < 2) {
+      questions.push(shortQ(n, 2, facts(n)));
       continue;
     }
     const options = shuffle([n, ...others]);
@@ -231,50 +239,84 @@ ${
       type: "mcq",
       topic_id: n.id,
       topic_title: n.title,
-      prompt: `Which topic does this describe?\n\n> ${clue}`,
+      prompt: `Which term fills the gap?\n\n> ${clue}`,
       options: options.map((o) => o.title),
       answer_index: options.indexOf(n),
       model_answer: n.title,
       marks: 1,
     });
   }
-  for (let i = 0; i < nShort; i++) questions.push(shortQ(pick(), 3));
+  for (let i = 0; i < nShort; i++) {
+    const n = pick();
+    questions.push(shortQ(n, 3, facts(n)));
+  }
   for (let i = 0; i < nLong; i++) {
     const n = pick();
+    const f = facts(n);
+    const parts = n.children.map((c) => c.title);
+    const guide = [
+      plainSummary(n.summary),
+      ...f.definitions.map((d) => `- ${d.text} *(${d.source})*`),
+      ...f.formulas.slice(0, 2).map((x) => `- ${x.lead ? `${x.lead} ` : ""}${x.math} *(${x.source})*`),
+      parts.length ? `Should cover: ${parts.join(", ")}.` : n.keywords.length ? `Key terms to cover: ${n.keywords.join(", ")}.` : "",
+    ].filter(Boolean);
     questions.push({
       id: newId(),
       type: "long",
       topic_id: n.id,
       topic_title: n.title,
-      prompt: `Discuss **${n.title}** in depth: define it, explain how it works, give an example, and relate it to at least one other topic in the course.`,
+      prompt: `Discuss **${n.title}** in depth: define it, explain how it works${parts.length ? ` (including ${parts.slice(0, 3).join(", ")})` : ""}, give an example, and relate it to at least one other topic in the course.`,
       options: [],
       answer_index: null,
-      model_answer: `${n.summary}\n\nKey terms to cover: ${n.keywords.join(", ")}`,
+      model_answer: guide.join("\n\n"),
       marks: 10,
     });
   }
   return { title: `Mock exam: ${ctx.label}`, questions, by: "heuristic" as const };
 }
 
-function shortQ(n: TopicNode, marks: number): ExamQuestion {
+/**
+ * Wrong options for "which term": the topic's siblings first (the terms most easily confused with it),
+ * then the rest of its branch, then the course; never a term the clue itself uses.
+ */
+export function distractors(n: TopicNode, all: TopicNode[], clue: string): TopicNode[] {
+  const parentOf = new Map(all.flatMap((p) => p.children.map((c) => [c.id, p.id] as const)));
+  const rootOf = (id: string): string => (parentOf.has(id) ? rootOf(parentOf.get(id)!) : id);
+  const ok = (o: TopicNode) => o.id !== n.id && !mentions(clue, o.title) && !mentions(o.title, n.title) && !mentions(n.title, o.title);
+  const siblings = shuffle(all.filter((o) => ok(o) && parentOf.get(o.id) === parentOf.get(n.id)));
+  const branch = shuffle(all.filter((o) => ok(o) && !siblings.includes(o) && rootOf(o.id) === rootOf(n.id)));
+  const rest = shuffle(all.filter((o) => ok(o) && !siblings.includes(o) && !branch.includes(o)));
+  const seen = new Set<string>();
+  return [...siblings, ...branch, ...rest].filter((o) => (seen.has(o.title.toLowerCase()) ? false : (seen.add(o.title.toLowerCase()), true)));
+}
+
+/** Branches that are a whole item (its file name or its own title) rather than a term in it. */
+function documentTitles(courseId: string): Set<string> {
+  const norm = (x: string) => x.toLowerCase().replace(/[_\s-]+/g, " ").trim();
+  const items = listMaterials(courseId, true);
+  const names = new Set(items.map((m) => norm(m.title)));
+  return new Set(
+    listTopics(courseId)
+      .filter((t) => !t.parent_id && (names.has(norm(t.title)) || items.some((m) => t.material_ids.includes(m.id) && (m.text ?? "").slice(0, 3000).includes(`# ${t.title}`))))
+      .map((t) => t.id),
+  );
+}
+
+function shortQ(n: TopicNode, marks: number, facts?: TopicFacts): ExamQuestion {
+  const def = facts?.definitions[0];
+  const mention = n.keywords.filter((k) => k.toLowerCase() !== n.title.toLowerCase()).slice(0, 3);
+  const guide = [def ? `${def.text} *(${def.source})*` : plainSummary(n.summary), ...(facts?.statements.slice(0, 2).map((x) => `- ${x.text}`) ?? [])].filter(Boolean);
   return {
     id: newId(),
     type: "short",
     topic_id: n.id,
     topic_title: n.title,
-    prompt: `Briefly explain **${n.title}**${n.keywords.length ? ` (mention: ${n.keywords.slice(0, 3).join(", ")})` : ""}.`,
+    prompt: `Briefly explain **${n.title}**${mention.length ? ` (mention: ${mention.join(", ")})` : ""}.`,
     options: [],
     answer_index: null,
-    model_answer: n.summary || n.keywords.join(", "),
+    model_answer: guide.join("\n\n") || n.keywords.join(", "),
     marks,
   };
-}
-
-function blank(summary: string, title: string) {
-  const words = title.split(/\s+/).filter((w) => w.length > 3);
-  let s = summary.replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]\s*/g, "").trim();
-  for (const w of words) s = s.replace(new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi"), "____");
-  return s;
 }
 
 function shuffle<T>(a: T[]): T[] {
