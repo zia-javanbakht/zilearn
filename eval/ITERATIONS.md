@@ -54,3 +54,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 43 | OCR'd section numbers are read as numbers (2.2.I . → 2.2.1., 3. I . → 3.1.) | 89.03 | 76.43 | yes |
 | 44 | OCR's J and $ for the fi ligature are read back (ModiJed → Modified, strain$eld → strain field) | 89.03 | 76.43 | yes |
 | 45 | A Roman numeral OCR read as ones in a capitals heading is put back (MODEL PROBLEM 11: → II:) | 89.1 | 76.43 | yes |
+| 46 | A long paper or chapter maps up to 44 terms (was 36) | 89.1 | 76.93 | yes |
