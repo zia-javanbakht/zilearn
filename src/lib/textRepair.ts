@@ -167,6 +167,15 @@ export function repairText(input: string, opts: RepairOptions = {}): { text: str
     return joined;
   });
 
+  // A section number OCR read with I or l for 1 and loose spaces ("2.2.I .", "3. I .") is the number.
+  text = text.replace(/^(\d+(?: ?\. ?(?:\d+|[Il]))+) ?\.(?= \p{Lu})/gmu, (all, num: string) => {
+    if (!/[Il ]/.test(all)) return all;
+    const fixed = `${num.replace(/[Il]/g, "1").replace(/ /g, "")}.`;
+    report.ocr++;
+    note(all, fixed);
+    return fixed;
+  });
+
   // 5. OCR letter-shape confusions, judged by the document's own majority spelling.
   // Only a rare non-word next to a frequent spelling is changed, so a born-digital text is safe too:
   // a PDF's own text layer may be an old scan's OCR.
