@@ -51,7 +51,7 @@ interface Sentence {
 }
 
 /** A box's label: "Definition 1.2 — Referential and Spatial Cuts." names what the box defines. */
-const BOX = /^\s*(definition|theorem|lemma|corollary|proposition|keypoint|key point|example|remark|intuition)\s+[\d.]+\s*[—–-]?\s*((?:[^.()]|\([^)]*\))*?)\s*(\([^)]*\d{4}[^)]*\))?\.(?=\s|$)\s*/i;
+const BOX = /^\s*(definition|theorem|lemma|corollary|proposition|keypoint|key point|example|remark|intuition|caption)\s+[\d.]+\s*[—–-]?\s*((?:[^.()]|\([^)]*\))*?)\s*(\([^)]*\d{4}[^)]*\))?\.(?=\s|$)\s*/i;
 
 const SENTENCE_LIKE = /\b(is|are|was|were|be|been|has|have|had|can|will|we|our|this|these|which|that|it|i\.e|e\.g)\b/i;
 
@@ -194,6 +194,12 @@ function sentencesOf(text: string, drills = false): Sentence[] {
       cur += (cur ? " " : "") + l;
     }
     if (cur) units.push(cur);
+    // A figure that names what it shows ("Figure 4. Graded mesh (non-uniform mesh): refinements …") is a box of its own.
+    for (const l of sec.body.split("\n")) {
+      const cap = l.trim().match(/^(?:Figure|Fig\.)\s*\d+[.:]\s+([\p{L}][\p{L} ’'()/-]{2,50}?):\s+(\S.*)$/u);
+      const name = cap && boxName(cap[1]);
+      if (name && name.split(" ").length <= 5 && !/^(the|a|an)\s/i.test(name)) units.push(`Caption 0 — ${name}. ${cap![2]}`);
+    }
     for (const u of units) {
       // A list item that names what it explains ("- Jacobian ratio: the uniformity of …") defines that name.
       const item = u.match(/^(?:[-*+•·]|\d+[.)])\s+([\p{L}][\p{L}\p{N} ,'’()/‐‑–-]{2,70}?):\s+(\S.*)$/u);
