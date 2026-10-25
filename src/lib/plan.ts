@@ -61,14 +61,18 @@ export interface StudyUnit {
   branch: TopicNode; // top-level ancestor (the unit itself for a lone top-level topic)
 }
 
-/** Leaves are the study units; parents only group them. */
+/**
+ * The study units, in the order to learn them: every topic below a top-level branch, a parent before
+ * its subtopics (a parent such as "Jacobian" is a concept of its own, which its subtopics build on).
+ * Top-level branches with subtopics get an overview and a synthesis instead; a lone one is a unit itself.
+ */
 export function studyUnits(roots: TopicNode[]): StudyUnit[] {
   const out: StudyUnit[] = [];
   const walk = (ns: TopicNode[], path: string[], branch: TopicNode | null) => {
     for (const n of ns) {
       const b = branch ?? n;
+      if (branch || !n.children.length) out.push({ node: n, path, branch: b });
       if (n.children.length) walk(n.children, [...path, n.title], b);
-      else out.push({ node: n, path, branch: b });
     }
   };
   walk(roots, [], null);
@@ -159,10 +163,14 @@ export function buildPlan(input: PlanInput): DraftPlan {
         kind: "study",
         iteration: k,
         depth,
-        minutes: Math.round(BASE_MINUTES[depth] * IMPORTANCE_FACTOR[imp(u.node)]),
+        // A parent's own session is shorter: its subtopics get sessions of their own.
+        minutes: Math.round(BASE_MINUTES[depth] * IMPORTANCE_FACTOR[imp(u.node)] * (u.node.children.length ? 0.75 : 1)),
         topic: u.node,
         title: u.node.title,
-        activities: activitiesFor(depth, kindsOf(u.node), u.node.effective_mastery),
+        activities: [
+          ...(u.node.children.length && k === 1 ? [`See where its subtopics (${u.node.children.map((c) => c.title).slice(0, 4).join(", ")}) fit in, before studying them`] : []),
+          ...activitiesFor(depth, kindsOf(u.node), u.node.effective_mastery),
+        ],
         priority: (depth === target ? 30 : depth === start(u) ? 20 : 10) + imp(u.node),
       });
       if (k === target && hasBranch && lastOfBranch.get(u.branch.id) === i) {

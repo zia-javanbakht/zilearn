@@ -8,7 +8,7 @@ import { diagramMermaid, figureProblems, FigureSchema, type Figure } from "./fig
 import { badge, conceptMermaid, echoesList, framingProblems, homes, mainTerms, mentions, summaryGaps, tidyTerms, type ConceptLink } from "./lessonTerms";
 import { enrichLesson } from "./lessonEnrich";
 import { buildTree, flattenTree, getCourse, getLesson, getTopic, getTopicsByIds, linksForTopic, listCourses, listMaterials, listTopics } from "./store";
-import { truncate } from "./text";
+import { plainSummary, truncate } from "./text";
 import { DEPTH_LEVELS, MASTERY_LABELS, MATERIAL_KIND_LABELS, type MaterialKind, type Mastery } from "./types";
 
 /**
@@ -337,7 +337,7 @@ export const WORD_BUDGET = [0, 800, 1300, 1800, 1600];
 
 export async function generateLessonDoc(topicId: string, depth: number): Promise<LessonDoc> {
   const { head, map, sources, context, prompt, record, earlier, keywords } = lessonRequest(topicId, depth);
-  if (!aiEnabled()) return tidyTerms({ ...offlineLesson(head, { summary: map.summary, keywords: map.keywords, mastery: map.mastery, slips: record.slips }, sources), keywords });
+  if (!aiEnabled()) return tidyTerms({ ...offlineLesson(head, { summary: plainSummary(map.summary), keywords: map.keywords, mastery: map.mastery, slips: record.slips }, sources), keywords });
   const out = await generateStructured({ schema: LessonSchema, effort: "medium", maxTokens: 20000, context, prompt });
   const doc = fromAi(head, out, keywords);
   const practice = sourceQuestions(sources);

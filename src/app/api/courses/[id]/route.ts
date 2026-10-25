@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
-import path from "node:path";
-import { dataDir } from "@/lib/db";
+import { dataPath } from "@/lib/db";
 import { buildTree, deleteCourse, getCourse, getPlan, listMaterials, listTopics, updateCourse } from "@/lib/store";
 import { listMaterialsWithMaps } from "@/lib/digest";
 import { body, fail, handle, ok, type Ctx } from "@/lib/http";
@@ -31,7 +30,8 @@ export const PATCH = handle(async (req: Request, { params }: Ctx<{ id: string }>
 
 export const DELETE = handle(async (_req: Request, { params }: Ctx<{ id: string }>) => {
   const { id } = await params;
+  if (!getCourse(id)) return fail("Course not found", 404);
   deleteCourse(id);
-  await fs.rm(path.join(dataDir(), "uploads", id), { recursive: true, force: true });
+  await fs.rm(dataPath("uploads", id), { recursive: true, force: true });
   return ok({ ok: true });
 });

@@ -570,7 +570,7 @@ export function BrainmapTab({ data, reload, onPlan }: { data: CourseData; reload
           </div>
           <span className="small muted">
             <span className="badge know">{counts.know} know</span> <span className="badge familiar">{counts.familiar} familiar</span>{" "}
-            <span className="badge dont_know">{counts.dont_know} don&apos;t know</span> <span className="badge">{counts.none} unmarked</span> of {leaves} study topics
+            <span className="badge dont_know">{counts.dont_know} don&apos;t know</span> <span className="badge">{counts.none} unmarked</span> of {leaves} topics to mark
           </span>
         </div>
         <div className="row">

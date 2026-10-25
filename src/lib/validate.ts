@@ -23,6 +23,29 @@ export const PlanInput = z.object({
   start_date: date.optional(),
 });
 
+/** A number in a range, or the default when it is missing or not a number (never NaN). */
+const num = (min: number, max: number, fallback: number) =>
+  z.preprocess((v) => (v === "" || v === null || v === undefined ? undefined : Number(v)), z.number().finite().optional())
+    .catch(undefined)
+    .transform((v) => (v === undefined ? fallback : Math.min(max, Math.max(min, v))));
+
+export const ExamInput = z.object({
+  scope: z.unknown().optional(),
+  questionCount: num(1, 40, 10).transform(Math.round),
+  mix: z
+    .object({ mcq: num(0, 100, 0), short: num(0, 100, 0), long: num(0, 100, 0) })
+    .catch({ mcq: 5, short: 3, long: 2 })
+    .optional()
+    // All weights zero (or none given) means the default mix.
+    .transform((m) => (m && m.mcq + m.short + m.long > 0 ? m : { mcq: 5, short: 3, long: 2 })),
+  durationMinutes: num(5, 240, 60).transform(Math.round),
+  depth: num(1, 4, 0).transform((d) => (d ? Math.round(d) : undefined)),
+  title: z.string().trim().max(120).optional().catch(undefined),
+});
+
+export const CardsInput = z.object({ count: num(5, 60, 20).transform(Math.round) });
+export const PodcastInput = z.object({ minutes: num(3, 40, 10) });
+
 /** Parse or return a readable error message. */
 export function check<T extends z.ZodType>(schema: T, data: unknown): { ok: true; data: z.infer<T> } | { ok: false; error: string } {
   const r = schema.safeParse(data);

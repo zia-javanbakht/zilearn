@@ -31,13 +31,7 @@ export function guessKind(filename: string, mime = ""): MaterialKind {
   return "other";
 }
 
-export function titleFromFilename(filename: string): string {
-  return filename
-    .replace(/\.[a-z0-9]{1,5}$/i, "")
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+export { titleFromFilename } from "./text";
 
 export async function extractFile(buf: Buffer, filename: string, mime: string): Promise<Extracted> {
   const n = filename.toLowerCase();

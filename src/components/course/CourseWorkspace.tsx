@@ -77,20 +77,15 @@ export function CourseWorkspace({ id }: { id: string }) {
           <h1 style={{ margin: "4px 0" }}>
             {course.name} {course.code && <span className="badge">{course.code}</span>}
           </h1>
-          <div className="row small muted">
-            <span>{data.materials.length} items</span>·<span>{countTopics(data.tree)} topics</span>
-            {course.exam_date && (
-              <>
-                ·<span>Exam {course.exam_date} ({daysUntil(course.exam_date)})</span>
-              </>
-            )}
-            {data.planProgress && (
-              <>
-                ·<span>
-                  Plan {data.planProgress.done}/{data.planProgress.total} done
-                </span>
-              </>
-            )}
+          <div className="small muted">
+            {[
+              `${data.materials.length} items`,
+              `${countTopics(data.tree)} topics`,
+              course.exam_date ? `Exam ${course.exam_date} (${daysUntil(course.exam_date)})` : "",
+              data.planProgress ? `Plan ${data.planProgress.done}/${data.planProgress.total} done` : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </div>
         </div>
       </div>
@@ -160,7 +155,7 @@ function Steps({ data, go }: { data: CourseData; go: (t: Tab) => void }) {
   return (
     <div className="card row" style={{ marginTop: 14, gap: 16 }}>
       {steps.map((s, i) => (
-        <button key={s.label} className={`ghost sm ${i === next ? "primary" : ""}`} onClick={() => go(s.tab)} title={s.hint} style={{ opacity: s.done ? 0.6 : 1 }}>
+        <button key={s.label} className={`sm ${i === next ? "primary" : "ghost"}`} onClick={() => go(s.tab)} title={s.hint} style={{ opacity: s.done ? 0.6 : 1 }}>
           {s.done ? "✓" : `${i + 1}.`} {s.label}
         </button>
       ))}

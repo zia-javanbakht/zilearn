@@ -94,6 +94,8 @@ export interface Source {
   title: string;
   kind: string;
   text: string;
+  /** One of the topic's own materials, as opposed to a passage the search found elsewhere in the course. */
+  own?: boolean;
 }
 
 /**
@@ -110,7 +112,7 @@ export function sourcesFor(courseId: string, query: string, maxChars = 20000, ma
   own.sort((a, b) => materialIds.indexOf(a.id) - materialIds.indexOf(b.id));
   const total = own.reduce((n, m) => n + (m.text?.length ?? 0), 0);
   if (own.length && total <= maxChars * 0.8) {
-    const out: Source[] = own.filter((m) => m.text?.trim()).map((m) => ({ title: m.title, kind: m.kind, text: m.text!.trim() }));
+    const out: Source[] = own.filter((m) => m.text?.trim()).map((m) => ({ title: m.title, kind: m.kind, text: m.text!.trim(), own: true }));
     return [...out, ...passages(courseId, query, maxChars - total, new Set(own.map((m) => m.id)), true)];
   }
   return passages(courseId, query, maxChars, new Set(materialIds), false);
@@ -143,7 +145,7 @@ function passages(courseId: string, query: string, budget: number, prefer: Set<s
     const text = rs
       .map((r, i) => (i && r.chunk_index !== rs[i - 1].chunk_index + 1 ? "[…]\n" : "") + (r.chunk_index === 0 ? r.content.replace(/^.*\n/, "") : r.content))
       .join("\n");
-    return { title: rs[0].title, kind: rs[0].kind, text: rs[0].chunk_index ? `[…]\n${text}` : text };
+    return { title: rs[0].title, kind: rs[0].kind, text: rs[0].chunk_index ? `[…]\n${text}` : text, own: prefer.has(rs[0].material_id) && !exclude };
   });
 }
 

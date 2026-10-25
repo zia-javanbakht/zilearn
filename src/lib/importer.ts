@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import JSZip from "jszip";
-import { dataDir, newId } from "./db";
+import { dataPath, newId } from "./db";
 import { providerName } from "./ai";
 import { extractFile, guessKind, titleFromFilename } from "./extract";
 import { deleteMaterial, findMaterialByHash, findMaterialByUrl, getMaterial, insertMaterial, listMaterials, updateMaterial } from "./store";
@@ -112,8 +112,8 @@ export async function importFile(
   const mime = f.mime || mimeFromName(f.name);
   const safe = f.name.replace(/[^\w.\-]+/g, "_").slice(-120);
   const rel = path.join("uploads", courseId, `${newId()}-${safe}`);
-  await fs.mkdir(path.join(dataDir(), "uploads", courseId), { recursive: true });
-  await fs.writeFile(path.join(dataDir(), rel), f.buf);
+  await fs.mkdir(dataPath("uploads", courseId), { recursive: true });
+  await fs.writeFile(dataPath(rel), f.buf);
   const ex = CAPTIONS.test(f.name) ? captionsText(f.buf.toString("utf8"), f.name) : await extractFile(f.buf, f.name, mime);
   if (MEDIA.test(f.name) || /^(audio|video)\//.test(mime)) {
     // Captions imported before their video (e.g. "lecture.en.vtt" sorts ahead of "lecture.webm") become its transcript.

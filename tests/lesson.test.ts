@@ -217,3 +217,25 @@ describe("offline key terms keep names", () => {
     expect(titles).not.toMatch(/per unit/i);
   });
 });
+
+describe("offline lessons stay on the topic", () => {
+  it("uses other materials only where they name the topic, and drops sentences cut off at a break", async () => {
+    const { offlineLesson } = await import("@/lib/lessonOffline");
+    const head = { title: "Jacobian", depth: 1, level: "Survey", goal: "", map: { course: "FEM", path: [], before: [], after: [], children: [], related: [] } } as never;
+    const own =
+      "# Isoparametric mapping\nThe Jacobian is the matrix of derivatives of the physical coordinates with respect to the natural coordinates. " +
+      "A positive Jacobian determinant means the element is not inverted.\n\nexactly but cannot integrate the rational functions from a varying mapping.";
+    const other =
+      "# Constitutive laws\nThink of a rubber band: for example, a reference fibre direction enters via a dot product. " +
+      "A linear law between stress and strain is the simplest material model for the coordinates.";
+    const doc = offlineLesson(head, { summary: "", keywords: ["natural coordinates"], mastery: null }, [
+      { title: "csd l7", kind: "slides", text: own, own: true },
+      { title: "nlcm", kind: "notes", text: other },
+    ]);
+    const text = JSON.stringify(doc);
+    expect(text).toMatch(/matrix of derivatives/);
+    expect(text).not.toMatch(/rubber band|linear law/);
+    expect(text).not.toMatch(/exactly but cannot/i);
+    expect(doc.read.map((r) => r.title)).toEqual(["csd l7"]);
+  });
+});

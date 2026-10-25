@@ -38,9 +38,10 @@ describe("reading a PDF again", () => {
 
   async function stored() {
     const c = createCourse({ name: "Solids" });
-    fs.writeFileSync(path.join(process.env.ZILEARN_DATA_DIR!, "notes.pdf"), await equationPdf());
+    fs.mkdirSync(path.join(process.env.ZILEARN_DATA_DIR!, "uploads"), { recursive: true });
+    fs.writeFileSync(path.join(process.env.ZILEARN_DATA_DIR!, "uploads", "notes.pdf"), await equationPdf());
     const m = insertMaterial({
-      course_id: c.id, kind: "reading", title: "Notes", source_type: "file", filename: "notes.pdf", mime: "application/pdf", path: "notes.pdf", url: null,
+      course_id: c.id, kind: "reading", title: "Notes", source_type: "file", filename: "notes.pdf", mime: "application/pdf", path: "uploads/notes.pdf", url: null,
       text: "Div P + f0 = 0 in B0 (12)", status: "ready", note: null,
     });
     setScan(m.id, { pages: [], total: 1, maths: [1] });

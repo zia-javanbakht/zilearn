@@ -113,3 +113,31 @@ describe("long documents for the AI digest", () => {
     expect(docExcerpt("short", 3500)).toBe("short");
   });
 });
+
+describe("offline overviews", () => {
+  it("prefers prose near the start and drops box labels, equation numbers and running heads", async () => {
+    const { keySentences } = await import("@/lib/digest");
+    const text = [
+      "LECTURE NOTES",
+      "The path from finite deformation to nonlinear finite elements rests on a single equilibrium statement of the body.",
+      "This note derives the reference and spatial forms of equilibrium for nonlinear finite elements.",
+      "(3) Definition 3.1 — Mass of the Cuts. The mass of the cut is the integral of the density over the cut.",
+      "For the displacement field, F = I + Grad u, and E = 1 2 ( Grad u + Grad uT + Grad uT Grad u ) for the finite elements.",
+    ].join("\n");
+    const s = keySentences(text, 2);
+    expect(s).not.toMatch(/LECTURE|Definition 3\.1|^\(3\)|^1 —/);
+    expect(s).not.toMatch(/Grad uT/);
+    expect(s).toMatch(/single equilibrium statement/);
+  });
+});
+
+describe("offline brainmap branch names", () => {
+  it("names an item's branch by the document's title when the item is only called by a code-like file name", async () => {
+    const { heuristicTopics } = await import("@/lib/brainmap");
+    const base = { course_id: "c", source_type: "file", mime: null, path: null, url: null, status: "ready", note: null, digest: null, created_at: "", kind: "slides" } as const;
+    const text = "# Introduction to Isoparametric Elements\n## Mapping\nThe mapping takes the parent element to the physical one.\n## Quality\nDistorted elements lose accuracy.";
+    const named = (title: string, filename: string) => heuristicTopics([{ ...base, id: "m", title, filename, text } as never])[0].title;
+    expect(named("csd l7", "csd_l7.pdf")).toBe("Introduction to Isoparametric Elements");
+    expect(named("Week 7 slides on mapping", "csd_l7.pdf")).toBe("Week 7 slides on mapping");
+  });
+});

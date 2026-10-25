@@ -740,6 +740,16 @@ export function reviewCard(id: string, rating: Rating, today: string): Card | nu
   return getCard(id);
 }
 
+export type CardSchedule = Pick<Card, "ease" | "interval" | "reps" | "lapses" | "due" | "last_review">;
+
+/** Put a card's schedule back as it was before a review (the review screen's Undo). */
+export function restoreCard(id: string, s: CardSchedule): Card | null {
+  db()
+    .prepare("UPDATE cards SET ease = ?, interval = ?, reps = ?, lapses = ?, due = ?, last_review = ? WHERE id = ?")
+    .run(s.ease, s.interval, s.reps, s.lapses, s.due, s.last_review, id);
+  return getCard(id);
+}
+
 export function updateCard(id: string, patch: { front?: string; back?: string }) {
   const c = getCard(id);
   if (!c) return null;
@@ -751,4 +761,33 @@ export function updateCard(id: string, patch: { front?: string; back?: string })
 
 export function deleteCard(id: string) {
   db().prepare("DELETE FROM cards WHERE id = ?").run(id);
+}
+
+export interface TodayCourse {
+  course: Pick<Course, "id" | "name" | "code" | "exam_date">;
+  /** Today's unfinished sessions, in plan order. */
+  sessions: Pick<PlanItem, "id" | "kind" | "topic_title" | "depth" | "minutes">[];
+  /** Unfinished sessions from earlier days. */
+  overdue: number;
+  /** Flashcards to review today (due ones plus the day's new ones). */
+  cards: number;
+  examInDays: number | null;
+}
+
+/** What each course asks of the student today, for the home page: courses with nothing to do are left out. */
+export function todayOverview(today: string, newCardLimit = 20): TodayCourse[] {
+  const d = db();
+  const out: TodayCourse[] = [];
+  for (const c of d.prepare("SELECT id, name, code, exam_date FROM courses ORDER BY created_at DESC").all() as TodayCourse["course"][]) {
+    const plan = d.prepare("SELECT id FROM plans WHERE course_id = ? ORDER BY created_at DESC LIMIT 1").get(c.id) as { id: string } | undefined;
+    const sessions = plan
+      ? (d.prepare("SELECT id, kind, topic_title, depth, minutes FROM plan_items WHERE plan_id = ? AND date = ? AND done = 0 ORDER BY position").all(plan.id, today) as TodayCourse["sessions"])
+      : [];
+    const overdue = plan ? (d.prepare("SELECT COUNT(*) AS n FROM plan_items WHERE plan_id = ? AND date < ? AND done = 0").get(plan.id, today) as { n: number }).n : 0;
+    const s = cardStats(c.id, today);
+    const cards = s.due + Math.min(s.fresh, newCardLimit);
+    const examInDays = c.exam_date ? Math.round((Date.parse(c.exam_date) - Date.parse(today)) / 86400000) : null;
+    if (sessions.length || overdue || cards || (examInDays !== null && examInDays >= 0 && examInDays <= 7)) out.push({ course: c, sessions, overdue, cards, examInDays });
+  }
+  return out;
 }

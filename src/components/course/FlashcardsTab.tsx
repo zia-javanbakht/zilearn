@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, localToday } from "../api";
 import { Markdown } from "../Markdown";
 import { Busy } from "../Busy";
@@ -153,6 +153,9 @@ function Review({ queue: initial, examDate, onDone }: { queue: Card[]; examDate:
   const [reviewed, setReviewed] = useState(0);
   const [again, setAgain] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  // Reviews this session, newest last, so a slip of the key can be taken back.
+  const [history, setHistory] = useState<{ before: Card; rating: Rating }[]>([]);
+  const busy = useRef(false);
   const card = queue[0];
   const today = localToday();
   const daysToExam = examDate ? Math.round((Date.parse(examDate) - Date.parse(today)) / 86400000) : null;
@@ -165,26 +168,58 @@ function Review({ queue: initial, examDate, onDone }: { queue: Card[]; examDate:
 
   const rate = useCallback(
     async (rating: Rating) => {
-      if (!card) return;
+      // A second key press while the first rating is on its way would rate the same card twice.
+      if (!card || busy.current) return;
+      busy.current = true;
       setError(null);
       try {
         const updated = await api<Card>(`/api/cards/${card.id}`, { method: "PATCH", json: { rating, today } });
         setReviewed((n) => n + 1);
+        setHistory((h) => [...h, { before: card, rating }]);
         // Forgotten cards come back at the end of this session until they stick.
         if (rating === 1) setAgain((n) => n + 1);
         setQueue((q) => (rating === 1 ? [...q.slice(1), updated] : q.slice(1)));
         setShown(false);
       } catch (e) {
         setError((e as Error).message);
+      } finally {
+        busy.current = false;
       }
     },
     [card, today],
   );
 
+  const undo = useCallback(async () => {
+    const last = history[history.length - 1];
+    if (!last || busy.current) return;
+    busy.current = true;
+    setError(null);
+    try {
+      const { ease, interval, reps, lapses, due, last_review } = last.before;
+      await api<Card>(`/api/cards/${last.before.id}`, { method: "PATCH", json: { undo: { ease, interval, reps, lapses, due, last_review } } });
+      setHistory((h) => h.slice(0, -1));
+      setReviewed((n) => n - 1);
+      if (last.rating === 1) setAgain((n) => n - 1);
+      // The card goes back to the front, answer showing, ready to be rated again.
+      setQueue((q) => [last.before, ...(last.rating === 1 ? q.filter((c, i) => !(c.id === last.before.id && i === q.length - 1)) : q)]);
+      setShown(true);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      busy.current = false;
+    }
+  }, [history]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName)) return;
+      if ((e.key === "z" && (e.metaKey || e.ctrlKey)) || (e.key === "u" && !e.metaKey && !e.ctrlKey && !e.altKey)) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (!shown && (e.key === " " || e.key === "Enter")) {
         e.preventDefault();
         setShown(true);
@@ -195,7 +230,7 @@ function Review({ queue: initial, examDate, onDone }: { queue: Card[]; examDate:
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [shown, rate]);
+  }, [shown, rate, undo]);
 
   return (
     <div className="stack" style={{ gap: 12, maxWidth: 760, margin: "0 auto" }}>
@@ -203,7 +238,12 @@ function Review({ queue: initial, examDate, onDone }: { queue: Card[]; examDate:
         <button className="ghost sm" onClick={onDone}>
           ← Done
         </button>
-        <span className="small muted" role="status">
+        <span className="row small muted" role="status">
+          {history.length > 0 && (
+            <button className="ghost sm" onClick={undo} title="Undo the last rating (U)">
+              ↶ Undo
+            </button>
+          )}
           {reviewed} reviewed · {queue.length} left
         </span>
       </div>
@@ -222,7 +262,8 @@ function Review({ queue: initial, examDate, onDone }: { queue: Card[]; examDate:
       ) : (
         <div className="card flashcard">
           <div className="small muted spread">
-            <span>{card.topic_title ?? "General"}</span>
+            {/* A card asking for the term itself would give it away in its topic label. */}
+            <span>{shown || !card.topic_title || card.front.toLowerCase().includes(card.topic_title.toLowerCase()) ? (card.topic_title ?? "General") : "Topic hidden until you answer"}</span>
             <span>{card.due == null ? "New" : card.lapses ? `Forgotten ${card.lapses}×` : `Every ${describeInterval(card.interval)}`}</span>
           </div>
           <Markdown>{card.front}</Markdown>
@@ -239,7 +280,7 @@ function Review({ queue: initial, examDate, onDone }: { queue: Card[]; examDate:
                 ))}
               </div>
               <p className="small muted" style={{ textAlign: "center", margin: 0 }}>
-                Keys 1-4. Be honest: &quot;Again&quot; if you couldn&apos;t recall it, &quot;Hard&quot; if it took real effort.
+                Keys 1-4, U to undo. Be honest: &quot;Again&quot; if you couldn&apos;t recall it, &quot;Hard&quot; if it took real effort.
               </p>
             </>
           ) : (
@@ -288,6 +329,7 @@ function CardList({ cards, onChange }: { cards: Card[]; onChange: () => void }) 
                   className="sm ghost danger"
                   aria-label="Delete card"
                   onClick={async () => {
+                    if (!window.confirm(`Delete this card?\n\n${c.front.split("\n")[0].slice(0, 120)}`)) return;
                     await api(`/api/cards/${c.id}`, { method: "DELETE" });
                     onChange();
                   }}

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { api } from "@/components/api";
+import { TodayPanel } from "@/components/TodayPanel";
 import type { Course } from "@/lib/types";
 
 type CourseRow = Course & { material_count: number; topic_count: number };
@@ -41,6 +42,8 @@ export default function Home() {
         </p>
       </div>
       {error && <div className="alert error">{error}</div>}
+
+      <TodayPanel />
 
       <form className="card stack" onSubmit={create}>
         <h2>New course</h2>
@@ -91,13 +94,8 @@ export default function Home() {
               <p className="muted small" style={{ margin: "8px 0" }}>
                 {c.summary ? c.summary.slice(0, 160) + (c.summary.length > 160 ? "…" : "") : "No brainmap yet."}
               </p>
-              <div className="row small muted">
-                <span>{c.material_count} items</span>·<span>{c.topic_count} topics</span>
-                {c.exam_date && (
-                  <>
-                    ·<span>Exam {c.exam_date}</span>
-                  </>
-                )}
+              <div className="small muted">
+                {c.material_count} items · {c.topic_count} topics{c.exam_date ? ` · Exam ${c.exam_date}` : ""}
               </div>
             </Link>
           ))}

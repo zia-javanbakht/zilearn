@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { aiEnabled, CUT_OFF_NOTE, generateStructured, generateText, UserError } from "./ai";
-import { excerptsFor } from "./kb";
+import { excerptsFor, sourcesFor } from "./kb";
+import { topicFacts, type TopicFacts } from "./lessonOffline";
+import { mentions } from "./lessonTerms";
 import { buildTree, flattenTree, getCourse, listMaterials, listTopics } from "./store";
-import { truncate } from "./text";
+import { plainSummary, truncate } from "./text";
 import {
   DEPTH_LEVELS,
   MASTERY_LABELS,
@@ -203,8 +205,8 @@ ${
     return { title: out.title || `Mock exam: ${ctx.label}`, questions, by: "claude" as const };
   }
 
-  // Offline: build questions from topic summaries.
-  const weighted = pool.flatMap((n) => Array(WEIGHT[n.effective_mastery ?? "dont_know"]).fill(n) as TopicNode[]);
+  // Offline: questions from what the materials say about each topic, weighted towards weak topics.
+  const weighted = ctx.nodes.flatMap((n) => Array(WEIGHT[n.effective_mastery ?? "dont_know"]).fill(n) as TopicNode[]);
   // Weighted towards weak topics, but without asking about the same topic twice until every topic has had a turn.
   const asked = new Set<string>();
   const pick = () => {
@@ -213,14 +215,23 @@ ${
     asked.add(n.id);
     return n;
   };
+  const factsOf = new Map<string, TopicFacts>();
+  const facts = (n: TopicNode) => {
+    if (!factsOf.has(n.id)) factsOf.set(n.id, topicFacts(n.title, n.keywords, sourcesFor(courseId, `${n.title} ${n.keywords.join(" ")}`, 12000, n.material_ids)));
+    return factsOf.get(n.id)!;
+  };
+  const documents = documentTitles(courseId);
+  const all = flattenTree(buildTree(listTopics(courseId))).filter((t) => !documents.has(t.id));
   const questions: ExamQuestion[] = [];
   for (let i = 0; i < nMcq; i++) {
     const n = pick();
-    const others = shuffle(pool.filter((p) => p.id !== n.id)).slice(0, 3);
-    const clue = blank(n.summary ?? "", n.title);
-    // A clue that is mostly blanks (or a recording's noise) gives nothing to reason from; ask for an explanation instead.
-    if (!clue || others.length < 1 || clue.split(/\s+/).filter((w) => !w.includes("____")).length < 6) {
-      questions.push(shortQ(n, 2));
+    const clue = all.some((t) => t.id === n.id) ? [...facts(n).definitions.filter((d) => d.term === n.title).map((d) => d.text.replace(/\*\*/g, "")), plainSummary(n.summary), ...facts(n).statements.map((x) => x.text)]
+          .map((x) => cloze(x, n.title))
+          .find(Boolean) : null;
+    const others = distractors(n, all, clue ?? "").slice(0, 3);
+    // Without a sentence to work from, or enough other terms to choose between, it's a written question.
+    if (!clue || others.length < 2) {
+      questions.push(shortQ(n, 2, facts(n)));
       continue;
     }
     const options = shuffle([n, ...others]);
@@ -229,50 +240,84 @@ ${
       type: "mcq",
       topic_id: n.id,
       topic_title: n.title,
-      prompt: `Which topic does this describe?\n\n> ${clue}`,
+      prompt: `Which term fills the gap?\n\n> ${clue}`,
       options: options.map((o) => o.title),
       answer_index: options.indexOf(n),
       model_answer: n.title,
       marks: 1,
     });
   }
-  for (let i = 0; i < nShort; i++) questions.push(shortQ(pick(), 3));
+  for (let i = 0; i < nShort; i++) {
+    const n = pick();
+    questions.push(shortQ(n, 3, facts(n)));
+  }
   for (let i = 0; i < nLong; i++) {
     const n = pick();
+    const f = facts(n);
+    const parts = n.children.map((c) => c.title);
+    const guide = [
+      plainSummary(n.summary),
+      ...f.definitions.map((d) => `- ${d.text} *(${d.source})*`),
+      ...f.formulas.slice(0, 2).map((x) => `- ${x.lead ? `${x.lead} ` : ""}${x.math} *(${x.source})*`),
+      parts.length ? `Should cover: ${parts.join(", ")}.` : n.keywords.length ? `Key terms to cover: ${n.keywords.join(", ")}.` : "",
+    ].filter(Boolean);
     questions.push({
       id: newId(),
       type: "long",
       topic_id: n.id,
       topic_title: n.title,
-      prompt: `Discuss **${n.title}** in depth: define it, explain how it works, give an example, and relate it to at least one other topic in the course.`,
+      prompt: `Discuss **${n.title}** in depth: define it, explain how it works${parts.length ? ` (including ${parts.slice(0, 3).join(", ")})` : ""}, give an example, and relate it to at least one other topic in the course.`,
       options: [],
       answer_index: null,
-      model_answer: `${n.summary}\n\nKey terms to cover: ${n.keywords.join(", ")}`,
+      model_answer: guide.join("\n\n"),
       marks: 10,
     });
   }
   return { title: `Mock exam: ${ctx.label}`, questions, by: "heuristic" as const };
 }
 
-function shortQ(n: TopicNode, marks: number): ExamQuestion {
+/**
+ * Wrong options for "which term": the topic's siblings first (the terms most easily confused with it),
+ * then the rest of its branch, then the course; never a term the clue itself uses.
+ */
+export function distractors(n: TopicNode, all: TopicNode[], clue: string): TopicNode[] {
+  const parentOf = new Map(all.flatMap((p) => p.children.map((c) => [c.id, p.id] as const)));
+  const rootOf = (id: string): string => (parentOf.has(id) ? rootOf(parentOf.get(id)!) : id);
+  const ok = (o: TopicNode) => o.id !== n.id && !mentions(clue, o.title) && !mentions(o.title, n.title) && !mentions(n.title, o.title);
+  const siblings = shuffle(all.filter((o) => ok(o) && parentOf.get(o.id) === parentOf.get(n.id)));
+  const branch = shuffle(all.filter((o) => ok(o) && !siblings.includes(o) && rootOf(o.id) === rootOf(n.id)));
+  const rest = shuffle(all.filter((o) => ok(o) && !siblings.includes(o) && !branch.includes(o)));
+  const seen = new Set<string>();
+  return [...siblings, ...branch, ...rest].filter((o) => (seen.has(o.title.toLowerCase()) ? false : (seen.add(o.title.toLowerCase()), true)));
+}
+
+/** Branches that are a whole item (its file name or its own title) rather than a term in it. */
+function documentTitles(courseId: string): Set<string> {
+  const norm = (x: string) => x.toLowerCase().replace(/[_\s-]+/g, " ").trim();
+  const items = listMaterials(courseId, true);
+  const names = new Set(items.map((m) => norm(m.title)));
+  return new Set(
+    listTopics(courseId)
+      .filter((t) => !t.parent_id && (names.has(norm(t.title)) || items.some((m) => t.material_ids.includes(m.id) && (m.text ?? "").slice(0, 3000).includes(`# ${t.title}`))))
+      .map((t) => t.id),
+  );
+}
+
+function shortQ(n: TopicNode, marks: number, facts?: TopicFacts): ExamQuestion {
+  const def = facts?.definitions[0];
+  const mention = n.keywords.filter((k) => k.toLowerCase() !== n.title.toLowerCase()).slice(0, 3);
+  const guide = [def ? `${def.text} *(${def.source})*` : plainSummary(n.summary), ...(facts?.statements.slice(0, 2).map((x) => `- ${x.text}`) ?? [])].filter(Boolean);
   return {
     id: newId(),
     type: "short",
     topic_id: n.id,
     topic_title: n.title,
-    prompt: `Briefly explain **${n.title}**${n.keywords.length ? ` (mention: ${n.keywords.slice(0, 3).join(", ")})` : ""}.`,
+    prompt: `Briefly explain **${n.title}**${mention.length ? ` (mention: ${mention.join(", ")})` : ""}.`,
     options: [],
     answer_index: null,
-    model_answer: n.summary || n.keywords.join(", "),
+    model_answer: guide.join("\n\n") || n.keywords.join(", "),
     marks,
   };
-}
-
-function blank(summary: string, title: string) {
-  const words = title.split(/\s+/).filter((w) => w.length > 3);
-  let s = summary.replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]\s*/g, "").trim();
-  for (const w of words) s = s.replace(new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "gi"), "____");
-  return s;
 }
 
 function shuffle<T>(a: T[]): T[] {
@@ -360,21 +405,19 @@ export async function generateNotes(courseId: string, scope: Scope, style: "conc
     const lines = [`# Review notes: ${ctx.course.name} - ${ctx.label}`, ""];
     const roots = buildTree(listTopics(courseId));
     const ids = new Set(ctx.nodes.map((n) => n.id));
+    // Weak topics get the most: everything found for them; known ones only their definitions.
     const walk = (ns: TopicNode[], depth: number) => {
       for (const n of ns) {
         const inside = ids.has(n.id) || flattenTree(n.children).some((c) => ids.has(c.id));
         if (!inside) continue;
-        lines.push(`${"#".repeat(Math.min(6, depth + 2))} ${n.title}`, "", n.summary, "");
-        if (n.keywords.length) lines.push(`**Key terms:** ${n.keywords.join(", ")}`, "");
-        if (!n.children.length && style !== "cheatsheet") {
-          const ex = excerptsFor(courseId, `${n.title} ${n.keywords.join(" ")}`, 1500, n.material_ids)[0];
-          if (ex) lines.push("> " + truncate(ex, 700).replace(/\n/g, "\n> "), "");
-        }
+        const mark = n.effective_mastery ? ` *(${MASTERY_LABELS[n.effective_mastery]})*` : "";
+        lines.push(`${"#".repeat(Math.min(6, depth + 2))} ${n.title}${style === "cheatsheet" ? "" : mark}`, "");
+        if (ids.has(n.id)) lines.push(...topicNotes(courseId, n, style), "");
         walk(n.children, depth + 1);
       }
     };
     walk(roots, 0);
-    return { title: `${ctx.label} - ${style}`, scope: ctx.label, content: lines.join("\n"), by: "heuristic" as const };
+    return { title: `${ctx.label} - ${style}`, scope: ctx.label, content: lines.join("\n").replace(/\n{3,}/g, "\n\n"), by: "heuristic" as const };
   }
   const styleGuide = {
     concise: "Concise revision notes: the essential definitions, results and how ideas connect. Around 1 page per major branch.",
@@ -396,6 +439,22 @@ The course source material is given above in <course_sources>.
 Format as Markdown with headings that follow the outline. Use LaTeX ($...$) for maths, tables where they help, and at most two small Mermaid diagrams (\`\`\`mermaid) for structure or processes. Spend more space on topics the student doesn't know yet. Finish with a "Most likely exam questions" section.`,
   });
   return { title: `${ctx.label} - ${style}`, scope: ctx.label, content: truncated ? text + CUT_OFF_NOTE : text, by: "claude" as const };
+}
+
+/** One topic's offline notes: its overview, the definitions and results its materials give, and where to read more. */
+function topicNotes(courseId: string, n: TopicNode, style: "concise" | "detailed" | "cheatsheet"): string[] {
+  const f = topicFacts(n.title, n.keywords, sourcesFor(courseId, `${n.title} ${n.keywords.join(" ")}`, 12000, n.material_ids));
+  const summary = plainSummary(n.summary);
+  const weak = n.effective_mastery !== "know";
+  const out: string[] = [];
+  if (style !== "cheatsheet" && summary) out.push(summary, "");
+  for (const d of f.definitions.slice(0, style === "cheatsheet" ? 2 : 4)) out.push(`- ${d.text.replace(/\n+/g, " ")}${style === "cheatsheet" ? "" : ` *(${d.source})*`}`);
+  if (f.definitions.length) out.push("");
+  for (const x of f.formulas.slice(0, style === "detailed" && weak ? 4 : 2)) out.push(...(x.lead && style !== "cheatsheet" ? [x.lead, ""] : []), x.math, "");
+  if (style !== "cheatsheet" && weak) for (const x of f.statements.slice(0, style === "detailed" ? 4 : 2)) out.push(`- ${x.text} *(${x.source})*`);
+  if (style === "cheatsheet" && !f.definitions.length && !f.formulas.length && summary) out.push(summary);
+  if (style !== "cheatsheet" && n.keywords.length) out.push("", `**Key terms:** ${n.keywords.join(", ")}`);
+  return out;
 }
 
 /* ---------------- Podcasts ---------------- */
@@ -434,13 +493,41 @@ Make it engaging and accurate: concrete examples and analogies, recap key points
     { speaker: "A", text: `Welcome to your ziLearn study podcast on ${ctx.course.name}. Today: ${ctx.label}.` },
     { speaker: "B", text: "Great, let's go through it topic by topic." },
   ];
+  const spoken = new Set<string>();
   for (const n of ctx.nodes.slice(0, 30)) {
+    const f = topicFacts(n.title, n.keywords, sourcesFor(courseId, `${n.title} ${n.keywords.join(" ")}`, 8000, n.material_ids));
+    // Read aloud, so only sentences that are words, not symbols.
+    const said = [f.definitions[0]?.text, plainSummary(n.summary), ...f.statements.map((x) => x.text)]
+      .filter((x): x is string => !!x)
+      .map(speakable)
+      // Neighbouring topics share sentences; the episode says each once.
+      .filter((x): x is string => !!x && !spoken.has(x));
+    if (!said.length) continue;
+    said.slice(0, 2).forEach((x) => spoken.add(x));
     segments.push({ speaker: "B", text: `So what is ${n.title} about?` });
-    segments.push({ speaker: "A", text: n.summary || `It covers ${n.keywords.join(", ")}.` });
-    if (n.keywords.length) segments.push({ speaker: "B", text: `The key terms to remember are ${n.keywords.slice(0, 5).join(", ")}.` });
+    segments.push({ speaker: "A", text: said[0] });
+    if (said[1]) {
+      segments.push({ speaker: "B", text: "And what else should I remember about it?" });
+      segments.push({ speaker: "A", text: said[1] });
+    }
   }
   segments.push({ speaker: "A", text: "That's the overview. Rebuild this episode after choosing an AI provider in Settings for a full, conversational script." });
   return { title: `${ctx.label}: audio overview`, scope: ctx.label, hosts, segments, by: "heuristic" as const };
+}
+
+/** A sentence fit to be read aloud: Markdown and maths taken out, or null when it is mostly symbols. */
+export function speakable(text: string): string | null {
+  const plain = text
+    .replace(/\$\$[\s\S]*?\$\$|\$[^$]*\$/g, " ")
+    .replace(/[*_`#>]/g, "")
+    .replace(/^\(\d+\)\s*/, "")
+    .replace(/\s+([,.;:])/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  const tokens = plain.split(" ");
+  // Maths italic letters (𝑆𝑝) are letters to Unicode, but they are symbols to a listener.
+  const words = tokens.filter((t) => /^[(“"]?\p{L}[\p{L}’'-]+[)”",.;:!?]?$/u.test(t) && !/[\u{1D400}-\u{1D7FF}]/u.test(t)).length;
+  return tokens.length >= 5 && words / tokens.length >= 0.8 ? plain : null;
 }
 
 /* ---------------- Flashcards ---------------- */
@@ -458,9 +545,9 @@ const CardSchema = z.object({
 export async function generateCards(courseId: string, scope: Scope, count: number) {
   const ctx = resolveScope(courseId, scope);
   if (!ctx.nodes.length) throw new UserError("Build the brainmap first.");
-  const n = Math.min(60, Math.max(5, Math.round(count)));
-  const leaves = ctx.nodes.filter((x) => !x.children.length);
-  const pool = leaves.length ? leaves : ctx.nodes;
+  const n = Math.min(60, Math.max(5, Math.round(count) || 20));
+  // Every topic in scope, parents too: a branch is a concept with its own definitions and results.
+  const pool = ctx.nodes;
   const byTitle = new Map(pool.map((x) => [x.title.toLowerCase(), x]));
   const topicOf = (title: string) =>
     byTitle.get(title.toLowerCase()) ?? pool.find((x) => title.toLowerCase().includes(x.title.toLowerCase())) ?? null;
@@ -491,19 +578,68 @@ Good flashcards:
     };
   }
 
-  // Offline: a definition card per topic, then key-term cards, weak topics first.
-  const order = [...pool].sort((a, b) => WEIGHT[b.effective_mastery ?? "dont_know"] - WEIGHT[a.effective_mastery ?? "dont_know"]);
+  // Offline: cards from what the materials state about each topic (its definitions and formulas), weak
+  // topics first and taking turns, so a small deck still covers many topics.
+  // A branch that is a whole item ("Balance Laws in Continuum Mechanics") isn't a term to put on a card.
+  const documents = documentTitles(courseId);
+  const terms = pool.filter((t) => !documents.has(t.id));
+  const order = [...(terms.length ? terms : pool)].sort((a, b) => WEIGHT[b.effective_mastery ?? "dont_know"] - WEIGHT[a.effective_mastery ?? "dont_know"]);
+  const decks = order.map((t) => offlineCards(courseId, t));
   const cards: { front: string; back: string; topic_id: string | null }[] = [];
-  for (const t of order) if (t.summary) cards.push({ front: `What is **${t.title}**?`, back: t.summary, topic_id: t.id });
-  for (const t of order) {
-    for (const k of t.keywords.slice(0, 3)) {
-      const sentence = excerptsFor(courseId, k, 600, t.material_ids)
-        .flatMap((e) => e.split(/(?<=[.!?])\s+/))
-        .find((s) => s.toLowerCase().includes(k.toLowerCase()) && s.length > 30 && s.length < 300);
-      if (sentence) cards.push({ front: `In **${t.title}**, what does "${k}" refer to?`, back: sentence.trim(), topic_id: t.id });
+  // A parent's key term is often a subtopic too: the same answer is one card.
+  const answers = new Set<string>();
+  for (let i = 0; cards.length < n && decks.some((d) => d.length > i); i++)
+    for (const d of decks) {
+      const key = d[i]?.back.split("\n\n")[0].toLowerCase().replace(/\W+/g, "");
+      if (!d[i] || cards.length >= n || answers.has(key!)) continue;
+      answers.add(key!);
+      cards.push(d[i]);
     }
+  return { cards, by: "heuristic" as const };
+}
+
+/** One topic's offline cards: a card per definition, a "complete the formula" card per equation, else its summary. */
+export function offlineCards(courseId: string, t: TopicNode): { front: string; back: string; topic_id: string }[] {
+  const facts = topicFacts(t.title, t.keywords, sourcesFor(courseId, `${t.title} ${t.keywords.join(" ")}`, 12000, t.material_ids));
+  const from = (source: string) => `\n\n*From ${source}*`;
+  const out: { front: string; back: string; topic_id: string }[] = [];
+  for (const d of facts.definitions.slice(0, 3))
+    out.push({
+      front: d.term === t.title ? `What is **${d.term}**?` : `In ${t.title}, what is **${d.term}**?`,
+      back: d.text + from(d.source),
+      topic_id: t.id,
+    });
+  const about = [t.title, ...t.keywords];
+  for (const f of facts.formulas) {
+    // The formula must be introduced as being about this topic, not just sit near it.
+    if (!about.some((k) => mentions(`${f.lead} ${f.source}`, k))) continue;
+    const math = f.math.replace(/^\$\$|\$\$$/g, "").trim();
+    const eq = math.indexOf("=");
+    // "... = 0." leaves nothing to recall.
+    if (eq < 1 || math.includes("\n") || eq > 40 || math.slice(eq + 1).replace(/[\s.,;]/g, "").length < 3) continue;
+    const lead = f.lead && !/^\$\$/.test(f.lead) ? `${f.lead}\n\n` : `Complete the result for **${t.title}**:\n\n`;
+    out.push({ front: `${lead}$$${math.slice(0, eq).trim()} = \\;?$$`, back: `$$${math}$$${from(f.source)}`, topic_id: t.id });
+    if (out.length >= 5) break;
   }
-  return { cards: cards.slice(0, n), by: "heuristic" as const };
+  // A sentence the materials say about the term, with the term left out, asks for the term itself.
+  const summary = plainSummary(t.summary);
+  for (const text of [summary, ...facts.statements.map((x) => x.text)]) {
+    if (out.length >= 2) break;
+    const gap = cloze(text, t.title);
+    if (gap) out.push({ front: `Which term fills the gap?\n\n> ${gap}`, back: `**${t.title}**\n\n${text}`, topic_id: t.id });
+  }
+  if (!out.length && summary) out.push({ front: `What is **${t.title}** about?`, back: summary, topic_id: t.id });
+  return out;
+}
+
+/** The text with a term (or its plural) replaced by one gap, or null when too little is left to go on. */
+export function cloze(text: string, term: string): string | null {
+  const esc = term.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "[\\s-]+");
+  const re = new RegExp(`(?<![\\p{L}])${esc}(?:e?s)?(?![\\p{L}])`, "giu");
+  if (!re.test(text)) return null;
+  const gapped = text.replace(re, "_____");
+  // The gap must leave enough words around it to work the term out from.
+  return gapped.split(/\s+/).filter((w) => /\p{L}{2}/u.test(w) && !w.includes("_____")).length >= 6 ? gapped : null;
 }
 
 /** Flashcards from the questions a student got wrong or only partly right in a graded exam. */
