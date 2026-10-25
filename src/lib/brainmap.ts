@@ -223,7 +223,8 @@ const termKey = (t: string) =>
     .toLowerCase()
     .replace(/[-‐‑–\s]+/g, " ")
     .replace(/(?<=\w)s\b/g, "")
-    .trim();
+    .trim()
+    .replace(/^(the|a|an) /, "");
 
 /** Most main terms that stand as top-level branches on their own; more are gathered under broader ones. */
 const MAX_LOOSE_BRANCHES = 5;
@@ -296,7 +297,8 @@ function mergeNamesakes(topics: NewTopic[]): NewTopic[] {
     const parent = topics.find((p) => p.ref.startsWith("S") && termKey(p.title) === termKey(t.title));
     if (!parent) continue;
     drop.add(t.ref);
-    for (const c of topics) if (c.parent_ref === t.ref) c.parent_ref = parent.ref;
+    // Its sub-terms stay where it was placed: in that section, or with what the text discusses them.
+    for (const c of topics) if (c.parent_ref === t.ref) c.parent_ref = t.parent_ref;
   }
   return topics.filter((t) => !drop.has(t.ref));
 }
