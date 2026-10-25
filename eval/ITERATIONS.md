@@ -86,3 +86,5 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 75 | A paper of ten sections or fewer keeps every section as a branch | 89.1 | 79.95 | yes |
 | 76 | A term goes to the one section whose heading names it | 89.1 | 79.47 | no |
 | 77 | A head noun nearly always qualified is named by its most used phrase (consistent tangent) | 89.1 | 80.03 | yes |
+| 78 | A word mostly qualifying others is dropped for its main phrase | 89.1 | 80.03 | no |
+| 79 | A long technical word used often ranks as a term of its own | 89.1 | 80.29 | yes |

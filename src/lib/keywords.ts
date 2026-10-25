@@ -513,7 +513,8 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
       if (titleKeys.includes(` ${c.key} `)) score *= 1.6;
       if (headingKeys.includes(` ${c.key} `)) score *= 1.4;
       if ([...c.sentences].some((i) => sentences[i].lead)) score *= 1.25;
-      if (words.length === 1 && c.boost === 1) score *= c.count >= 6 ? 0.8 : 0.6;
+      // A long technical word ("delamination", "objectivity") used often is a term of its own.
+      if (words.length === 1 && c.boost === 1) score *= c.count >= 6 ? (words[0].length >= 9 ? 1 : 0.8) : 0.6;
       // A generic word in front ("model results", "effect of fiber") makes a weak term.
       if (words.length > 1 && GENERIC.has(words[0])) score *= 0.7;
       // A term ending in a word for any quantity ("strain values") names the measure, not a concept.
