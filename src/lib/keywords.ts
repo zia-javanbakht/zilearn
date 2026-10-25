@@ -535,15 +535,20 @@ function evidenceIn(sentences: Sentence[], term: string, aliases: string[], othe
 
 /* ---------------- The keyword map ---------------- */
 
+/** Characters past which a material counts as long (a paper, a chapter of notes). */
+const LONG_TEXT = 20000;
+
 /**
  * The material's keyword map: up to `mains` main terms in the order the material takes them up, each
  * with the terms used most with it, and every term with what the material says about it.
  */
 export function keywordMap(text: string, opts: { mains?: number; children?: number; terms?: KeyTerm[] } = {}): KeywordNode[] {
   const sentences = sentencesOf(text);
-  const terms = opts.terms ?? keyTerms(text);
+  // A long paper or set of notes has more to map than a short handout.
+  const long = text.length > LONG_TEXT;
+  const terms = opts.terms ?? keyTerms(text, long ? 36 : 24);
   if (!terms.length) return [];
-  const nMain = Math.min(opts.mains ?? 7, Math.max(3, Math.ceil(terms.length / 3)));
+  const nMain = Math.min(opts.mains ?? (long ? 12 : 7), Math.max(3, Math.ceil(terms.length / 3)));
   const sets = new Map(terms.map((t) => [t.term, new Set(sentences.flatMap((s, i) => (contains(s, termKeys(t.term, t.aliases)) ? [i] : [])))]));
   // Main terms are ones the material keeps coming back to.
   const strong = terms.filter((t) => t.count >= 3);

@@ -36,16 +36,16 @@ export async function structureCourse(course: Course, materials: Material[]): Pr
   const usable = materials.filter((m) => (m.text ?? "").trim().length > 0 || m.title);
   // Key terms first: when the items have keyword maps, those are the map, with or without AI.
   if (usable.some(keywordMapOf)) {
-    const topics = heuristicTopics(usable);
     if (aiEnabled()) {
       try {
-        const out = await describeWithAi(course, usable, topics);
+        // The AI gathers the terms under broader branches itself; offline, the document's sections do.
+        const out = await describeWithAi(course, usable, heuristicTopics(usable, { gather: false }));
         return { ...out, by: "claude" };
       } catch (e) {
         console.warn("[brainmap] The AI couldn't describe the keyword map; using the items' own sentences.", e);
       }
     }
-    return { topics, summary: heuristicSummary(course, usable), by: "heuristic" };
+    return { topics: heuristicTopics(usable), summary: heuristicSummary(course, usable), by: "heuristic" };
   }
   if (aiEnabled() && usable.length) {
     const { topics, summary } = await structureWithClaude(course, usable);
@@ -222,6 +222,9 @@ const termKey = (t: string) =>
     .replace(/(?<=\w)s\b/g, "")
     .trim();
 
+/** Most main terms that stand as top-level branches on their own; more are gathered under broader ones. */
+const MAX_LOOSE_BRANCHES = 8;
+
 /** Most top-level branches the items' main terms make before each item becomes a branch of its own. */
 const MAX_TERM_BRANCHES = 14;
 
@@ -230,7 +233,7 @@ const MAX_TERM_BRANCHES = 14;
  * use is one branch, citing them all) and the terms under each main term are its sub-branches, each with
  * what the item says about it. Null when the items' main terms are too many to stand as branches.
  */
-function keywordBranches(mapped: Material[]): NewTopic[] | null {
+function keywordBranches(mapped: Material[], gather = true): NewTopic[] | null {
   type Branch = { title: string; summary: string; ids: string[]; subs: Map<string, { title: string; summary: string; ids: string[] }> };
   const mains = new Map<string, Branch>();
   for (const m of mapped)
@@ -258,13 +261,67 @@ function keywordBranches(mapped: Material[]): NewTopic[] | null {
       placed.add(k);
     }
   const topics: NewTopic[] = [];
-  [...mains.values()].forEach((b, j) => {
+  const branches = [...mains.values()];
+  // One paper or set of notes with many main terms: its sections gather them, as the AI gathers them under broader branches.
+  const groups = gather && mapped.length === 1 && branches.length > MAX_LOOSE_BRANCHES ? sectionGroups(mapped[0], branches.map((b) => b.title)) : null;
+  const groupOf = new Map<number, string>();
+  groups?.forEach((g, gi) => {
+    topics.push({ ref: `S${gi}`, parent_ref: null, title: g.title, summary: g.summary, keywords: g.members.map((i) => bareTerm(branches[i].title)).slice(0, 8), material_ids: [mapped[0].id], importance: 3 });
+    for (const i of g.members) groupOf.set(i, `S${gi}`);
+  });
+  branches.forEach((b, j) => {
     const ref = `K${j}`;
     const subs = [...b.subs.values()];
-    topics.push({ ref, parent_ref: null, title: truncate(b.title, 80), summary: b.summary, keywords: [b.title, ...subs.map((x) => x.title)].map(bareTerm).slice(0, 8), material_ids: b.ids, importance: subs.length >= 2 || b.ids.length > 1 ? 3 : 2 });
+    topics.push({ ref, parent_ref: groupOf.get(j) ?? null, title: truncate(b.title, 80), summary: b.summary, keywords: [b.title, ...subs.map((x) => x.title)].map(bareTerm).slice(0, 8), material_ids: b.ids, importance: subs.length >= 2 || b.ids.length > 1 ? 3 : 2 });
     subs.forEach((st, k) => topics.push({ ref: `${ref}.${k}`, parent_ref: ref, title: truncate(st.title, 80), summary: st.summary, keywords: [bareTerm(st.title)], material_ids: st.ids, importance: 2 }));
   });
-  return topics;
+  return orderByDocument(topics, groups);
+}
+
+/** Groups first where they start; a term outside every group stays where the keyword map put it. */
+function orderByDocument(topics: NewTopic[], groups: { title: string }[] | null): NewTopic[] {
+  if (!groups?.length) return topics;
+  const tops = topics.filter((t) => !t.parent_ref);
+  const under = (ref: string): NewTopic[] => topics.filter((t) => t.parent_ref === ref).flatMap((t) => [t, ...under(t.ref)]);
+  return tops.flatMap((t) => [t, ...under(t.ref)]);
+}
+
+/**
+ * A single paper or set of notes with many key terms: its sections gather them, as a student reads it.
+ * Each main term goes to the section that mentions it most (its introduction and conclusion count for
+ * less); a section that gathers two or more terms is a branch, named as the material names it.
+ */
+function sectionGroups(m: Material, terms: string[]): { title: string; summary: string; members: number[] }[] | null {
+  const text = m.text ?? "";
+  const sections = studySections(text).filter((s) => s.heading && !/^(abstract|summary|keywords?)$/i.test(s.heading));
+  const lvl = Math.min(...sections.map((s) => s.level ?? 1).filter((l) => l > 0));
+  type G = { title: string; body: string; context: boolean };
+  const gs: G[] = [];
+  for (const s of sections) {
+    if ((s.level ?? 1) === 0) continue;
+    if ((s.level ?? 1) <= lvl || !gs.length) gs.push({ title: s.heading, body: s.body, context: CONTEXT_SECTION.test(s.heading) || /^appendix\b/i.test(s.heading) });
+    else gs[gs.length - 1].body += `\n${s.heading}\n${s.body}`;
+  }
+  if (gs.length < 2) return null;
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const count = (body: string, term: string) => {
+    const words = bareTerm(term).toLowerCase().split(/\s+/).map((w) => esc(w.replace(/s$/, "")) + "s?");
+    return (body.toLowerCase().match(new RegExp(`\\b${words.join("[\\s-]+")}\\b`, "g")) ?? []).length;
+  };
+  const members = gs.map(() => [] as number[]);
+  terms.forEach((t, i) => {
+    let best = -1;
+    let score = 0;
+    gs.forEach((g, gi) => {
+      const n = count(g.body, t) * (g.context ? 0.5 : 1);
+      if (n > score) (score = n), (best = gi);
+    });
+    if (best >= 0) members[best].push(i);
+  });
+  const mend = headingRepairer(text);
+  // An introduction or conclusion frames the paper's topics rather than being one: its terms stay branches of their own.
+  const out = gs.map((g, gi) => ({ title: clipWords(mend(g.title), 60), summary: firstSentences(g.body, 2), members: members[gi], context: g.context })).filter((g) => g.members.length >= 2 && !g.context);
+  return out.length >= 2 ? out : null;
 }
 
 /**
@@ -272,9 +329,9 @@ function keywordBranches(mapped: Material[]): NewTopic[] | null {
  * give the branches: their main terms, with the terms under them as sub-branches. Any other item is a
  * branch of its own, with its sections (or its digest's topics) under it.
  */
-export function heuristicTopics(materials: Material[]): NewTopic[] {
+export function heuristicTopics(materials: Material[], opts: { gather?: boolean } = {}): NewTopic[] {
   const mapped = materials.filter((m) => keywordMapOf(m));
-  const byTerms = mapped.length ? keywordBranches(mapped) : null;
+  const byTerms = mapped.length ? keywordBranches(mapped, opts.gather ?? true) : null;
   const topics: NewTopic[] = byTerms ?? [];
   materials.forEach((m, i) => {
     if (byTerms && keywordMapOf(m)) return;

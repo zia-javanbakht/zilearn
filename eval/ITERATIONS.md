@@ -8,3 +8,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 |---|---|---|---|---|
 | 0 | Baseline | 85.01 | 62.12 | |
 | 1 | Box labels (Definition/Theorem/Keypoint names) become key terms, quoted from the box | 85.01 | 64.62 | yes |
+| 2 | More main terms for long documents; offline, a paper's sections gather more than 8 main terms (the AI path groups them itself) | 85.01 | 65.29 | yes |

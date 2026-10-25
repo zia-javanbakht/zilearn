@@ -42,7 +42,7 @@ describe("key terms of a paper", () => {
   it("maps the terms and quotes what the paper says about each, with the section it says it in", () => {
     const map = keywordMap(paper);
     expect(map.length).toBeGreaterThanOrEqual(4);
-    expect(map.length).toBeLessThanOrEqual(7);
+    expect(map.length).toBeLessThanOrEqual(12);
     const all = map.flatMap((n) => [n, ...n.children]);
     expect(all.length).toBeGreaterThanOrEqual(12);
     const text = flat(paper);
