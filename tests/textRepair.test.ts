@@ -49,6 +49,11 @@ describe("repairText", () => {
     expect(fix("The modern view. The modern way. The modern form. A modem.")).toContain("A modem.");
   });
 
+  it("reads an old scan's J and $ for f and fi", () => {
+    const t = "The finite field. A finite field again. Each finite field. The Jinite element and the strain$eld. ModiJed by the modified, modified, modified rule.";
+    expect(fix(t)).toContain("The finite element and the strain field. Modified by");
+  });
+
   it("reports what it fixed", () => {
     const r = repairText("The e ect is di erent.").report;
     expect(r.ligatures).toBe(2);

@@ -52,3 +52,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 41 | A term named like any section merges into that section, wherever the term was placed (no duplicate Stress measures) | 88.88 | 76.52 | yes |
 | 42 | Single word dropped when a third of its uses are inside phrases (was half) | 88.88 | 76.52 | no |
 | 43 | OCR'd section numbers are read as numbers (2.2.I . → 2.2.1., 3. I . → 3.1.) | 89.03 | 76.43 | yes |
+| 44 | OCR's J and $ for the fi ligature are read back (ModiJed → Modified, strain$eld → strain field) | 89.03 | 76.43 | yes |

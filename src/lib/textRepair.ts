@@ -278,6 +278,7 @@ const SHAPES: [RegExp, string][] = [
   [/5/g, "s"],
   // Scans of old journals: "Jinite", "Jield" for "finite", "field"; "Finany" for "Finally".
   [/j/g, "f"],
+  [/j/g, "fi"],
   [/n/g, "ll"],
 ];
 
@@ -298,6 +299,20 @@ function fixOcrShapes(text: string, context: string | undefined, report: RepairR
     }
     if (best) fixes.set(w, best.v);
   }
+  // A dollar sign for the fi ligature ("strain$eld", "$nite"), when that makes a word the text uses.
+  text = text.replace(/([A-Za-z]*)\$([a-z]{2,})\b/g, (all, a: string, b: string) => {
+    const lower = a.toLowerCase();
+    // "strain$eld" is two words run together: "strain field".
+    for (const [head, tail] of [[lower, `fi${b}`], ["", `${lower}fi${b}`]] as const) {
+      if ((counts.get(tail) ?? 0) < 3) continue;
+      if (head && !isWord(head) && (counts.get(head) ?? 0) < 3) continue;
+      report.ocr++;
+      const fixed = head ? `${a} ${tail}` : likeCase(a || "f", tail);
+      note(all, fixed);
+      return fixed;
+    }
+    return all;
+  });
   if (!fixes.size) return text;
   return text.replace(/\b[A-Za-z0-9]+\b/g, (w) => {
     const to = fixes.get(w.toLowerCase());
