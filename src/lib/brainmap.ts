@@ -532,11 +532,13 @@ function afterTitlePage(text: string): string {
   return first > 0 ? text.slice(first) : text;
 }
 
-function firstSentences(text: string, n: number) {
+function firstSentences(text: string, n: number, around = true): string {
   const s = proseLines(text.split("\n"))
+    // An equation stands where it is: the words leading into it ("The trial space is") and on from it ("where S is …") are no sentence without it.
+    .map((l) => (around && /^\s*\$\$/.test(l) ? "\u0001" : l))
     // A figure's labels ("1 2", "Natural / Parent") and a line of symbols say nothing on their own:
     // keep lines of words, list items and headings.
-    .filter((l) => (l.match(/(?:^|\s)[A-Za-z][a-z]{2,}[,.;:)]?(?=\s|$)/g) ?? []).length >= 3 || /^\s*-\s+\S/.test(l) || /^#/.test(l.trim()))
+    .filter((l) => l === "\u0001" || (l.match(/(?:^|\s)[A-Za-z][a-z]{2,}[,.;:)]?(?=\s|$)/g) ?? []).length >= 3 || /^\s*-\s+\S/.test(l) || /^#/.test(l.trim()))
     // A lesson's lists of its terms and formulas ("Key terms: …") are its layout.
     .filter((l) => !/^\s*(key (terms|words)|keywords|formula|procedure)\s*:/i.test(l))
     // A box's label ("Definition 3.1 — Mass of the Cuts (Smith 2002).") names it; its text says what it is.
@@ -545,7 +547,10 @@ function firstSentences(text: string, n: number) {
     .replace(/--- Page \d+ ---/g, " ")
     // Headings (a title, the author line under it) aren't sentences of the text, but they end one.
     .replace(/^\s*#{1,6}\s+.*$/gm, "\u0000")
-    .replace(/^\s*([-*]\s+|slide \d+:\s*)/gim, "");
+    .replace(/^\s*([-*]\s+|slide \d+:\s*)/gim, "")
+    // A sentence broken only at a comma reads on without its equation ("… internal energy U, with e the energy density.").
+    .replace(/((?:[^.!?\u0000\u0001]|[.!?](?!\s+\p{Lu}))*),\s*(?:\u0001\s*)+((?:with|and|so|which|while|giving|i\.e\.)\s(?:[^.!?\u0000\u0001]|[.!?](?!\s|$))*[.!?])/gu, "$1, $2")
+    .replace(/(?:[^.!?\u0000\u0001]|[.!?](?!\s+\p{Lu}))*(?:\u0001\s*)+(?:\p{Ll}(?:[^.!?\u0000\u0001]|[.!?](?!\s|$))*[.!?]*)?/gu, "\u0000");
   // A sentence ends at a stop followed by a space, not at the dot of "3.1" or "e.g.,".
   const parts = s
     .split("\u0000")
@@ -553,6 +558,8 @@ function firstSentences(text: string, n: number) {
     .filter(Boolean)
     .flatMap((x) => x.match(/(?:[^.!?]|[.!?](?=\S))+[.!?]+(?=\s|$)|(?:[^.!?]|[.!?](?=\S))+$/g) ?? [])
     .filter((x) => /\p{L}{3}/u.test(x));
+  // A section that is all equations and their lead-ins is still summed up by them.
+  if (!parts.length && around) return firstSentences(text, n, false);
   return truncate(parts.slice(0, n).map((x) => x.trim()).join(" "), 300);
 }
 
