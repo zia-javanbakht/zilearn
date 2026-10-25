@@ -66,3 +66,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 55 | A sub-term named like a section is that section's node, not a second one | 89.1 | 77.88 | yes |
 | 56 | A term goes to the section whose box defines it (Theorem 2.2 — Divergence Theorem → The Global-to-Local Tools) | 89.1 | 78.21 | yes |
 | 57 | Namesakes match without a leading article (The Closed-System Identity); a merged term's sub-terms stay where it was | 89.1 | 78.19 | yes |
+| 58 | A section holding one term is a branch too (Conservation of Mass, Finite Elements) | 89.1 | 78.96 | yes |
