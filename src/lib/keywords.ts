@@ -51,6 +51,8 @@ interface Sentence {
 /** A box's label: "Definition 1.2 — Referential and Spatial Cuts." names what the box defines. */
 const BOX = /^\s*(definition|theorem|lemma|corollary|proposition|keypoint|key point|example|remark|intuition)\s+[\d.]+\s*[—–-]?\s*((?:[^.()]|\([^)]*\))*?)\s*(\([^)]*\d{4}[^)]*\))?\.(?=\s|$)\s*/i;
 
+const SENTENCE_LIKE = /\b(is|are|was|were|be|been|has|have|had|can|will|we|our|this|these|which|that|it|i\.e|e\.g)\b/i;
+
 /** The name a box label gives, or null when it is only a number or a sentence. */
 function boxName(label: string): string | null {
   // Asides and citations aren't part of the name: "Divergence (Gauss') Theorem", "Jacobian Matrix (Cook et al. 2002)".
@@ -188,6 +190,10 @@ function sentencesOf(text: string): Sentence[] {
     }
     if (cur) units.push(cur);
     for (const u of units) {
+      // A list item that names what it explains ("- Jacobian ratio: the uniformity of …") defines that name.
+      const item = u.match(/^(?:[-*+•·]|\d+[.)])\s+([\p{L}][\p{L}\p{N} ,'’()/‐‑–-]{2,70}?):\s+(\S.*)$/u);
+      const label = item ? boxName(item[1]) : null;
+      if (label && !SENTENCE_LIKE.test(label) && !/\b(of|the|and|to|in|a|an|by|with|for|from|on)$/i.test(label)) boxes.push({ name: label, at: out.length });
       // Superscript citations stick to the stop ("industries.1 However", "et al.15 used").
       const clean = u
         .replace(/([a-z)\]])[.](\d+(?:[,–-]\d+)*)(?=\s+\p{Lu})/gu, "$1.")

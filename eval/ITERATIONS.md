@@ -15,3 +15,5 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 6 | Section titles as candidate key terms (boost 2) | 85.01 | 67.20 | no |
 | 7 | Section titles boost key terms the text uses (x1.5) | 85.01 | 68.02 | no |
 | 8 | Lone adjectives and words mostly used inside longer terms aren't key terms; quiz/exercise sections never gather terms | 85.01 | 68.47 | yes |
+| 9 | A term's note is the first quote no other term's note uses | 85.01 | 68.20 | no |
+| 10 | A list item's label ("- Jacobian ratio: …") is a key term the item defines | 85.01 | 69.01 | yes |
