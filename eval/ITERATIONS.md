@@ -40,3 +40,7 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 29 | A figure caption that names what it shows (Figure 4. Graded mesh: …) is read as a box naming a term | 87.67 | 75.28 | yes |
 | 30 | A longer term isn't dropped for a word that is itself mostly part of phrases (Weibull modulus is kept) | 87.67 | 75.4 | yes |
 | 31 | A single-word term used 6+ times is penalised less (×0.8, was ×0.6): objectivity, delamination | 87.67 | 75.92 | yes |
+| 32 | Single-word penalty ×0.95 at 6+ uses | 87.67 | 75.78 | no |
+| 33 | Single-word penalty eased from 4 uses | 87.67 | 75.92 | no |
+| 34 | Evidence avoids sentences thick with maths symbols | 87.67 | 75.76 | no |
+| 35 | Long sentences are no longer cut into 30-word pieces when they end with a stop, and never inside an equation | 87.67 | 76.11 | yes |

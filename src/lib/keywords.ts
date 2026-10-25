@@ -241,9 +241,11 @@ function sentencesOf(text: string, drills = false): Sentence[] {
       if (box) boxes.push({ name: box, at: out.length });
       if (t.split(" ").length < 3) return;
       // Captions without stops (speech recognition) run on: take them about thirty words at a time.
-      const words = t.split(" ");
-      if (words.length > 70) {
-        for (let k = 0; k < words.length; k += 30) push(words.slice(k, k + 30).join(" "));
+      // A display equation counts as one word and is never cut.
+      const maths: string[] = [];
+      const words = t.replace(/\$\$[\s\S]*?\$\$/g, (m) => `\u0001${maths.push(m) - 1}\u0001`).split(" ");
+      if (words.length > 70 && !/[.!?]["”’)]?$/.test(t)) {
+        for (let k = 0; k < words.length; k += 30) push(words.slice(k, k + 30).join(" ").replace(/\u0001(\d+)\u0001/g, (_, i) => maths[Number(i)]));
         return;
       }
       const opens = boxes.length && boxes[boxes.length - 1].at === out.length ? boxes[boxes.length - 1].name : undefined;
