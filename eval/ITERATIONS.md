@@ -67,3 +67,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 56 | A term goes to the section whose box defines it (Theorem 2.2 — Divergence Theorem → The Global-to-Local Tools) | 89.1 | 78.21 | yes |
 | 57 | Namesakes match without a leading article (The Closed-System Identity); a merged term's sub-terms stay where it was | 89.1 | 78.19 | yes |
 | 58 | A section holding one term is a branch too (Conservation of Mass, Finite Elements) | 89.1 | 78.96 | yes |
+| 59 | OCR's l for a slash between two words is read back (stresslplane → stress/plane) | 89.1 | 78.96 | yes |

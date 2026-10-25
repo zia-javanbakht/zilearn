@@ -304,6 +304,13 @@ function fixOcrShapes(text: string, context: string | undefined, report: RepairR
       }
     }
     if (best) fixes.set(w, best.v);
+    // A slash read as l between two words the text uses ("stresslplane" is "stress/plane").
+    else
+      for (let p = 4; p <= w.length - 4; p++)
+        if (w[p] === "l" && (counts.get(w.slice(0, p)) ?? 0) >= 3 && (counts.get(w.slice(p + 1)) ?? 0) >= 3 && isWord(w.slice(0, p)) && isWord(w.slice(p + 1))) {
+          fixes.set(w, `${w.slice(0, p)}/${w.slice(p + 1)}`);
+          break;
+        }
   }
   // A dollar sign for the fi ligature ("strain$eld", "$nite"), when that makes a word the text uses.
   text = text.replace(/([A-Za-z]*)\$([a-z]{2,})\b/g, (all, a: string, b: string) => {
