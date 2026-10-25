@@ -44,6 +44,9 @@ function lineOf(items: Item[]): PdfLine {
     exp = null;
   };
   // "\u0001" is a minus from a broken symbol font, put back later.
+  const at = new Map<number, number>();
+  for (const it of rest) if (it.str?.trim() && it.transform) at.set(Math.round(it.transform[5]), (at.get(Math.round(it.transform[5])) ?? 0) + it.str.trim().length);
+  const lineBase = at.size ? [...at].sort((a, b) => b[1] - a[1])[0][0] : null;
   const SCRIPT = /^[\p{L}\p{N}+−\-′*/\u0001þ]{1,6}\s?$/u;
   rest.forEach((it, k) => {
     const t = it.str ?? "";
@@ -71,15 +74,17 @@ function lineOf(items: Item[]): PdfLine {
     const prev = [...rest.slice(0, k)].reverse().find((p) => p.str?.trim());
     const before = prev?.str ?? "";
     // Raised against the symbol it follows, not the line: in a stacked fraction the line has no one baseline.
-    const raised = prev?.transform ? y - prev.transform[5] : 0;
+    // After a big bracket (set high, from a symbol font), against the line's baseline: "(σ11/XT)" then "2".
+    const tall = !!prev && /^[\u0010-\u0017]$/.test(before.trim());
+    const raised = tall && lineBase != null ? y - lineBase : prev?.transform ? y - prev.transform[5] : 0;
     const piece = t.trim();
     const smaller = !!prev && h <= 0.85 * sizeOf(prev);
     const isExp =
       h > 0 &&
       raised > 0.25 * h &&
-      raised < 0.8 * h &&
+      raised < (tall ? 2.2 : 0.8) * h &&
       /^[\p{L}\p{N}+−\-′*/]{1,6}\s?$/u.test(t) &&
-      ((/[\u{1d400}-\u{1d7ff}\u0370-\u03ff\u2100-\u214f)\]]$/u.test(before) && /[\d+−\u{1d400}-\u{1d7ff}]/u.test(piece)) ||
+      ((/[\u{1d400}-\u{1d7ff}\u0370-\u03ff\u2100-\u214f)\]\u0011\u0013\u0015]$/u.test(before) && /[\d+−\u{1d400}-\u{1d7ff}]/u.test(piece)) ||
         // Set smaller after a symbol or a capital standing for one (pdfTeX's "F" then "T": Fᵀ; "(QF)" then "T").
         (smaller && /^[\p{L}\p{N}+−′*]{1,4}$/u.test(piece) && /(?:^|[\s(=+−,⋅·])[A-Z]{1,3}\s?$|[)\]\u0370-\u03ff\u{1d400}-\u{1d7ff}]$/u.test(before))) &&
       !(/[)\]]$/.test(before) && /^\d{2,}$/.test(piece));
