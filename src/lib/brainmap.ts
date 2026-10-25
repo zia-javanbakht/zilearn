@@ -556,7 +556,9 @@ function firstSentences(text: string, n: number, around = true): string {
     .replace(/--- Page \d+ ---/g, " ")
     // Headings (a title, the author line under it) aren't sentences of the text, but they end one.
     .replace(/^\s*#{1,6}\s+.*$/gm, "\u0000")
-    .replace(/^\s*([-*]\s+|slide \d+:\s*)/gim, "")
+    // A list item is a sentence of its own, whether or not it ends with a stop.
+    .replace(/^\s*[-*]\s+/gm, "\u0000")
+    .replace(/^\s*slide \d+:\s*/gim, "")
     // A sentence broken only at a comma reads on without its equation ("… internal energy U, with e the energy density.").
     .replace(/((?:[^.!?\u0000\u0001]|[.!?](?!\s+\p{Lu}))*),\s*(?:\u0001\s*)+((?:with|and|so|which|while|giving|i\.e\.)\s(?:[^.!?\u0000\u0001]|[.!?](?!\s|$))*[.!?])/gu, "$1, $2")
     .replace(/(?:[^.!?\u0000\u0001]|[.!?](?!\s+\p{Lu}))*(?:\u0001\s*)+(?:\p{Ll}(?:[^.!?\u0000\u0001]|[.!?](?!\s|$))*[.!?]*)?/gu, "\u0000");
@@ -569,7 +571,7 @@ function firstSentences(text: string, n: number, around = true): string {
     .filter((x) => /\p{L}{3}/u.test(x));
   // A section that is all equations and their lead-ins is still summed up by them.
   if (!parts.length && around) return firstSentences(text, n, false);
-  return truncate(parts.slice(0, n).map((x) => x.trim()).join(" "), 300);
+  return truncate(parts.slice(0, n).map((x) => x.trim().replace(/[\p{L}\p{N})]$/u, "$&.")).join(" "), 300);
 }
 
 export { toFlowchart, toMindmap } from "./mermaid";

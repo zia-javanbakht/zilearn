@@ -96,3 +96,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 85 | A sub-term another section's heading names goes to that section | 89.1 | 80.46 | yes |
 | 86 | A sub-term quoted from a section no term went to goes there | 89.1 | 80.29 | no |
 | 87 | A term's quoted bullet reads as a sentence: capital first, stop at the end | 89.1 | 80.53 | yes |
+| 88 | A section note reads each list item as a sentence of its own | 89.1 | 80.64 | yes |
