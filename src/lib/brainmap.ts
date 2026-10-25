@@ -210,6 +210,9 @@ function groundedTerms(terms: string[], sources: string): string[] {
   return checked.length >= Math.min(3, terms.length) ? checked : terms.map((t) => repairTerm(t, sources)).filter(Boolean).slice(0, 8);
 }
 
+/** Exercises, hints, answers and quizzes: practice on the material, not a part of its content. */
+const DRILL_SECTION = /^((multiple[- ]choice\s+)?(concept\s+)?quiz(zes)?|exercises?|hints?|answers?|questions and answers|answer checks|self[- ]?tests?|review questions|practice (problems|questions)|problems|solutions)\b/i;
+
 const CONTEXT_SECTION = /^(introduction( and motivation)?|motivation|background|conclusions?|concluding remarks|summary( and conclusions?)?|discussion and conclusions?|closing remarks|outlook)$/i;
 
 const keywordMapOf = (m: Material) => (m.digest && (m.digest.basis === "keywords" || m.digest.edited) && m.digest.topics.length ? m.digest : null);
@@ -299,7 +302,7 @@ function sectionGroups(m: Material, terms: string[]): { title: string; summary: 
   const gs: G[] = [];
   for (const s of sections) {
     if ((s.level ?? 1) === 0) continue;
-    if ((s.level ?? 1) <= lvl || !gs.length) gs.push({ title: s.heading, body: s.body, context: CONTEXT_SECTION.test(s.heading) || /^appendix\b/i.test(s.heading) });
+    if ((s.level ?? 1) <= lvl || !gs.length) gs.push({ title: s.heading, body: s.body, context: CONTEXT_SECTION.test(s.heading) || /^appendix\b/i.test(s.heading) || DRILL_SECTION.test(s.heading) });
     else gs[gs.length - 1].body += `\n${s.heading}\n${s.body}`;
   }
   if (gs.length < 2) return null;

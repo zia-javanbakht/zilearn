@@ -425,6 +425,8 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
       }
     return false;
   };
+  const pairs = [...cands.values()].filter((c) => c.count >= 2 && c.key.split(" ").length === 2);
+  const inPhrases = (c: Candidate) => pairs.reduce((n, p) => n + (p.key.split(" ").includes(c.key) ? p.count : 0), 0);
   const scored = [...cands.values()]
     .map((c) => ({ c, form: formOf(c) }))
     .filter(({ c }) => !extended(c))
@@ -433,6 +435,10 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
       // On its own, an everyday word ("strain", "mass") is part of a longer term; a name or a coined word stands alone.
       if (words.length === 1 && c.boost === 1 && (GENERIC.has(words[0]) || everyday(form.toLowerCase()) || words[0].length < 4)) return false;
       if (words.length === 1 && c.boost === 1 && c.count < 4) return false;
+      // A lone adjective ("nonlinear", "tensile", "constitutive") qualifies a term rather than being one.
+      if (words.length === 1 && c.boost === 1 && /(al|ive|ar|ile|ic|ous|ary|ory|able|ible)$/.test(words[0]) && !/^\p{Lu}/u.test(form)) return false;
+      // A word mostly used inside longer terms ("tangent" in "consistent tangent", "tangent stiffness") is those terms.
+      if (words.length === 1 && c.boost === 1 && inPhrases(c) >= 0.5 * c.count) return false;
       // Part of a longer term: nearly always written with the same word before or after it ("element model" after "finite").
       const most = (m: Map<string, number>) => Math.max(0, ...m.values());
       if (c.boost === 1 && c.count >= 2 && Math.max(most(c.prev), most(c.next)) >= 0.7 * c.count) return false;

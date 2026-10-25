@@ -12,3 +12,6 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 3 | Headings run into their paragraph ("Effect of …: ", "2.3.1. Title. Text") start sections | 85.01 | 66.36 | yes |
 | 4 | Lettered appendix headings (A, A.1, B Exercises); exercises, hints and quizzes don't supply key terms; en-dash names (Piola–Kirchhoff) are one word | 85.01 | 67.84 | yes |
 | 5 | Names joined by an en dash match their sentences, so they get notes | 85.01 | 68.18 | yes |
+| 6 | Section titles as candidate key terms (boost 2) | 85.01 | 67.20 | no |
+| 7 | Section titles boost key terms the text uses (x1.5) | 85.01 | 68.02 | no |
+| 8 | Lone adjectives and words mostly used inside longer terms aren't key terms; quiz/exercise sections never gather terms | 85.01 | 68.47 | yes |
