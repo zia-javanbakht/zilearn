@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { aiEnabled, generateStructured } from "./ai";
 import { offlineDigest } from "./digest";
-import { proseLines, studySections, topKeywords, truncate } from "./text";
+import { proseLines, studySections, titleFromFilename, topKeywords, truncate } from "./text";
 import { checkKeywords, repairTerm } from "./textRepair";
 import { clipWords } from "./figure";
 import { headingRepairer } from "./headingRepair";
@@ -293,7 +293,7 @@ export function heuristicTopics(materials: Material[]): NewTopic[] {
     topics.push({
       ref,
       parent_ref: null,
-      title: own && !/\s/.test(m.title) ? clipWords(mend(own), 80) : m.title,
+      title: own && fileNamed(m) ? clipWords(mend(own), 80) : m.title,
       summary: digest?.summary || firstSentences(abstractOf(text) ?? afterTitlePage(text), 2) || `${MATERIAL_KIND_LABELS[m.kind]} for this course.`,
       keywords: digest?.keywords.slice(0, 8) ?? topKeywords(text, 6),
       material_ids: [m.id],
@@ -346,6 +346,17 @@ export function heuristicTopics(materials: Material[]): NewTopic[] {
     }
   });
   return topics;
+}
+
+/**
+ * A title that is only the file's name, and a code-like one ("abs2024", "csd l7", "Thompson nlcm"): the
+ * document's own title says more. A title the student gave the item is kept.
+ */
+function fileNamed(m: Material): boolean {
+  if (!/\s/.test(m.title)) return true;
+  if (!m.filename || titleFromFilename(m.filename) !== m.title) return false;
+  const words = m.title.split(/\s+/);
+  return words.length <= 3 && words.some((w) => /\d/.test(w) || /^[a-z]+$/.test(w));
 }
 
 /** "Representative volume element (RVE)" as a key term: "Representative volume element". */

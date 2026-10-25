@@ -75,6 +75,15 @@ export function truncate(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 1) + "…";
 }
 
+/** "csd_l7.pdf" as a title: "csd l7". */
+export function titleFromFilename(filename: string): string {
+  return filename
+    .replace(/\.[a-z0-9]{1,5}$/i, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Where a topic's note comes from, as the offline brainmap appends it: "… (see “Element quality”)". */
 export const SEE_WHERE = / \(see “[^”]*”\)$/;
 

@@ -164,6 +164,14 @@ function normStart(s: string | null | undefined): string | null {
 export function digestNow(materials: Material[]): Material[] {
   return materials.map((m) => {
     // A digest from before keyword maps (no basis, the AI's too) is remade from key terms; one the student edited stays.
+    if (m.text?.trim() && m.digest?.by === "offline" && m.digest.basis && !m.digest.edited) {
+      // An offline overview is cheap to write again, so one saved by an older version picks up later fixes.
+      const summary = offlineSummary(m.text);
+      if (summary === m.digest.summary) return m;
+      const digest = { ...m.digest, summary };
+      setDigest(m.id, digest);
+      return { ...m, digest };
+    }
     if (!m.text?.trim() || (m.digest && (m.digest.basis || m.digest.edited))) return m;
     const fresh = offlineDigest(m.text);
     // The AI's overview of the item is still good; its old topic list isn't the map.
@@ -254,11 +262,16 @@ function fromKeywords(nodes: KeywordNode[]): Pick<Digest, "topics" | "keywords">
   return { topics, keywords };
 }
 
+/** An item's offline overview: its abstract, or its key sentences. */
+export function offlineSummary(raw: string): string {
+  const text = repairText(raw).text;
+  return abstractSentences(text, 3) ?? keySentences(stripTimestamps(text), 3);
+}
+
 export function offlineDigest(raw: string): Digest {
   // Text saved before extraction repairs existed may still be broken ("e ect"); terms and summary use the repaired form.
   const text = repairText(raw).text;
-  const plain = stripTimestamps(text);
-  const summary = abstractSentences(text, 3) ?? keySentences(plain, 3);
+  const summary = offlineSummary(raw);
   // Key terms first; the map is built from them.
   const nodes = keywordMap(text);
   if (nodes.length >= 2 && nodes.reduce((n, x) => n + 1 + x.children.length, 0) >= 4) return { summary, ...fromKeywords(nodes), by: "offline", basis: "keywords" };
@@ -375,14 +388,21 @@ export function keySentences(raw: string, n: number): string {
     .replace(/^\s*#{1,6}\s+.*$/gm, "")
     .replace(/^\s*([-*+]|\d+[.)])\s+/gm, "")
     .trim();
-  const sentences = (text.replace(/\s+/g, " ").match(/[^.!?]+[.!?]+/g) ?? [text])
-    .map((s) => s.trim())
+  // A box's label ("Definition 3.1 — Mass of the Cuts.") names the box; and "3.1" or "e.g." doesn't end a sentence.
+  const sentences = (text.replace(/\s+/g, " ").match(/(?:[^.!?]|[.!?](?=\S))+[.!?]+(?=\s|$)/g) ?? [text])
+    // An equation's number left over from the line before ("(3) ...") and a box's label are not part of it.
+    .map((s) => s.trim().replace(/^\(\d+\)\s*/, "").replace(/^\p{Lu}[\p{Lu}\s]{3,}\s(?=\p{Lu}\p{Ll})/u, "").replace(/^(definition|theorem|lemma|corollary|proposition|keypoint|key point|example|remark)\s+[\d.]+\s*[—–-]\s*[^.]{1,120}?\.(\s+|$)/i, ""))
     .filter((s) => s.split(" ").length >= 6 && s.length <= 400 && !isGarbled(s));
   if (!sentences.length) return truncate(text.replace(/\s+/g, " ").trim(), 300);
   const weight = new Map(topKeywords(text, 25).map((w, i) => [stem(w), 25 - i]));
   const scored = sentences.map((s, i) => {
     const words = (s.toLowerCase().match(/[a-z][a-z0-9\-]+/g) ?? []).map(stem);
-    const score = words.reduce((sum, w) => sum + (weight.get(w) ?? 0), 0) / Math.sqrt(words.length || 1);
+    // An overview is prose: a sentence that is mostly symbols ("E = 1 2 ( Grad u + ...") explains less, and a
+    // document says what it is about near its start.
+    const tokens = s.split(/\s+/);
+    const prose = tokens.filter((t) => /^[(“"]?\p{Ll}[\p{Ll}’'-]{2,}[)”",.;:]?$/u.test(t) || /^\p{Lu}\p{Ll}{2,}[,.;:]?$/u.test(t)).length / tokens.length;
+    const early = i < 8 ? 1.4 : 1;
+    const score = (words.reduce((sum, w) => sum + (weight.get(w) ?? 0), 0) / Math.sqrt(words.length || 1)) * prose * prose * early;
     return { s, i, score };
   });
   const seen = new Set<string>();
