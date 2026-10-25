@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { markDisplayMaths } from "./mathLines";
 import { aiEnabled, generateText, providerName } from "./ai";
 import { findScannedPages, ocrLayerPages, pageList } from "./ocr";
 import { fixMathGlyphs, isPoor, mathsHeavy, OCR_PRODUCER, pageQuality, pagesFromLines, pdfLines, wordCounts, type GlyphReport } from "./pdfText";
@@ -94,7 +95,7 @@ async function extractPdf(buf: Buffer): Promise<Extracted> {
   if (aiEnabled() && reread.length && buf.length < 30 * 1024 * 1024) {
     const read = await transcribePages(buf, reread);
     if (read.size) {
-      const all = pages.map((p, i) => read.get(i + 1) ?? p);
+      const all = pages.map((p, i) => read.get(i + 1) ?? markDisplayMaths(p));
       const missed = reread.filter((n) => !read.has(n));
       const unreadScans = scan.pages.filter((n) => !read.has(n));
       const by = providerName();
@@ -122,7 +123,8 @@ async function extractPdf(buf: Buffer): Promise<Extracted> {
   else if (maths.length >= 2) notes.push(`Equations on pages ${pageList(maths)} lose their layout in the PDF's text. ${aiEnabled() ? `“Read again” asks ${providerName()} to write them out as LaTeX.` : "With an AI provider (Settings), “Read again” writes them out as LaTeX."}`);
   if (fixes) notes.push(fixes);
   const textPages = raw.length - scan.pages.length;
-  const t = repaired.replace(/^--- Page \d+ ---$/gm, "").trim() ? repaired : "";
+  // Display equations marked as maths, so they aren't read as sentences.
+  const t = repaired.replace(/^--- Page \d+ ---$/gm, "").trim() ? markDisplayMaths(repaired) : "";
   return {
     text: t,
     // A few pictured pages in a long document still leave plenty to study from.

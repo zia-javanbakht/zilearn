@@ -200,14 +200,18 @@ function sentencesOf(text: string): Sentence[] {
         .replace(/\bet al\.\s?\d+(?:[,–-]\d+)*/g, "et al.")
         .replace(/^[-*+•·]\s+/, "")
         .replace(/^(abstract|summary)[.:]?\s+(?=\p{Lu})/iu, "");
+      // A display equation is part of the sentence that leads into it, and the sentence ends with it.
+      const maths: string[] = [];
+      const held = clean.replace(/\$\$[\s\S]*?\$\$/g, (m) => `\u0001${maths.push(m) - 1}\u0001`).replace(/(\u0001\d+\u0001)\s+(?=\p{Lu}\p{Ll})/gu, "$1\u0002");
+      const back = (x: string) => x.replace(/\u0001(\d+)\u0001/g, (_, k) => maths[Number(k)]);
       let piece = "";
-      for (const tok of clean.split(/(?<=[.!?])\s+/)) {
+      for (const tok of held.split(/(?<=[.!?])\s+|\u0002/)) {
         piece += (piece ? " " : "") + tok;
         if (ABBREV.test(piece) || /\b\p{Lu}\.$/u.test(piece)) continue;
-        push(piece);
+        push(back(piece));
         piece = "";
       }
-      if (piece) push(piece);
+      if (piece) push(back(piece));
     }
     function push(s: string) {
       const stamp = s.match(STAMP)?.[1];
