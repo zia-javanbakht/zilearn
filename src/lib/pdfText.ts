@@ -405,7 +405,7 @@ export function shatteredMatrices(lines: string[], page: number): string[] {
  */
 export function figureLabels(lines: string[], page: number): string[] {
   const words = (l: string) => (l.match(/[A-Za-z]{2,}/g) ?? []).length;
-  const label = (l: string) => l.trim() !== "" && !/^\s*(#|- |\d+\.\s|\[matrix)/.test(l) && !/[.;:]$/.test(l.trim()) && words(l) <= 5;
+  const label = (l: string) => l.trim() !== "" && !/^\s*(#|- |\d+\.\s|\[matrix)/.test(l) && !/[.;:]$/.test(l.trim()) && (words(l) <= 5 || (l.trim().length <= 50 && words(l) <= 7));
   const out = [...lines];
   for (let i = out.length - 1; i > 0; i--) {
     if (!/^\s*(Figure|Fig\.)\s*\d+[.:]/.test(out[i])) continue;

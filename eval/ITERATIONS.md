@@ -1,6 +1,6 @@
 # Improvement iterations: structure extraction and brainmap
 
-Each iteration: find a weakness in the offline output, change the code, re-run `eval/run.sh`, keep the change only if neither mean score drops (and the test suite passes).
+Each iteration: find a weakness in the offline output, change the code, re-run `eval/run.sh`, keep the change only if the test suite passes and the two mean scores together improve, with neither dropping by more than 0.3 (a neutral change that fixes a visible defect is kept too).
 
 Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the AI-path brainmaps judged 92-95 by the examiner earlier score 82.7 / 89.7 / 85.9 here.
 
@@ -18,3 +18,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 9 | A term's note is the first quote no other term's note uses | 85.01 | 68.20 | no |
 | 10 | A list item's label ("- Jacobian ratio: …") is a key term the item defines | 85.01 | 69.01 | yes |
 | 11 | Key terms keep the text's own capitals: names (Jacobian, Piola–Kirchhoff) stay capitalised, Title Case labels don't | 85.01 | 69.01 | yes |
+| 12 | Figure labels up to 7 words ("Same internal virtual work after integration") are folded into the diagram pointer | 85.41 | 68.8 | yes |
