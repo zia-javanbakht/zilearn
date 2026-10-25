@@ -12,6 +12,7 @@ import { NotesTab } from "./NotesTab";
 import { FlashcardsTab } from "./FlashcardsTab";
 import { PodcastsTab } from "./PodcastsTab";
 import { SettingsTab } from "./SettingsTab";
+import { AskTab } from "./AskTab";
 
 export interface CourseData {
   course: Course;
@@ -23,6 +24,7 @@ export interface CourseData {
 const TABS = [
   ["materials", "Materials"],
   ["brainmap", "Brainmap"],
+  ["ask", "Ask"],
   ["plan", "Study plan"],
   ["cards", "Flashcards"],
   ["exams", "Mock exams"],
@@ -31,7 +33,7 @@ const TABS = [
   ["settings", "Settings"],
 ] as const;
 type Tab = (typeof TABS)[number][0];
-const KEEP: Tab[] = ["materials", "cards", "exams", "notes", "podcasts"];
+const KEEP: Tab[] = ["materials", "ask", "cards", "exams", "notes", "podcasts"];
 
 export function CourseWorkspace({ id }: { id: string }) {
   const [data, setData] = useState<CourseData | null>(null);
@@ -107,6 +109,11 @@ export function CourseWorkspace({ id }: { id: string }) {
         </div>
       )}
       {tab === "brainmap" && <BrainmapTab data={data} reload={reload} onPlan={() => go("plan")} />}
+      {(tab === "ask" || kept.has("ask")) && (
+        <div hidden={tab !== "ask"}>
+          <AskTab data={data} />
+        </div>
+      )}
       {tab === "plan" && <PlanTab data={data} reload={reload} go={go} />}
       {(tab === "cards" || kept.has("cards")) && (
         <div hidden={tab !== "cards"}>

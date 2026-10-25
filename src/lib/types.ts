@@ -254,7 +254,12 @@ export interface Card {
   front: string;
   back: string;
   source: "generated" | "exam" | "manual";
-  ease: number;
+  /** basic: question and answer; cloze: the front holds {{cN::...}} deletions and `ord` says which this card asks; label: a diagram with a box to name. */
+  kind: "basic" | "cloze" | "label";
+  ord: number;
+  ease: number; // SM-2 ease from before FSRS; kept for old exports, no longer used
+  stability: number | null; // FSRS, see srs.ts
+  difficulty: number | null;
   interval: number;
   reps: number;
   lapses: number;

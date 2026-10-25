@@ -1,12 +1,25 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import "katex/dist/katex.min.css";
 import "./globals.css";
 import { AiBadge } from "@/components/AiBadge";
+import { InstallApp } from "@/components/InstallApp";
 
 export const metadata: Metadata = {
   title: "ziLearn",
   description: "Your study suite: brainmaps, progressive study plans, knowledge base, mock exams, review notes and podcasts.",
+  appleWebApp: { capable: true, title: "ziLearn", statusBarStyle: "default" },
+  icons: { icon: "/icon-192.png", apple: "/apple-touch-icon.png" },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#161b2e" },
+  ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -25,6 +38,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <AiBadge />
         </header>
         <main>{children}</main>
+        <InstallApp />
       </body>
     </html>
   );

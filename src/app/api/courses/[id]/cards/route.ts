@@ -1,4 +1,5 @@
 import { generateCards, parseScope } from "@/lib/generate";
+import { hasCloze } from "@/lib/cloze";
 import { addCards, cardStats, dueCards, getCourse, listCards } from "@/lib/store";
 import { CardsInput } from "@/lib/validate";
 import { body, fail, handle, ok, todayFrom, type Ctx } from "@/lib/http";
@@ -15,7 +16,7 @@ export const GET = handle(async (req: Request, { params }: Ctx<{ id: string }>) 
   return ok({ stats: cardStats(id, today), cards: q.get("due") ? dueCards(id, today) : listCards(id) });
 });
 
-/** Generate cards for a scope, or add one card written by the student ({front, back}). */
+/** Generate cards for a scope, or add one card written by the student ({front, back}; a front with {{c1::...}} is a cloze card). */
 export const POST = handle(async (req: Request, { params }: Ctx<{ id: string }>) => {
   const { id } = await params;
   if (!getCourse(id)) return fail("Course not found", 404);
@@ -23,8 +24,9 @@ export const POST = handle(async (req: Request, { params }: Ctx<{ id: string }>)
   let added: number;
   let by: string = "student";
   if (typeof b.front === "string" || typeof b.back === "string") {
-    if (!b.front?.trim() || !b.back?.trim()) return fail("A card needs a front and a back.");
-    added = addCards(id, [{ front: b.front.slice(0, 4000), back: b.back.slice(0, 8000), topic_id: b.topic_id ?? null }], "manual", "student");
+    const cloze = hasCloze(b.front ?? "");
+    if (!b.front?.trim() || (!cloze && !b.back?.trim())) return fail("A card needs a front and a back.");
+    added = addCards(id, [{ front: b.front.slice(0, 4000), back: (b.back ?? "").slice(0, 8000), topic_id: b.topic_id ?? null }], "manual", "student");
     if (!added) return fail("You already have a card with that front.");
   } else {
     const out = await generateCards(id, parseScope(b.scope), CardsInput.parse(b).count);

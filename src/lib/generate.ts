@@ -15,6 +15,8 @@ import {
   type TopicNode,
 } from "./types";
 import { db, newId } from "./db";
+import { clozeAnswer, hasCloze } from "./cloze";
+import type { NewCard } from "./store";
 
 /* ---------------- Scope ---------------- */
 
@@ -536,11 +538,14 @@ const CardSchema = z.object({
   cards: z.array(
     z.object({
       topic: z.string().describe("Title of the topic the card tests, copied from the outline"),
-      front: z.string().describe("Question or cue, one idea per card, Markdown"),
-      back: z.string().describe("Short answer, 1-3 sentences or a formula, Markdown"),
+      kind: z.enum(["basic", "cloze"]).describe("basic: a question and its answer; cloze: a sentence with {{c1::...}} gaps"),
+      front: z.string().describe("basic: question or cue, one idea per card, Markdown. cloze: one sentence from the material with the key term(s) as {{c1::term}}"),
+      back: z.string().describe("basic: short answer, 1-3 sentences or a formula, Markdown. cloze: optional extra note, may be empty"),
     }),
   ),
 });
+
+type GeneratedCard = NewCard;
 
 export async function generateCards(courseId: string, scope: Scope, count: number) {
   const ctx = resolveScope(courseId, scope);
@@ -570,12 +575,16 @@ Good flashcards:
 - Fronts are specific questions that have one right answer ("Why does X need Y?", "What is the formula for Z?"), not "Explain X".
 - Mix recall of definitions with "why" and "when would you use" cards, and a few that contrast easily confused ideas.
 - Backs are short: the answer first, then at most one sentence of explanation. Use LaTeX ($...$) for maths.
+- About a quarter of the cards are cloze cards (kind "cloze"): a key sentence or formula from the material with the term to recall written {{c1::term}}. Gap only what is worth recalling; a second gap in the same sentence ({{c2::...}}) becomes a separate card. Inside maths, gap a whole symbol or sub-expression: $E = {{c1::mc^2}}$.
 - Spend more cards on topics the student doesn't know yet; cover every topic in scope at least once if the count allows.`,
     });
-    return {
-      cards: out.cards.map((c) => ({ front: c.front, back: c.back, topic_id: topicOf(c.topic)?.id ?? null })),
-      by: "claude" as const,
-    };
+    const written: GeneratedCard[] = out.cards.map((c) => ({
+      front: c.front,
+      back: c.back,
+      topic_id: topicOf(c.topic)?.id ?? null,
+      kind: c.kind === "cloze" && hasCloze(c.front) ? "cloze" : "basic",
+    }));
+    return { cards: [...written, ...labelCards(ctx.nodes, Math.round(n * 0.15))], by: "claude" as const };
   }
 
   // Offline: cards from what the materials state about each topic (its definitions and formulas), weak
@@ -585,24 +594,52 @@ Good flashcards:
   const terms = pool.filter((t) => !documents.has(t.id));
   const order = [...(terms.length ? terms : pool)].sort((a, b) => WEIGHT[b.effective_mastery ?? "dont_know"] - WEIGHT[a.effective_mastery ?? "dont_know"]);
   const decks = order.map((t) => offlineCards(courseId, t));
-  const cards: { front: string; back: string; topic_id: string | null }[] = [];
+  // Some of the deck asks to name a box in a diagram of the course's structure.
+  const labels = labelCards(ctx.nodes, Math.round(n * 0.15));
+  const cards: GeneratedCard[] = [];
   // A parent's key term is often a subtopic too: the same answer is one card.
   const answers = new Set<string>();
   for (let i = 0; cards.length < n && decks.some((d) => d.length > i); i++)
     for (const d of decks) {
-      const key = d[i]?.back.split("\n\n")[0].toLowerCase().replace(/\W+/g, "");
-      if (!d[i] || cards.length >= n || answers.has(key!)) continue;
-      answers.add(key!);
+      if (!d[i] || cards.length >= n - labels.length) continue;
+      const key = (d[i].kind === "cloze" ? clozeAnswer(d[i].front, 1) : d[i].back.split("\n\n")[0]).toLowerCase().replace(/\W+/g, "");
+      if (answers.has(key)) continue;
+      answers.add(key);
       cards.push(d[i]);
     }
-  return { cards, by: "heuristic" as const };
+  return { cards: [...cards, ...labels], by: "heuristic" as const };
+}
+
+/**
+ * "Name the missing box" cards from the brainmap: a branch drawn with its subtopics, one of them hidden.
+ * Branches with three to eight short subtopics make good diagrams; each gives up to two cards.
+ */
+export function labelCards(nodes: TopicNode[], max: number): GeneratedCard[] {
+  const out: GeneratedCard[] = [];
+  const label = (t: string) => t.replace(/["\[\]{}<>|]/g, "'");
+  const branches = nodes.filter((p) => p.children.length >= 3 && p.children.length <= 8 && p.children.every((c) => c.title.length <= 48));
+  for (let round = 0; round < 2 && out.length < max; round++)
+    for (const p of branches) {
+      if (out.length >= max) break;
+      // Hide a different subtopic each round, spread through the branch.
+      const hidden = p.children[(round * Math.ceil(p.children.length / 2) + p.title.length) % p.children.length];
+      const lines = ["flowchart TD", `  p["${label(p.title)}"]`, ...p.children.map((c, i) => `  p --> c${i}["${c.id === hidden.id ? "?" : label(c.title)}"]`)];
+      const summary = plainSummary(hidden.summary);
+      out.push({
+        kind: "label",
+        front: `Name the missing box under **${p.title}**:\n\n\`\`\`mermaid\n${lines.join("\n")}\n\`\`\``,
+        back: `**${hidden.title}**${summary ? `\n\n${summary}` : ""}`,
+        topic_id: hidden.id,
+      });
+    }
+  return out;
 }
 
 /** One topic's offline cards: a card per definition, a "complete the formula" card per equation, else its summary. */
-export function offlineCards(courseId: string, t: TopicNode): { front: string; back: string; topic_id: string }[] {
+export function offlineCards(courseId: string, t: TopicNode): (GeneratedCard & { topic_id: string })[] {
   const facts = topicFacts(t.title, t.keywords, sourcesFor(courseId, `${t.title} ${t.keywords.join(" ")}`, 12000, t.material_ids));
   const from = (source: string) => `\n\n*From ${source}*`;
-  const out: { front: string; back: string; topic_id: string }[] = [];
+  const out: (GeneratedCard & { topic_id: string })[] = [];
   for (const d of facts.definitions.slice(0, 3))
     out.push({
       front: d.term === t.title ? `What is **${d.term}**?` : `In ${t.title}, what is **${d.term}**?`,
@@ -625,21 +662,26 @@ export function offlineCards(courseId: string, t: TopicNode): { front: string; b
   const summary = plainSummary(t.summary);
   for (const text of [summary, ...facts.statements.map((x) => x.text)]) {
     if (out.length >= 2) break;
-    const gap = cloze(text, t.title);
-    if (gap) out.push({ front: `Which term fills the gap?\n\n> ${gap}`, back: `**${t.title}**\n\n${text}`, topic_id: t.id });
+    // A sentence the materials say about the term, with the term as a cloze deletion.
+    const gap = cloze(text, t.title, (m) => `{{c1::${m}}}`);
+    if (gap) out.push({ kind: "cloze", front: gap, back: `*${t.title}*`, topic_id: t.id });
   }
   if (!out.length && summary) out.push({ front: `What is **${t.title}** about?`, back: summary, topic_id: t.id });
   return out;
 }
 
-/** The text with a term (or its plural) replaced by one gap, or null when too little is left to go on. */
-export function cloze(text: string, term: string): string | null {
+/**
+ * The text with a term (or its plural) replaced by a gap ("_____", or what `mark` makes of the words
+ * it replaces), or null when too little is left to go on.
+ */
+export function cloze(text: string, term: string, mark?: (found: string) => string): string | null {
   const esc = term.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "[\\s-]+");
   const re = new RegExp(`(?<![\\p{L}])${esc}(?:e?s)?(?![\\p{L}])`, "giu");
   if (!re.test(text)) return null;
   const gapped = text.replace(re, "_____");
   // The gap must leave enough words around it to work the term out from.
-  return gapped.split(/\s+/).filter((w) => /\p{L}{2}/u.test(w) && !w.includes("_____")).length >= 6 ? gapped : null;
+  if (gapped.split(/\s+/).filter((w) => /\p{L}{2}/u.test(w) && !w.includes("_____")).length < 6) return null;
+  return mark ? text.replace(re, mark) : gapped;
 }
 
 /** Flashcards from the questions a student got wrong or only partly right in a graded exam. */

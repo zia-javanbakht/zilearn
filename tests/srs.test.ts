@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { NEW_CARD, nextDueIn, review } from "@/lib/srs";
+import { cardState, elapsedDays, fromSm2, NEW_CARD, nextDueIn, preview, retrievability, review } from "@/lib/srs";
 import { openDb, setDb } from "@/lib/db";
 import { addCards, cardStats, createCourse, dueCards, replaceTopics, reviewCard, updateCourse } from "@/lib/store";
 import { cardsFromMistakes, generateCards } from "@/lib/generate";
@@ -9,32 +9,90 @@ delete process.env.ANTHROPIC_AUTH_TOKEN;
 delete process.env.GEMINI_API_KEY;
 delete process.env.GOOGLE_API_KEY;
 
-describe("spaced repetition schedule", () => {
-  it("grows intervals with Good and resets on Again", () => {
+describe("FSRS schedule", () => {
+  it("grows intervals with Good, by more each time, and starts over on Again", () => {
     let s = NEW_CARD;
     const intervals: number[] = [];
-    for (let i = 0; i < 5; i++) intervals.push((s = review(s, 3)).interval);
-    expect(intervals.slice(0, 3)).toEqual([1, 3, 8]);
-    expect(intervals[4]).toBeGreaterThan(intervals[3]);
-    const lapsed = review(s, 1);
+    // Each review on the day it falls due.
+    for (let i = 0; i < 5; i++) intervals.push((s = review(s, 3, s.interval)).interval);
+    expect(intervals[0]).toBe(3); // FSRS-5's first Good
+    for (let i = 1; i < 5; i++) expect(intervals[i]).toBeGreaterThan(intervals[i - 1] * 1.5);
+    const lapsed = review(s, 1, s.interval);
     expect(lapsed).toMatchObject({ interval: 0, reps: 0, lapses: 1 });
-    expect(lapsed.ease).toBeCloseTo(2.3);
+    expect(lapsed.stability).toBeLessThan(s.stability);
+    expect(lapsed.difficulty).toBeGreaterThan(s.difficulty);
   });
 
-  it("orders the buttons Hard < Good < Easy and keeps ease at least 1.3", () => {
-    const s = { ease: 2.5, interval: 10, reps: 3, lapses: 0 };
-    const [h, g, e] = [2, 3, 4].map((r) => review(s, r as 2 | 3 | 4).interval);
+  it("orders the buttons Hard < Good < Easy and keeps difficulty within 1-10", () => {
+    const s = { stability: 10, difficulty: 5, interval: 10, reps: 3, lapses: 0 };
+    const [a, h, g, e] = preview(s, 10).map((x) => x.interval);
+    expect(a).toBe(0);
     expect(h).toBeLessThan(g);
     expect(g).toBeLessThan(e);
-    let low = s;
-    for (let i = 0; i < 20; i++) low = review(low, 2);
-    expect(low.ease).toBe(1.3);
+    let hard = s;
+    for (let i = 0; i < 30; i++) hard = review(hard, 1, 1);
+    expect(hard.difficulty).toBeLessThanOrEqual(10);
+    let easy = s;
+    for (let i = 0; i < 30; i++) easy = review(easy, 4, easy.interval);
+    expect(easy.difficulty).toBeGreaterThanOrEqual(1);
+    expect(easy.interval).toBeLessThanOrEqual(365);
+  });
+
+  it("relearns a forgotten card on the same day with the short-term formula", () => {
+    const forgot = review(NEW_CARD, 1, 0);
+    expect(forgot.interval).toBe(0);
+    const again = review(forgot, 3, 0);
+    // A day or two: Hard gets the 1-day minimum and Good must give more.
+    expect([1, 2]).toContain(again.interval);
+    expect(again.stability).toBeGreaterThan(forgot.stability);
+  });
+
+  it("is 90% sure of recall after `stability` days", () => {
+    expect(retrievability(7, 7)).toBeCloseTo(0.9, 5);
+    expect(retrievability(0, 7)).toBe(1);
+  });
+
+  it("converts SM-2 cards: interval becomes stability, ease becomes difficulty", () => {
+    expect(fromSm2(2.5, 20)).toEqual({ stability: 20, difficulty: 5 });
+    expect(fromSm2(1.3, 3).difficulty).toBe(10);
+    expect(fromSm2(3.3, 3).difficulty).toBe(1);
+    expect(fromSm2(2.5, 0).stability).toBeGreaterThan(0);
+    // A stored SM-2 card without FSRS fields still schedules.
+    const st = cardState({ ease: 2.1, interval: 12, reps: 4, lapses: 1, due: "2026-10-20", last_review: "2026-10-08", stability: null, difficulty: null });
+    expect(st.stability).toBe(12);
+    expect(elapsedDays({ interval: 12, reps: 4, lapses: 1, due: "2026-10-20", last_review: "2026-10-08", stability: 12, difficulty: 5 }, "2026-10-20")).toBe(12);
   });
 
   it("brings cards back before the exam", () => {
-    expect(nextDueIn({ ease: 2.5, interval: 30, reps: 4, lapses: 0 }, 10)).toBe(9);
-    expect(nextDueIn({ ease: 2.5, interval: 5, reps: 4, lapses: 0 }, 10)).toBe(5);
-    expect(nextDueIn({ ease: 2.5, interval: 30, reps: 4, lapses: 0 }, null)).toBe(30);
+    const s = (interval: number) => ({ stability: interval, difficulty: 5, interval, reps: 4, lapses: 0 });
+    expect(nextDueIn(s(30), 10)).toBe(9);
+    expect(nextDueIn(s(5), 10)).toBe(5);
+    expect(nextDueIn(s(30), null)).toBe(30);
+  });
+});
+
+describe("moving an SM-2 database to FSRS", () => {
+  it("gives reviewed cards a memory state once, and leaves new cards new", async () => {
+    const Database = (await import("better-sqlite3")).default;
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "zl-")), "old.db");
+    // An old database: cards with SM-2 fields only.
+    const old = new Database(file);
+    old.exec(`CREATE TABLE courses (id TEXT PRIMARY KEY, name TEXT NOT NULL, code TEXT, description TEXT, exam_date TEXT, target_level INTEGER NOT NULL DEFAULT 3, hours_per_day REAL NOT NULL DEFAULT 2, summary TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
+      CREATE TABLE cards (id TEXT PRIMARY KEY, course_id TEXT NOT NULL, topic_id TEXT, front TEXT NOT NULL, back TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'generated', ease REAL NOT NULL DEFAULT 2.5, interval INTEGER NOT NULL DEFAULT 0, reps INTEGER NOT NULL DEFAULT 0, lapses INTEGER NOT NULL DEFAULT 0, due TEXT, last_review TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), generated_by TEXT NOT NULL);
+      INSERT INTO courses (id, name) VALUES ('c', 'C');
+      INSERT INTO cards (id, course_id, front, back, ease, interval, reps, due, last_review, generated_by) VALUES ('a', 'c', 'Q1', 'A1', 2.5, 20, 3, '2026-11-01', '2026-10-12', 'student');
+      INSERT INTO cards (id, course_id, front, back, generated_by) VALUES ('b', 'c', 'Q2', 'A2', 'student');`);
+    old.close();
+    const d = openDb(file);
+    const rows = d.prepare("SELECT id, stability, difficulty, kind, ord FROM cards ORDER BY id").all();
+    expect(rows).toEqual([
+      { id: "a", stability: 20, difficulty: 5, kind: "basic", ord: 0 },
+      { id: "b", stability: null, difficulty: null, kind: "basic", ord: 0 },
+    ]);
+    d.close();
   });
 });
 
@@ -66,7 +124,9 @@ describe("flashcard store", () => {
     const again = reviewCard(second.id, 1, today)!;
     expect(again.due).toBe(today);
     expect(cardStats(c.id, today)).toEqual({ total: 2, due: 1, fresh: 0, learned: 1 });
-    expect(dueCards(c.id, "2026-10-12").map((x) => x.id).sort()).toEqual([first.id, second.id].sort());
+    // Good on a new card is three days under FSRS.
+    expect(dueCards(c.id, "2026-10-12").map((x) => x.id)).toEqual([second.id]);
+    expect(dueCards(c.id, "2026-10-14").map((x) => x.id).sort()).toEqual([first.id, second.id].sort());
   });
 
   it("caps the next review before the exam date", () => {
@@ -74,7 +134,7 @@ describe("flashcard store", () => {
     updateCourse(c.id, { exam_date: "2026-10-14" });
     addCards(c.id, [{ front: "Q", back: "A", topic_id: null }], "manual", "student");
     const [card] = dueCards(c.id, "2026-10-11");
-    const r = reviewCard(card.id, 4, "2026-10-11")!; // Easy on a new card is 4 days, past the exam
+    const r = reviewCard(card.id, 4, "2026-10-11")!; // Easy on a new card is 16 days, past the exam
     expect(r.due).toBe("2026-10-13");
   });
 
@@ -112,6 +172,6 @@ describe("undoing a review", () => {
     const after = reviewCard(before.id, 1, "2026-10-25")!;
     expect(after.due).not.toBeNull();
     const back = restoreCard(before.id, before)!;
-    expect([back.due, back.reps, back.lapses, back.ease, back.interval]).toEqual([before.due, before.reps, before.lapses, before.ease, before.interval]);
+    expect([back.due, back.reps, back.lapses, back.stability, back.difficulty, back.interval]).toEqual([before.due, before.reps, before.lapses, before.stability, before.difficulty, before.interval]);
   });
 });

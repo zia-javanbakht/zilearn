@@ -5,7 +5,9 @@ import { api, localToday } from "../api";
 import { Markdown } from "../Markdown";
 import { Busy } from "../Busy";
 import { ScopePicker, type ScopeValue } from "./ScopePicker";
-import { describeInterval, nextDueIn, NEW_CARD, RATING_LABELS, review, type Rating } from "@/lib/srs";
+import { cardState, daysBetween, describeInterval, elapsedDays, nextDueIn, preview, RATING_LABELS, type Rating } from "@/lib/srs";
+import { cardFront, cardSummary, topicGivesAway } from "@/lib/cardView";
+import { Learn } from "./LearnMode";
 import type { Card, CardStats } from "@/lib/types";
 import type { CourseData } from "./CourseWorkspace";
 
@@ -19,6 +21,8 @@ export function FlashcardsTab({ data, active }: { data: CourseData; active: bool
   const [stats, setStats] = useState<CardStats | null>(null);
   const [cards, setCards] = useState<Card[] | null>(null);
   const [queue, setQueue] = useState<Card[] | null>(null);
+  const [learning, setLearning] = useState<Card[] | null>(null);
+  const [learnTopic, setLearnTopic] = useState("");
   const [scope, setScope] = useState<ScopeValue>({ kind: "course" });
   const [count, setCount] = useState(20);
   const [busy, setBusy] = useState(false);
@@ -63,6 +67,11 @@ export function FlashcardsTab({ data, active }: { data: CourseData; active: bool
   }
 
   if (queue) return <Review queue={queue} examDate={data.course.exam_date} onDone={() => (setQueue(null), load())} />;
+  if (learning) return <Learn cards={learning} onDone={() => setLearning(null)} />;
+
+  // Learn mode works on one topic's cards (with its subtopics') or on the whole deck.
+  const topicsWithCards = [...new Map((cards ?? []).filter((c) => c.topic_id && c.topic_title).map((c) => [c.topic_id!, c.topic_title!])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  const learnSet = (cards ?? []).filter((c) => !learnTopic || c.topic_id === learnTopic);
 
   const ready = (stats?.due ?? 0) + Math.min(20, stats?.fresh ?? 0);
   return (
@@ -75,19 +84,48 @@ export function FlashcardsTab({ data, active }: { data: CourseData; active: bool
               Spaced repetition: each card comes back just before you would forget it, and every card is seen again before your exam.
             </p>
           </div>
-          <button className="primary" disabled={!ready} onClick={startReview}>
-            {ready ? `Review now (${ready})` : "Nothing due today"}
-          </button>
+          <div className="row">
+            {cards && cards.length > 0 && <CardExport courseId={id} />}
+            <button className="primary" disabled={!ready} onClick={startReview}>
+              {ready ? `Review now (${ready})` : "Nothing due today"}
+            </button>
+          </div>
         </div>
         {stats && stats.total > 0 && (
           <div className="row small">
             <span className="badge dont_know">{stats.due} due</span>
             <span className="badge">{stats.fresh} new</span>
             <span className="badge know">{stats.learned} learned</span>
-            <span className="muted">{stats.total} cards. Up to 20 new cards are introduced per day.</span>
+            <span className="muted">{stats.total} cards. Up to 20 new cards are introduced per day; FSRS times each review.</span>
           </div>
         )}
       </div>
+
+      {cards && cards.length >= 4 && (
+        <div className="card stack">
+          <div className="spread">
+            <div>
+              <h3 style={{ margin: 0 }}>Learn</h3>
+              <p className="small muted" style={{ margin: "4px 0 0" }}>
+                Cram a set of cards until you know every one: multiple choice first, then typing the answer. It doesn&apos;t change your review schedule.
+              </p>
+            </div>
+            <div className="row">
+              <select aria-label="Cards to learn" value={learnTopic} onChange={(e) => setLearnTopic(e.target.value)} style={{ maxWidth: 260 }}>
+                <option value="">All cards ({cards.length})</option>
+                {topicsWithCards.map(([tid, title]) => (
+                  <option key={tid} value={tid}>
+                    {title} ({cards.filter((c) => c.topic_id === tid).length})
+                  </option>
+                ))}
+              </select>
+              <button className="primary" disabled={learnSet.length < 2} onClick={() => setLearning(learnSet)}>
+                Start Learn
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="card stack">
         <h3 style={{ margin: 0 }}>Make cards</h3>
@@ -119,6 +157,7 @@ function AddCard({ courseId, onAdded }: { courseId: string; onAdded: () => void 
   const [front, setFront] = useState("");
   const [back, setBack] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const cloze = /\{\{c\d+::/.test(front);
   async function add() {
     setError(null);
     try {
@@ -134,11 +173,11 @@ function AddCard({ courseId, onAdded }: { courseId: string; onAdded: () => void 
     <details>
       <summary style={{ cursor: "pointer" }}>Write your own card</summary>
       <div className="stack" style={{ marginTop: 8 }}>
-        <textarea aria-label="Front" placeholder="Front: a question or cue" value={front} onChange={(e) => setFront(e.target.value)} style={{ minHeight: 60 }} />
-        <textarea aria-label="Back" placeholder="Back: the answer (Markdown and $maths$ work)" value={back} onChange={(e) => setBack(e.target.value)} style={{ minHeight: 60 }} />
+        <textarea aria-label="Front" placeholder="Front: a question or cue. For a cloze card, mark the gaps: The {{c1::mitochondrion}} makes {{c2::ATP}}." value={front} onChange={(e) => setFront(e.target.value)} style={{ minHeight: 60 }} />
+        <textarea aria-label="Back" placeholder={cloze ? "Extra note shown with the answer (optional)" : "Back: the answer (Markdown and $maths$ work)"} value={back} onChange={(e) => setBack(e.target.value)} style={{ minHeight: 60 }} />
         <div className="row">
-          <button className="sm primary" disabled={!front.trim() || !back.trim()} onClick={add}>
-            Add card
+          <button className="sm primary" disabled={!front.trim() || (!cloze && !back.trim())} onClick={add}>
+            {cloze ? "Add cloze card" : "Add card"}
           </button>
           {error && <span className="small" style={{ color: "var(--dont)" }}>{error}</span>}
         </div>
@@ -158,13 +197,12 @@ function Review({ queue: initial, examDate, onDone }: { queue: Card[]; examDate:
   const busy = useRef(false);
   const card = queue[0];
   const today = localToday();
-  const daysToExam = examDate ? Math.round((Date.parse(examDate) - Date.parse(today)) / 86400000) : null;
+  const daysToExam = examDate ? daysBetween(today, examDate) : null;
 
   const previews = useMemo(() => {
     if (!card) return null;
-    const state = card.due == null ? NEW_CARD : card;
-    return ([1, 2, 3, 4] as Rating[]).map((r) => describeInterval(nextDueIn(review(state, r), daysToExam)));
-  }, [card, daysToExam]);
+    return preview(cardState(card), elapsedDays(card, today)).map((next) => describeInterval(nextDueIn(next, daysToExam)));
+  }, [card, daysToExam, today]);
 
   const rate = useCallback(
     async (rating: Rating) => {
@@ -195,8 +233,8 @@ function Review({ queue: initial, examDate, onDone }: { queue: Card[]; examDate:
     busy.current = true;
     setError(null);
     try {
-      const { ease, interval, reps, lapses, due, last_review } = last.before;
-      await api<Card>(`/api/cards/${last.before.id}`, { method: "PATCH", json: { undo: { ease, interval, reps, lapses, due, last_review } } });
+      const { stability, difficulty, interval, reps, lapses, due, last_review } = last.before;
+      await api<Card>(`/api/cards/${last.before.id}`, { method: "PATCH", json: { undo: { stability, difficulty, interval, reps, lapses, due, last_review } } });
       setHistory((h) => h.slice(0, -1));
       setReviewed((n) => n - 1);
       if (last.rating === 1) setAgain((n) => n - 1);
@@ -263,14 +301,19 @@ function Review({ queue: initial, examDate, onDone }: { queue: Card[]; examDate:
         <div className="card flashcard">
           <div className="small muted spread">
             {/* A card asking for the term itself would give it away in its topic label. */}
-            <span>{shown || !card.topic_title || card.front.toLowerCase().includes(card.topic_title.toLowerCase()) ? (card.topic_title ?? "General") : "Topic hidden until you answer"}</span>
+            <span>{shown || !topicGivesAway(card) ? (card.topic_title ?? "General") : "Topic hidden until you answer"}</span>
             <span>{card.due == null ? "New" : card.lapses ? `Forgotten ${card.lapses}×` : `Every ${describeInterval(card.interval)}`}</span>
           </div>
-          <Markdown>{card.front}</Markdown>
+          {/* A cloze card fills its own gap when turned over, so the front changes instead of a back appearing. */}
+          <Markdown>{cardFront(card, shown)}</Markdown>
           {shown ? (
             <>
-              <hr />
-              <Markdown>{card.back}</Markdown>
+              {card.back.trim() && (
+                <>
+                  <hr />
+                  <Markdown>{card.back}</Markdown>
+                </>
+              )}
               <div className="row rate" style={{ justifyContent: "center" }}>
                 {([1, 2, 3, 4] as Rating[]).map((r, i) => (
                   <button key={r} className={`rate-${r}`} onClick={() => rate(r)}>
@@ -299,7 +342,7 @@ function CardList({ cards, onChange }: { cards: Card[]; onChange: () => void }) 
   const [editing, setEditing] = useState<string | null>(null);
   const shown = useMemo(() => {
     const f = filter.trim().toLowerCase();
-    return f ? cards.filter((c) => `${c.front} ${c.back} ${c.topic_title ?? ""}`.toLowerCase().includes(f)) : cards;
+    return f ? cards.filter((c) => `${cardSummary(c)} ${c.back} ${c.topic_title ?? ""}`.toLowerCase().includes(f)) : cards;
   }, [cards, filter]);
   return (
     <div className="card stack">
@@ -316,9 +359,11 @@ function CardList({ cards, onChange }: { cards: Card[]; onChange: () => void }) 
               <details style={{ flex: 1, minWidth: 0 }}>
                 <summary style={{ cursor: "pointer" }}>
                   <span className="small muted">{c.topic_title ?? "General"} · </span>
-                  {c.front.split("\n")[0].replace(/[*_`$#>]/g, "").slice(0, 140)}
+                  {c.kind !== "basic" && <span className="badge" style={{ marginRight: 6 }}>{c.kind === "cloze" ? `cloze ${c.ord}` : "diagram"}</span>}
+                  {cardSummary(c).slice(0, 140)}
                 </summary>
-                <Markdown>{c.back}</Markdown>
+                {c.kind !== "basic" && <Markdown>{cardFront(c, true)}</Markdown>}
+                {c.back.trim() && <Markdown>{c.back}</Markdown>}
               </details>
               <div className="row" style={{ flexShrink: 0 }}>
                 <span className="small muted">{c.due == null ? "new" : `due ${c.due}`}</span>
@@ -329,7 +374,7 @@ function CardList({ cards, onChange }: { cards: Card[]; onChange: () => void }) 
                   className="sm ghost danger"
                   aria-label="Delete card"
                   onClick={async () => {
-                    if (!window.confirm(`Delete this card?\n\n${c.front.split("\n")[0].slice(0, 120)}`)) return;
+                    if (!window.confirm(`Delete this card?\n\n${cardSummary(c).slice(0, 120)}`)) return;
                     await api(`/api/cards/${c.id}`, { method: "DELETE" });
                     onChange();
                   }}
@@ -368,5 +413,23 @@ function EditCard({ card, onClose }: { card: Card; onClose: () => void }) {
         </button>
       </div>
     </div>
+  );
+}
+
+function CardExport({ courseId }: { courseId: string }) {
+  return (
+    <details className="menu">
+      <summary className="btn sm ghost" role="button">
+        Export ▾
+      </summary>
+      <div className="menu-list">
+        <a className="btn sm ghost" href={`/api/courses/${courseId}/cards/export?format=apkg`} download>
+          Anki deck (.apkg)
+        </a>
+        <a className="btn sm ghost" href={`/api/courses/${courseId}/cards/export?format=csv`} download>
+          Spreadsheet or Quizlet (.csv)
+        </a>
+      </div>
+    </details>
   );
 }

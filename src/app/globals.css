@@ -356,3 +356,42 @@ a.ai-badge:hover { text-decoration: none; filter: brightness(1.05); }
 .deepen-menu button.primary { text-align: center; border-color: var(--accent); }
 .mermaid-box g.node.moving { cursor: grabbing; opacity: 0.85; }
 input.changed { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+
+/* Ask this course */
+.ask-q { align-self: flex-end; max-width: 80%; padding: 10px 14px; border-radius: 14px 14px 4px 14px; background: var(--accent); color: #fff; white-space: pre-wrap; }
+.ask-a .markdown a[href^="#cite-"] { display: inline-block; min-width: 1.4em; padding: 0 4px; margin: 0 1px; border-radius: 6px; background: var(--accent-soft); font-size: 0.75em; font-weight: 700; text-align: center; vertical-align: super; line-height: 1.4; }
+.ask-a .markdown a[href^="#cite-"]::before { content: "["; }
+.ask-a .markdown a[href^="#cite-"]::after { content: "]"; }
+.cite-chip { border-radius: 999px; }
+.cite-chip.on { border-color: var(--accent); color: var(--accent); }
+.passage { margin: 0; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--surface-2); border-radius: 0 8px 8px 0; }
+.passage-text { white-space: pre-wrap; font-size: 0.9rem; max-height: 320px; overflow: auto; margin-top: 6px; }
+.ask-box { position: sticky; bottom: 12px; align-items: flex-end; }
+.ask-box textarea { min-height: 44px; resize: vertical; font-size: 16px; }
+
+/* Learn mode */
+.learn-bar { display: flex; height: 6px; border-radius: 999px; overflow: hidden; background: var(--surface-2); }
+.learn-bar .m { background: var(--know); }
+.learn-bar .f { background: var(--familiar); }
+.learn-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; }
+.learn-option { display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 10px 12px; min-height: 52px; }
+.learn-option .markdown > :last-child { margin-bottom: 0; }
+.learn-option.right { border-color: var(--know); background: var(--know-soft); opacity: 1; }
+.learn-option.wrong { border-color: var(--dont); background: var(--dont-soft); opacity: 1; }
+
+/* Phones, and ziLearn installed as an app (it then runs edge to edge, under the notch). */
+.topbar { padding-top: max(12px, env(safe-area-inset-top)); padding-left: max(24px, env(safe-area-inset-left)); padding-right: max(24px, env(safe-area-inset-right)); }
+main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+@media (max-width: 640px) {
+  main { padding: 14px 12px calc(72px + env(safe-area-inset-bottom)); }
+  h1 { font-size: 1.3rem; }
+  .card { padding: 14px; }
+  .topbar { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+  /* 16px stops iOS Safari zooming in when a field is focused. */
+  input, select, textarea { font-size: 16px; }
+  .flashcard .rate { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .flashcard .rate button { flex-direction: column; justify-content: center; min-height: 56px; }
+  .learn-options { grid-template-columns: minmax(0, 1fr); }
+  .ask-q { max-width: 92%; }
+  .ask-box { bottom: calc(8px + env(safe-area-inset-bottom)); }
+}
