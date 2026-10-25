@@ -286,7 +286,13 @@ function keywordBranches(mapped: Material[], gather = true): NewTopic[] | null {
     const ref = `K${j}`;
     const subs = [...b.subs.values()];
     topics.push({ ref, parent_ref: groupOf.get(j) ?? null, title: truncate(b.title, 80), summary: b.summary, keywords: [b.title, ...subs.map((x) => x.title)].map(bareTerm).slice(0, 8), material_ids: b.ids, importance: subs.length >= 2 || b.ids.length > 1 ? 3 : 2 });
-    subs.forEach((st, k) => topics.push({ ref: `${ref}.${k}`, parent_ref: ref, title: truncate(st.title, 80), summary: st.summary, keywords: [bareTerm(st.title)], material_ids: st.ids, importance: 2 }));
+    // A sub-term the heading of another section names ("Angular momentum" in "Conservation of Angular Momentum") goes there.
+    const elsewhere = (title: string) => {
+      const key = ` ${termKey(title)} `;
+      const hits = groups?.flatMap((g, gi) => (` ${termKey(g.title)} `.includes(key) ? [`S${gi}`] : [])) ?? [];
+      return termKey(title).includes(" ") && hits.length === 1 && hits[0] !== groupOf.get(j) ? hits[0] : null;
+    };
+    subs.forEach((st, k) => topics.push({ ref: `${ref}.${k}`, parent_ref: elsewhere(st.title) ?? ref, title: truncate(st.title, 80), summary: st.summary, keywords: [bareTerm(st.title)], material_ids: st.ids, importance: 2 }));
   });
   return orderByDocument(mergeNamesakes(topics), groups);
 }
