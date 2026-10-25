@@ -115,7 +115,7 @@ function wordKey(w: string): string {
   return stem(w.toLowerCase().replace(/[’']s?$/, "").replace(/[-‐‑–]/g, ""));
 }
 
-const DRILL = /^((multiple[- ]choice\s+)?(concept\s+)?quiz(zes)?|exercises?|hints?|answers?|answer checks|self[- ]?tests?|review questions|practice (problems|questions)|problems|solutions|warm[- ]?up|check yourself|your turn|try (it|this))\b/i;
+const DRILL = /^((multiple[- ]choice\s+)?(concept\s+)?quiz(zes)?|exercises?|hints?|answers?|answer checks|self[- ]?tests?|review questions|practice (problems|questions)|problems|solutions|warm[- ]?up|check yourself|your turn|try (it|this)|map of this (lesson|topic|chapter))\b/i;
 
 const DRILL_WEIGHT = 0.5;
 /** A list item's label that is the layout's, not a term: "Key terms: …", "Formula: …", "Hint: …". */
@@ -556,6 +556,8 @@ function quotable(t: string, lenient = false): boolean {
   const words = t.split(/\s+/).length;
   // A reference ("Wriggers, P. Nonlinear Finite Element Methods.") names a book; it doesn't teach.
   if (/^\p{Lu}[\p{L}'-]+,\s+(\p{Lu}\.\s?)+/u.test(t)) return false;
+  // A lesson's labelled lines ("Formula: …", "Procedure: …") list rather than say.
+  if (/^(formula|procedure|key terms|beyond your notes)\s*:/i.test(t)) return false;
   return words >= (lenient ? 4 : 6) && words <= 70 && letters / t.length > (lenient ? 0.4 : 0.6) && (lenient || !isGarbled(t));
 }
 
@@ -584,6 +586,8 @@ function evidenceIn(sentences: Sentence[], term: string, aliases: string[], othe
       if (opens(s)) score += 4;
       // Another term's note already quotes it: say something new where the material does.
       if (used.has(s.text)) score -= 2.5;
+      // An objective or a task ("Extract the damping ratio …", "Find the stiffness") asks; it doesn't explain.
+      if (/^(derive|extract|size|explain|apply|use|find|compute|calculate|describe|identify|determine|state|show|estimate|predict|sketch|write|give|turn|choose)\b/i.test(s.text)) score -= 1.5;
       const words = s.text.split(" ").length;
       if (words > 45) score -= 1;
       // The first time a term comes up is usually where it is introduced.

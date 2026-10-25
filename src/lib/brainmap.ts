@@ -217,6 +217,8 @@ const DRILL_SECTION = /^((multiple[- ]choice\s+)?(concept\s+)?quiz(zes)?|exercis
 const CONTEXT_SECTION =
   /^(introduction( and motivation)?|motivation|background|conclusions?|concluding remarks|summary( and conclusions?)?|discussion and conclusions?|closing remarks|outlook|map of this (lesson|topic|chapter)|where this fits|key (terms|ideas|points)|common (mistakes|errors|pitfalls)|connections|takeaways|key takeaways|learning (objectives|outcomes)|objectives|recap|what('|’)s next|further reading)$/i;
 
+const RESTATES = /^(map of this (lesson|topic|chapter)|where this fits|key (terms|ideas|points)|takeaways|key takeaways|connections|common (mistakes|errors|pitfalls)|recap)$/i;
+
 const keywordMapOf = (m: Material) => (m.digest && (m.digest.basis === "keywords" || m.digest.edited) && m.digest.topics.length ? m.digest : null);
 
 /** A term as one key across items: "Representative volume elements (RVE)" and "representative volume element" match. */
@@ -367,7 +369,8 @@ function sectionGroups(m: Material, terms: string[]): SectionGroup[] | null {
     let best = -1;
     let score = 0;
     gs.forEach((g, gi) => {
-      const n = count(g.body, t) * (g.context ? 0.5 : 1);
+      // A lesson's map, key-term list or takeaways restate every term: they say nothing about where one belongs.
+      const n = count(g.body, t) * (g.context ? (RESTATES.test(g.title) ? 0 : 0.5) : 1);
       if (n > score) (score = n), (best = gi);
     });
     // The section whose box defines or states it ("Theorem 2.2 — Divergence (Gauss') Theorem") is its home.

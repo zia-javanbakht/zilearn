@@ -287,6 +287,9 @@ export function isAuthorLine(s: string): boolean {
  * The sections worth studying: headings without numbering clutter, back matter (references, funding,
  * declarations) left out, and front-page labels and author lines kept only as untitled text.
  */
+/** Sections a lesson puts before its first numbered one that are its own, not a title page. */
+const FRONT_SECTION = /^(map of this (lesson|topic|chapter)|where this fits|warm[- ]?up|overview|learning (objectives|outcomes)|objectives|prerequisites)$/i;
+
 export function studySections(text: string): Section[] {
   const out: Section[] = [];
   const sections = splitSections(text);
@@ -299,7 +302,7 @@ export function studySections(text: string): Section[] {
     // "References I": a slide deck numbers the frames of a long list.
     if (BACK_MATTER.test(h.replace(/\s+(I{1,3}|IV|\d)$/, ""))) return;
     // Front matter sits before the first few headings; a closing "Summary" is a real section.
-    if (s.heading && i < 5 && (FRONT_LABELS.test(h) || isAuthorLine(s.heading) || (i > 0 && i < firstNumbered && (s.level ?? 0) > 1))) out.push({ heading: "", body: s.body });
+    if (s.heading && i < 5 && (FRONT_LABELS.test(h) || isAuthorLine(s.heading) || (i > 0 && i < firstNumbered && (s.level ?? 0) > 1 && !FRONT_SECTION.test(h)))) out.push({ heading: "", body: s.body });
     // Numbering is the paper's bookkeeping; the level keeps the structure it carried.
     else out.push({ ...s, heading: h });
   });
