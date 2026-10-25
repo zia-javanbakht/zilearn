@@ -640,7 +640,7 @@ export function keywordMap(text: string, opts: { mains?: number; children?: numb
   const sentences = sentencesOf(text);
   // A long paper or set of notes has more to map than a short handout.
   const long = text.length > LONG_TEXT;
-  const terms = opts.terms ?? keyTerms(text, long ? 44 : 24);
+  const terms = opts.terms ?? keyTerms(text, long ? 48 : 24);
   if (!terms.length) return [];
   const nMain = Math.min(opts.mains ?? (long ? 12 : 7), Math.max(3, Math.ceil(terms.length / 3)));
   // A box's sentences are about what its label names, though the label itself isn't in them.
