@@ -75,3 +75,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 64 | Source, glossary and pitfall lines aren't quoted as what a term is | 89.1 | 79.03 | yes |
 | 65 | Formula cards: the lead is the whole sentence into the equation; a caption's lines are never an equation; eval also counts offline formula cards (0 on main, 89 now) | 89.1 | 78.98 | yes |
 | 66 | A lone equation number (12) becomes 	ag{12} | 89.1 | 78.98 | yes |
+| 67 | Eval deck keeps one card per answer, as the app does | 89.1 | 78.98 | yes |

@@ -30,7 +30,9 @@ for (const DOC of DOCS)
     walk(buildTree(listTopics(course.id)), 0);
     writeFileSync(`${OUT}/${DOC}.brainmap.json`, JSON.stringify({ summary: s.summary, nodes: nodes.map((n) => ({ depth: n.depth, title: n.title, summary: n.summary, keywords: n.keywords, importance: n.importance })) }, null, 1));
     // Offline flashcards for every topic: how many quote a formula is tracked beside the scores.
-    const cards = nodes.flatMap((n) => offlineCards(course.id, n));
+    // The deck keeps one card per answer, as the app's offline deck does.
+    const seen = new Set<string>();
+    const cards = nodes.flatMap((n) => offlineCards(course.id, n)).filter((c) => !seen.has(c.back) && seen.add(c.back));
     writeFileSync(`${OUT}/${DOC}.cards.json`, JSON.stringify(cards.map(({ front, back }) => ({ front, back })), null, 1));
     writeFileSync(`${OUT}/${DOC}.brainmap.md`, `Course summary: ${s.summary}\n\n` + nodes.map((n) => `${"  ".repeat(n.depth)}- ${n.title} (imp ${n.importance}) :: ${n.summary}`).join("\n"));
   }, 300000);
