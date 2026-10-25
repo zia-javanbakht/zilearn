@@ -42,7 +42,9 @@ describe("the course brainmap is built from key terms", () => {
     expect(terms.map((t) => t.title)).toEqual(expect.arrayContaining(["Representative volume element (RVE)", "Periodic boundary conditions (PBC)"]));
     const sections = topics.filter((t) => t.ref.startsWith("S"));
     expect(sections.length).toBeGreaterThanOrEqual(2);
-    for (const g of sections) expect(topics.filter((t) => t.parent_ref === g.ref).length).toBeGreaterThanOrEqual(2);
+    // Each section holds terms, directly or in its subsections.
+    const under = (ref: string): string[] => topics.filter((t) => t.parent_ref === ref).flatMap((t) => [t.ref, ...under(t.ref)]);
+    for (const g of sections.filter((t) => !t.parent_ref)) expect(under(g.ref).filter((r) => r.startsWith("K")).length).toBeGreaterThanOrEqual(1);
     // No branch for the paper itself, its title, or the introduction and conclusion that frame it.
     for (const t of topics) expect(t.title).not.toMatch(/^(Introduction|Conclusions?|Prediction of the failure|abs2024)/);
     const pdc = terms.find((t) => /^Pseudo-ductile composites/.test(t.title))!;

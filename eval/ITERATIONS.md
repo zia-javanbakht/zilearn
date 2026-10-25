@@ -23,3 +23,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 14 | Exponents set smaller after a capital or bracket (pdfTeX's Fᵀ, F⁻ᵀ, (QF)ᵀ) are read as ^T, ^{−T} | 87.23 | 68.84 | yes |
 | 15 | Stacked fractions (numerator over denominator) are read as a/b on one line, e.g. P = ∂Ψ/∂F | 87.41 | 68.81 | yes |
 | 16 | A document's sections gather its terms from 6 main terms up (was 9) | 87.41 | 69.43 | yes |
+| 17 | Within a section branch, its subsections are branches too, holding the terms they discuss most | 87.41 | 72.21 | yes |

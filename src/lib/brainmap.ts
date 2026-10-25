@@ -269,8 +269,13 @@ function keywordBranches(mapped: Material[], gather = true): NewTopic[] | null {
   const groups = gather && mapped.length === 1 && branches.length > MAX_LOOSE_BRANCHES ? sectionGroups(mapped[0], branches.map((b) => b.title)) : null;
   const groupOf = new Map<number, string>();
   groups?.forEach((g, gi) => {
-    topics.push({ ref: `S${gi}`, parent_ref: null, title: g.title, summary: g.summary, keywords: g.members.map((i) => bareTerm(branches[i].title)).slice(0, 8), material_ids: [mapped[0].id], importance: 3 });
+    const all = [...g.members, ...g.parts.flatMap((p) => p.members)];
+    topics.push({ ref: `S${gi}`, parent_ref: null, title: g.title, summary: g.summary, keywords: all.map((i) => bareTerm(branches[i].title)).slice(0, 8), material_ids: [mapped[0].id], importance: 3 });
     for (const i of g.members) groupOf.set(i, `S${gi}`);
+    g.parts.forEach((p, k) => {
+      topics.push({ ref: `S${gi}.p${k}`, parent_ref: `S${gi}`, title: p.title, summary: p.summary, keywords: p.members.map((i) => bareTerm(branches[i].title)).slice(0, 8), material_ids: [mapped[0].id], importance: p.members.length ? 3 : 2 });
+      for (const i of p.members) groupOf.set(i, `S${gi}.p${k}`);
+    });
   });
   branches.forEach((b, j) => {
     const ref = `K${j}`;
@@ -294,16 +299,25 @@ function orderByDocument(topics: NewTopic[], groups: { title: string }[] | null)
  * Each main term goes to the section that mentions it most (its introduction and conclusion count for
  * less); a section that gathers two or more terms is a branch, named as the material names it.
  */
-function sectionGroups(m: Material, terms: string[]): { title: string; summary: string; members: number[] }[] | null {
+type SectionGroup = { title: string; summary: string; members: number[]; parts: { title: string; summary: string; members: number[] }[] };
+
+function sectionGroups(m: Material, terms: string[]): SectionGroup[] | null {
   const text = m.text ?? "";
   const sections = studySections(text).filter((s) => s.heading && !/^(abstract|summary|keywords?)$/i.test(s.heading));
   const lvl = Math.min(...sections.map((s) => s.level ?? 1).filter((l) => l > 0));
-  type G = { title: string; body: string; context: boolean };
+  type Part = { title: string; body: string };
+  type G = { title: string; body: string; own: string; context: boolean; parts: Part[] };
   const gs: G[] = [];
   for (const s of sections) {
     if ((s.level ?? 1) === 0) continue;
-    if ((s.level ?? 1) <= lvl || !gs.length) gs.push({ title: s.heading, body: s.body, context: CONTEXT_SECTION.test(s.heading) || /^appendix\b/i.test(s.heading) || DRILL_SECTION.test(s.heading) });
-    else gs[gs.length - 1].body += `\n${s.heading}\n${s.body}`;
+    if ((s.level ?? 1) <= lvl || !gs.length) gs.push({ title: s.heading, body: s.body, own: s.body, context: CONTEXT_SECTION.test(s.heading) || /^appendix\b/i.test(s.heading) || DRILL_SECTION.test(s.heading), parts: [] });
+    else {
+      const g = gs[gs.length - 1];
+      g.body += `\n${s.heading}\n${s.body}`;
+      // Its subsections, one level down; deeper ones belong to theirs.
+      if ((s.level ?? 1) === lvl + 1 || !g.parts.length) g.parts.push({ title: s.heading, body: s.body });
+      else g.parts[g.parts.length - 1].body += `\n${s.heading}\n${s.body}`;
+    }
   }
   if (gs.length < 2) return null;
   const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -312,6 +326,7 @@ function sectionGroups(m: Material, terms: string[]): { title: string; summary: 
     return (body.toLowerCase().match(new RegExp(`\\b${words.join("[\\s-]+")}\\b`, "g")) ?? []).length;
   };
   const members = gs.map(() => [] as number[]);
+  const partOf = gs.map((g) => g.parts.map(() => [] as number[]));
   terms.forEach((t, i) => {
     let best = -1;
     let score = 0;
@@ -319,11 +334,27 @@ function sectionGroups(m: Material, terms: string[]): { title: string; summary: 
       const n = count(g.body, t) * (g.context ? 0.5 : 1);
       if (n > score) (score = n), (best = gi);
     });
-    if (best >= 0) members[best].push(i);
+    if (best < 0) return;
+    // A term one subsection discusses most of the time goes under that subsection.
+    const g = gs[best];
+    const inPart = g.parts.map((p) => count(p.body, t));
+    const k = inPart.indexOf(Math.max(0, ...inPart));
+    if (k >= 0 && inPart[k] >= 1 && inPart[k] >= 0.5 * count(g.body, t)) partOf[best][k].push(i);
+    else members[best].push(i);
   });
   const mend = headingRepairer(text);
-  // An introduction or conclusion frames the paper's topics rather than being one: its terms stay branches of their own.
-  const out = gs.map((g, gi) => ({ title: clipWords(mend(g.title), 60), summary: firstSentences(g.body, 2), members: members[gi], context: g.context })).filter((g) => g.members.length >= 2 && !g.context);
+  const out: SectionGroup[] = gs.flatMap((g, gi) => {
+    // An introduction or conclusion frames the paper's topics rather than being one: its terms stay branches of their own.
+    if (g.context) return [];
+    // Subsections that name a part of the content, or hold a term.
+    const parts = g.parts
+      .map((p, k) => ({ title: clipWords(mend(p.title), 60), summary: firstSentences(p.body, 2), members: partOf[gi][k] }))
+      .filter((p) => p.members.length || (!DRILL_SECTION.test(p.title) && !CONTEXT_SECTION.test(p.title) && p.title.split(/\s+/).length <= 8 && !/[?]$/.test(p.title)))
+      .slice(0, 8);
+    const held = members[gi].length + parts.reduce((n, p) => n + p.members.length, 0);
+    if (held < 2 && !(held >= 1 && parts.length) && parts.length < 3) return [];
+    return [{ title: clipWords(mend(g.title), 60), summary: firstSentences(g.own, 2) || firstSentences(g.body, 2), members: members[gi], parts }];
+  });
   return out.length >= 2 ? out : null;
 }
 
