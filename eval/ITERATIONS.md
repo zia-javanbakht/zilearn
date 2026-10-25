@@ -35,3 +35,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 25a | Exercise and quiz sentences count toward terms at weight 0.75 | 87.67 | 73.44 | no |
 | 25 | Exercise and quiz sentences count toward a term at half weight (never quoted) | 87.67 | 73.55 | yes |
 | 26 | A box's sentences count as mentions of the term its label names, so the term is placed with the main term they discuss | 87.67 | 73.75 | yes |
+| 27 | Terms sharing only 'of the X' (role of / two uses of the Jacobian) are not pieces of one name | 87.67 | 73.85 | yes |

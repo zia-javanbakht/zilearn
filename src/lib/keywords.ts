@@ -325,7 +325,8 @@ function inside(a: string[], b: string[]): boolean {
 
 /** Two terms share a run of at least two words without either containing the other: pieces of one longer term. */
 function overlap(a: string[], b: string[]): boolean {
-  for (let i = 0; i + 1 < a.length; i++) if (` ${b.join(" ")} `.includes(` ${a[i]} ${a[i + 1]} `)) return true;
+  // "of the Jacobian" in "role of the Jacobian" and "two uses of the Jacobian" is no shared piece.
+  for (let i = 0; i + 1 < a.length; i++) if (!/^(of|the|and|a|an)$/.test(a[i]) && !/^(of|the|and|a|an)$/.test(a[i + 1]) && ` ${b.join(" ")} `.includes(` ${a[i]} ${a[i + 1]} `)) return true;
   return false;
 }
 
