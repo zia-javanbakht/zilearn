@@ -175,10 +175,10 @@ export function splitSections(text: string): Section[] {
   for (const raw of lines) {
     const line = raw.trim();
     // A heading run into its paragraph ("Effect of the RVE size: To investigate …", "2.2.2. The patch test. Consider …").
-    const run = !cur || !cur.body || /[.!?:]\s*$/.test(cur.body.trimEnd()) ? runInHeading(line) : null;
+    const run: { heading: string; rest: string; level?: number } | null = !cur || !cur.body || /[.!?:]\s*$/.test(cur.body.trimEnd()) ? runInHeading(line) : null;
     if (run) {
       if (cur) sections.push(cur);
-      const parent = [...sections, ...(cur ? [cur] : [])].reverse().find((s) => s.heading && !s.runIn);
+      const parent: Section | undefined = [...sections, ...(cur ? [cur] : [])].reverse().find((s) => s.heading && !s.runIn);
       cur = { heading: run.heading, body: run.rest + "\n", level: run.level ?? (parent?.level ?? 1) + 1, runIn: true };
       continue;
     }
