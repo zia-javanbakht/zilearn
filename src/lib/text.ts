@@ -151,6 +151,8 @@ export interface Section {
   body: string;
   /** How deep the heading sits: 0 for a document title ("# …"), 1 for a section, 2 for a subsection, … */
   level?: number;
+  /** The heading opened its paragraph ("Effect of the RVE size: …") rather than standing on its own line. */
+  runIn?: boolean;
 }
 
 /** The depth of a heading line, from its Markdown hashes or its numbering ("2.1" is 2). */
@@ -170,6 +172,14 @@ export function splitSections(text: string): Section[] {
   let cur: Section | null = null;
   for (const raw of lines) {
     const line = raw.trim();
+    // A heading run into its paragraph ("Effect of the RVE size: To investigate …", "2.2.2. The patch test. Consider …").
+    const run = !cur || !cur.body || /[.!?:]\s*$/.test(cur.body.trimEnd()) ? runInHeading(line) : null;
+    if (run) {
+      if (cur) sections.push(cur);
+      const parent = [...sections, ...(cur ? [cur] : [])].reverse().find((s) => s.heading && !s.runIn);
+      cur = { heading: run.heading, body: run.rest + "\n", level: run.level ?? (parent?.level ?? 1) + 1, runIn: true };
+      continue;
+    }
     const h = headingOf(line);
     // A title set over two lines ("A CLASS OF … METHODS AND" / "THE METHOD OF …") is one heading.
     if (h && cur && cur.heading && !cur.body && TRAILING_FUNCTION_WORD.test(cur.heading)) {
@@ -184,6 +194,18 @@ export function splitSections(text: string): Section[] {
   }
   if (cur) sections.push(cur);
   return sections.filter((s) => s.heading || s.body.trim());
+}
+
+/**
+ * A paragraph that opens with its own title: "Effect of fiber volume fraction of the middle ply: As explained …"
+ * or a numbered "2.3.1. Extension to plasticity. The formulation …". The title must read like one.
+ */
+function runInHeading(line: string): { heading: string; rest: string; level?: number } | null {
+  let m = line.match(/^(\d+\.\d+(?:\.\d+)*)\.?\s+([A-Z][^.!?:]{2,80})[.:]\s+(\p{Lu}.*)$/u);
+  if (m && titleLike(m[2], 10)) return { heading: unshout(m[2].trim()), rest: m[3], level: m[1].split(".").length };
+  m = line.match(/^([A-Z][^.!?:;()]{8,90}):\s+(\p{Lu}.*)$/u);
+  if (m && m[1].split(/\s+/).length >= 3 && titleLike(m[1], 12)) return { heading: m[1].trim(), rest: m[2] };
+  return null;
 }
 
 function headingOf(line: string): string | null {
