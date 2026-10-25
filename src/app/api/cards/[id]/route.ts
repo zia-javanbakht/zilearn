@@ -6,7 +6,7 @@ import type { Rating } from "@/lib/srs";
 export const dynamic = "force-dynamic";
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable();
-const Schedule = z.object({ ease: z.number().min(1).max(5), interval: z.number().min(0).max(36500), reps: z.number().int().min(0), lapses: z.number().int().min(0), due: day, last_review: day });
+const Schedule = z.object({ stability: z.number().min(0).max(100000).nullable(), difficulty: z.number().min(0).max(10).nullable(), interval: z.number().min(0).max(36500), reps: z.number().int().min(0), lapses: z.number().int().min(0), due: day, last_review: day });
 
 /** Record a review ({rating: 1-4, today}), undo one ({undo: the schedule from before}), or edit the card ({front, back}). */
 export const PATCH = handle(async (req: Request, { params }: Ctx<{ id: string }>) => {

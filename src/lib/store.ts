@@ -1,7 +1,8 @@
 import { inheritMastery } from "./tree";
 import { db, newId } from "./db";
 import { chunkText } from "./text";
-import { NEW_CARD, nextDueIn, review, type Rating } from "./srs";
+import { cardState, daysBetween, elapsedDays, nextDueIn, review, type Rating } from "./srs";
+import { clozeNumbers } from "./cloze";
 import type { LessonDoc } from "./lesson";
 import type {
   Digest,
@@ -668,26 +669,40 @@ export function clampInt(n: number, lo: number, hi: number) {
 
 const CARD_COLS = "c.*, t.title AS topic_title";
 
-export function addCards(
-  courseId: string,
-  cards: { front: string; back: string; topic_id: string | null }[],
-  source: Card["source"],
-  by: Card["generated_by"],
-): number {
+export interface NewCard {
+  front: string;
+  back: string;
+  topic_id: string | null;
+  /** "cloze" when the front holds {{c1::...}} deletions; worked out from the text when left out. */
+  kind?: Card["kind"];
+}
+
+/**
+ * Add cards, skipping ones whose front the course already has. A cloze note becomes one card per
+ * cloze number, and its back (extra notes) may be empty.
+ */
+export function addCards(courseId: string, cards: NewCard[], source: Card["source"], by: Card["generated_by"]): number {
   const d = db();
-  const have = new Set((d.prepare("SELECT front FROM cards WHERE course_id = ?").all(courseId) as { front: string }[]).map((r) => normTitle(r.front)));
-  const ins = d.prepare("INSERT INTO cards (id, course_id, topic_id, front, back, source, generated_by) VALUES (?, ?, ?, ?, ?, ?, ?)");
+  const key = (front: string, ord: number) => `${normTitle(front)}#${ord}`;
+  const have = new Set((d.prepare("SELECT front, ord FROM cards WHERE course_id = ?").all(courseId) as { front: string; ord: number }[]).map((r) => key(r.front, r.ord)));
+  const ins = d.prepare("INSERT INTO cards (id, course_id, topic_id, front, back, source, generated_by, kind, ord) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
   const topicOk = d.prepare("SELECT 1 FROM topics WHERE id = ? AND course_id = ?");
   let n = 0;
   d.transaction(() => {
     for (const c of cards) {
       const front = c.front.trim();
       const back = c.back.trim();
-      const key = normTitle(front);
-      if (!front || !back || have.has(key)) continue;
-      have.add(key);
-      ins.run(newId(), courseId, c.topic_id && topicOk.get(c.topic_id, courseId) ? c.topic_id : null, front, back, source, by);
-      n++;
+      const ords = c.kind === "basic" || c.kind === "label" ? [] : clozeNumbers(front);
+      const kind = ords.length ? "cloze" : c.kind === "label" ? "label" : "basic";
+      if (!front || (kind !== "cloze" && !back)) continue;
+      const topic = c.topic_id && topicOk.get(c.topic_id, courseId) ? c.topic_id : null;
+      for (const ord of ords.length ? ords : [0]) {
+        const k = key(front, ord);
+        if (have.has(k)) continue;
+        have.add(k);
+        ins.run(newId(), courseId, topic, front, back, source, by, kind, ord);
+        n++;
+      }
     }
   })();
   return n;
@@ -707,10 +722,10 @@ export function getCard(id: string): Card | null {
 export function dueCards(courseId: string, today: string, newLimit = 20): Card[] {
   const d = db();
   const reviews = d
-    .prepare(`SELECT ${CARD_COLS} FROM cards c LEFT JOIN topics t ON t.id = c.topic_id WHERE c.course_id = ? AND c.due IS NOT NULL AND c.due <= ? ORDER BY c.due, c.ease`)
+    .prepare(`SELECT ${CARD_COLS} FROM cards c LEFT JOIN topics t ON t.id = c.topic_id WHERE c.course_id = ? AND c.due IS NOT NULL AND c.due <= ? ORDER BY c.due, c.difficulty DESC`)
     .all(courseId, today) as Card[];
   const fresh = d
-    .prepare(`SELECT ${CARD_COLS} FROM cards c LEFT JOIN topics t ON t.id = c.topic_id WHERE c.course_id = ? AND c.due IS NULL ORDER BY c.created_at LIMIT ?`)
+    .prepare(`SELECT ${CARD_COLS} FROM cards c LEFT JOIN topics t ON t.id = c.topic_id WHERE c.course_id = ? AND c.due IS NULL ORDER BY c.created_at, c.ord LIMIT ?`)
     .all(courseId, newLimit) as Card[];
   return [...reviews, ...fresh];
 }
@@ -731,32 +746,62 @@ export function reviewCard(id: string, rating: Rating, today: string): Card | nu
   const card = getCard(id);
   if (!card) return null;
   const course = getCourse(card.course_id);
-  const daysToExam = course?.exam_date ? Math.round((Date.parse(course.exam_date) - Date.parse(today)) / 86400000) : null;
-  const next = review(card.due == null ? NEW_CARD : card, rating);
+  const daysToExam = course?.exam_date ? daysBetween(today, course.exam_date) : null;
+  const next = review(cardState(card), rating, elapsedDays(card, today));
   const due = new Date(Date.parse(today) + nextDueIn(next, daysToExam) * 86400000).toISOString().slice(0, 10);
   db()
-    .prepare("UPDATE cards SET ease = ?, interval = ?, reps = ?, lapses = ?, due = ?, last_review = ? WHERE id = ?")
-    .run(next.ease, next.interval, next.reps, next.lapses, due, today, id);
+    .prepare("UPDATE cards SET stability = ?, difficulty = ?, interval = ?, reps = ?, lapses = ?, due = ?, last_review = ? WHERE id = ?")
+    .run(next.stability, next.difficulty, next.interval, next.reps, next.lapses, due, today, id);
   return getCard(id);
 }
 
-export type CardSchedule = Pick<Card, "ease" | "interval" | "reps" | "lapses" | "due" | "last_review">;
+export type CardSchedule = Pick<Card, "stability" | "difficulty" | "interval" | "reps" | "lapses" | "due" | "last_review">;
 
 /** Put a card's schedule back as it was before a review (the review screen's Undo). */
 export function restoreCard(id: string, s: CardSchedule): Card | null {
   db()
-    .prepare("UPDATE cards SET ease = ?, interval = ?, reps = ?, lapses = ?, due = ?, last_review = ? WHERE id = ?")
-    .run(s.ease, s.interval, s.reps, s.lapses, s.due, s.last_review, id);
+    .prepare("UPDATE cards SET stability = ?, difficulty = ?, interval = ?, reps = ?, lapses = ?, due = ?, last_review = ? WHERE id = ?")
+    .run(s.stability, s.difficulty, s.interval, s.reps, s.lapses, s.due, s.last_review, id);
   return getCard(id);
 }
 
+/**
+ * Edit a card. A cloze note's cards share one front, so editing it edits them all: deletions that are
+ * gone take their cards with them, new ones get cards, and a basic card given {{c1::...}} becomes cloze.
+ */
 export function updateCard(id: string, patch: { front?: string; back?: string }) {
   const c = getCard(id);
   if (!c) return null;
-  db()
-    .prepare("UPDATE cards SET front = ?, back = ? WHERE id = ?")
-    .run(patch.front?.trim() || c.front, patch.back?.trim() || c.back, id);
-  return getCard(id);
+  const d = db();
+  const front = patch.front?.trim() || c.front;
+  const back = patch.back?.trim() ?? c.back;
+  const ords = c.kind === "label" ? [] : clozeNumbers(front);
+  if (c.kind !== "cloze" && !ords.length) {
+    d.prepare("UPDATE cards SET front = ?, back = ? WHERE id = ?").run(front, back || c.back, id);
+    return getCard(id);
+  }
+  d.transaction(() => {
+    const siblings = c.kind === "cloze" ? (d.prepare("SELECT id, ord FROM cards WHERE course_id = ? AND front = ? AND kind = 'cloze'").all(c.course_id, c.front) as { id: string; ord: number }[]) : [{ id, ord: c.ord }];
+    if (!ords.length) {
+      // No deletions left: it's a plain card again, kept once.
+      d.prepare("UPDATE cards SET front = ?, back = ?, kind = 'basic', ord = 0 WHERE id = ?").run(front, back || "(no answer)", id);
+      for (const s of siblings) if (s.id !== id) d.prepare("DELETE FROM cards WHERE id = ?").run(s.id);
+      return;
+    }
+    const kept = new Set<number>();
+    for (const s of siblings) {
+      // This card keeps its schedule under the first deletion if its own number is gone.
+      const ord = ords.includes(s.ord) ? s.ord : s.id === id && !siblings.some((x) => x.ord === ords[0]) ? ords[0] : null;
+      if (ord == null || kept.has(ord)) d.prepare("DELETE FROM cards WHERE id = ?").run(s.id);
+      else {
+        kept.add(ord);
+        d.prepare("UPDATE cards SET front = ?, back = ?, kind = 'cloze', ord = ? WHERE id = ?").run(front, back, ord, s.id);
+      }
+    }
+    const ins = d.prepare("INSERT INTO cards (id, course_id, topic_id, front, back, source, generated_by, kind, ord) VALUES (?, ?, ?, ?, ?, ?, ?, 'cloze', ?)");
+    for (const ord of ords) if (!kept.has(ord)) ins.run(newId(), c.course_id, c.topic_id, front, back, c.source, c.generated_by, ord);
+  })();
+  return getCard(id) ?? (d.prepare(`SELECT ${CARD_COLS} FROM cards c LEFT JOIN topics t ON t.id = c.topic_id WHERE c.course_id = ? AND c.front = ? ORDER BY c.ord`).get(c.course_id, front) as Card);
 }
 
 export function deleteCard(id: string) {

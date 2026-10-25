@@ -21,7 +21,13 @@ A study suite for university students and academics. Each course collects all of
 - **Progressive study plan**: the course is covered in passes (Survey → Understand → Apply → Master). Unknown topics start at pass 1, familiar ones at pass 2, and "known" topics get a quick check first. Later passes interleave branches; each branch opens with an overview and closes with a synthesis; every pass ends with a checkpoint quiz; short recall warm-ups bring back topics from 1, 3 and 7 days earlier; and the last day before the exam is a mock exam plus weak-topic review. Ticking sessions off records the depth reached, so rebuilding from today never repeats finished work, and topics you later mark "Don't know" are repeated at the right depth. A topic with subtopics below the top level (say "Jacobian" under a lecture's branch) gets its own, shorter session before them.
 - **Today** on the home page: each course's sessions for today, any missed ones, the flashcards to review and how close the exam is.
 - **Calendar export**: download the plan as an `.ics` file or subscribe to it (one event per session or per day, your chosen start time and reminder, plus the exam day).
-- **Flashcards** with spaced repetition (Again / Hard / Good / Easy, SM-2 style). Cards are generated for any scope, written by you, or made from the questions you got wrong in a mock exam. Intervals are squeezed so every card comes back before the exam. Press U (or Ctrl+Z) to undo a rating. Without an AI key, cards ask for the definitions and results your materials state, or for the term missing from a sentence about it.
+- **Ask this course**: ask questions in the Ask tab and get answers from your own materials, every claim marked [1], [2]… and linked to the passage it came from (click to read it, or open the file). Follow-up questions keep the conversation's context. Without an AI key, the answer is the best-matching sentences of your materials, still cited.
+- **Flashcards** scheduled with FSRS (the scheduler Anki uses; Again / Hard / Good / Easy). Cards reviewed under the old SM-2 scheduler are converted once, keeping their intervals. Cards are generated for any scope, written by you, or made from the questions you got wrong in a mock exam. Intervals are squeezed so every card comes back before the exam. Press U (or Ctrl+Z) to undo a rating. Without an AI key, cards ask for the definitions and results your materials state, or for the term missing from a sentence about it.
+  - **Cloze cards**: write `The {{c1::mitochondrion}} makes {{c2::ATP}}.` (Anki's syntax, hints with `{{c1::answer::hint}}`, works inside maths); each number is its own card.
+  - **Diagram cards**: a branch of the brainmap drawn with one box hidden, to name.
+  - **Learn**: Quizlet-style cramming of a topic's cards, multiple choice first and then typing the answer, until each is mastered. It doesn't change the review schedule.
+  - **Export** as an Anki deck (.apkg, with Basic and Cloze notes, maths and topic tags) or a CSV for spreadsheets and Quizlet.
+- **Installable**: ziLearn can be added to a phone's home screen or installed on a desktop, and its pages fit a phone screen.
 - **Knowledge base** across all courses: full-text search over topics and every material (SQLite FTS5), and cross-course links between similar topics (TF-IDF similarity, verified and explained by Claude when available). Related topics also show next to each topic in the brainmap.
 - **Mock exams** weighted towards weak topics and styled on your sample exams; multiple choice is auto-marked, written answers are marked by Claude (or self-marked offline). Results can update your brainmap marks. Offline, multiple choice asks which term fills a gap in what your materials say, with related terms from the same branch as the wrong options, and written questions come with a marking guide from your materials.
 - **Review notes** (concise, detailed or cheat sheet) for the whole course, one branch, or only weak topics, with LaTeX maths and Mermaid diagrams. Export as PDF (compiled with the Z class), LaTeX or Markdown; cheat sheets are set in two columns. Material summaries export the same way.
@@ -47,6 +53,8 @@ npm run dev                  # http://localhost:3000
 ```
 
 Data (SQLite database and uploaded files) lives in `./data` unless `ZILEARN_DATA_DIR` is set.
+
+To use ziLearn from your phone, run it on your computer with `npm run build && npm run start:lan`, open `http://<your computer's IP>:3000` on the phone (same Wi-Fi), and choose "Add to Home Screen" in the browser's menu. Full offline install (a service worker) needs https or localhost, so over plain http on a home network the phone gets a home-screen shortcut that opens full screen.
 
 Without an API key everything still works with built-in heuristics (heading- and key-term-based brainmaps, and lessons, flashcards, exams, notes and podcasts built from the definitions, formulas and statements in your materials); the header shows "Offline mode". With a key, the AI does the structuring, lessons, exams, marking, notes, flashcards and podcast scripts.
 
@@ -83,7 +91,7 @@ Layout:
 - `src/lib/kb.ts` search and cross-course links
 - `src/lib/lesson.ts` structured lessons; `src/lib/lessonCheck.ts` maths and figure checks; `src/lib/lessonOffline.ts` lessons without AI (and `topicFacts`, which the offline flashcards, exams, notes and podcasts use); `src/lib/figure.ts` and `src/lib/expr.ts` plots and diagrams; `src/lib/latex.ts` LaTeX export with the Z class
 - `src/lib/generate.ts` mock exams and grading, review notes, podcasts, flashcards
-- `src/lib/srs.ts` spaced-repetition scheduling; `src/lib/ics.ts` calendar export; `src/lib/transcript.ts` transcript formatting
+- `src/lib/srs.ts` FSRS scheduling; `src/lib/cloze.ts`, `src/lib/cardView.ts`, `src/lib/learn.ts`, `src/lib/cardExport.ts` cloze cards, how cards show, Learn mode, Anki/CSV export; `src/lib/ask.ts` Ask this course; `src/lib/ics.ts` calendar export; `src/lib/transcript.ts` transcript formatting
 - `src/lib/ai.ts` Claude calls (streaming, prompt caching of course sources, cancellation)
 - `src/lib/extract.ts`, `src/lib/youtube.ts` ingestion
 - `src/lib/store.ts`, `src/lib/db.ts` SQLite storage

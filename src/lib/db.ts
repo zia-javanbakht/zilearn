@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { fromSm2 } from "./srs";
 
 export function dataDir(): string {
   const dir = path.resolve(/*turbopackIgnore: true*/ process.env.ZILEARN_DATA_DIR || path.join(process.cwd(), "data"));
@@ -187,6 +188,17 @@ CREATE TABLE IF NOT EXISTS topic_undo (
   data TEXT NOT NULL
 );
 
+-- "Ask this course": the questions asked and the cited answers, oldest first.
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id TEXT PRIMARY KEY,
+  course_id TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+  role TEXT NOT NULL,
+  content TEXT NOT NULL,
+  citations TEXT NOT NULL DEFAULT '[]',
+  generated_by TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- A diagram the student edited (renamed, added, deleted, moved nodes), by the hash of the code it was drawn from.
 CREATE TABLE IF NOT EXISTS diagram_edits (
   key TEXT PRIMARY KEY,
@@ -201,6 +213,7 @@ CREATE INDEX IF NOT EXISTS idx_plan_items_plan ON plan_items(plan_id);
 CREATE INDEX IF NOT EXISTS idx_links_from ON links(from_topic);
 CREATE INDEX IF NOT EXISTS idx_links_to ON links(to_topic);
 CREATE INDEX IF NOT EXISTS idx_cards_course_due ON cards(course_id, due);
+CREATE INDEX IF NOT EXISTS idx_chat_course ON chat_messages(course_id, created_at);
 `;
 
 /** Columns added after the first release; CREATE TABLE IF NOT EXISTS doesn't add them to old databases. */
@@ -214,6 +227,10 @@ const COLUMNS: [table: string, column: string, type: string][] = [
   ["materials", "digest", "TEXT"], // JSON Digest: summary, key terms and topics of the material
   ["lessons", "doc", "TEXT"], // JSON LessonDoc: the structured lesson the Markdown and LaTeX are made from
   ["materials", "scan", "TEXT"], // JSON ScanInfo: PDF pages that are pictures without text
+  ["cards", "stability", "REAL"], // FSRS memory stability in days; NULL until first reviewed (see srs.ts)
+  ["cards", "difficulty", "REAL"], // FSRS difficulty, 1-10
+  ["cards", "kind", "TEXT NOT NULL DEFAULT 'basic'"], // basic, cloze ({{c1::...}} in the front) or label (a diagram with a hidden box)
+  ["cards", "ord", "INTEGER NOT NULL DEFAULT 0"], // which cloze number this card asks for (cloze cards only)
 ];
 
 function migrate(db: Database.Database) {
@@ -222,6 +239,17 @@ function migrate(db: Database.Database) {
     if (!have) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
   db.exec("CREATE INDEX IF NOT EXISTS idx_materials_sha ON materials(course_id, sha256)");
+  // Cards reviewed under SM-2 get the FSRS memory state their ease and interval imply, once.
+  const old = db.prepare("SELECT id, ease, interval FROM cards WHERE due IS NOT NULL AND stability IS NULL").all() as { id: string; ease: number; interval: number }[];
+  if (old.length) {
+    const set = db.prepare("UPDATE cards SET stability = ?, difficulty = ? WHERE id = ?");
+    db.transaction(() => {
+      for (const c of old) {
+        const s = fromSm2(c.ease, c.interval);
+        set.run(s.stability, s.difficulty, c.id);
+      }
+    })();
+  }
 }
 
 let instance: Database.Database | null = null;
