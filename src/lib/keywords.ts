@@ -185,7 +185,8 @@ function sentencesOf(text: string, drills = false): Sentence[] {
     let cur = "";
     for (const raw of proseLines(sec.body.split("\n"))) {
       const l = raw.trim();
-      if (!l || /^([-*+•·]|\d+[.)])\s/.test(l) || /^#/.test(l) || KEYWORDS_LABEL.test(l)) {
+      // A box ("Keypoint 2.2 — …") starts its own paragraph, whatever the line before it.
+      if (!l || /^([-*+•·]|\d+[.)])\s/.test(l) || /^#/.test(l) || KEYWORDS_LABEL.test(l) || (BOX.test(l) && /[—–]/.test(l))) {
         if (cur) units.push(cur);
         cur = l && !KEYWORDS_LABEL.test(l) ? l.replace(/^#{1,6}\s*/, "") : "";
         continue;
