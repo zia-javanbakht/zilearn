@@ -88,3 +88,5 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 77 | A head noun nearly always qualified is named by its most used phrase (consistent tangent) | 89.1 | 80.03 | yes |
 | 78 | A word mostly qualifying others is dropped for its main phrase | 89.1 | 80.03 | no |
 | 79 | A long technical word used often ranks as a term of its own | 89.1 | 80.29 | yes |
+| 80 | A long word qualified many ways stays a term | 89.1 | 80.22 | no |
+| 81 | No terms ending on a joining word (distributed based, linear plus) | 89.1 | 80.29 | yes |

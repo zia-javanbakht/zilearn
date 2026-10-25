@@ -417,6 +417,8 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
           if (len === 1 && GENERIC.has(last)) continue;
           // A verb ("ensures local invertibility", "nonlinearity enters") makes a clause, not a term.
           if (len > 1 && (VERB.test(first) || VERB.test(last))) continue;
+          // A phrase ending on a joining word ("distributed based", "linear plus") is cut from a longer one.
+          if (len > 1 && /^(based|plus|minus|via|versus|times|per|than|such|etc)$/.test(last)) continue;
           // An adverb starts a clause, not a term ("randomly removes units").
           if (/ly$/.test(first) && first.length > 4 && !/^(assembly|family|anomaly|poly|supply|monopoly|butterfly)$/.test(first)) continue;
           if (len > 1 && /^(high|higher|low|lower|large|small|different|various|several|new|proposed|present|good)$/.test(last)) continue;
