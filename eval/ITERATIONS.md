@@ -94,3 +94,5 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 83 | A leading term stays a sub-branch though its one sentence is quoted already (committed with 84) | 89.1 | 80.32 | yes |
 | 84 | A box that states only a formula gives its term that formula as its note | 89.1 | 80.46 | yes |
 | 85 | A sub-term another section's heading names goes to that section | 89.1 | 80.46 | yes |
+| 86 | A sub-term quoted from a section no term went to goes there | 89.1 | 80.29 | no |
+| 87 | A term's quoted bullet reads as a sentence: capital first, stop at the end | 89.1 | 80.53 | yes |

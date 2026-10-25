@@ -515,7 +515,9 @@ const bareTerm = (t: string) => t.replace(/\s*\([^)]*\)$/, "").trim();
 
 /** A term's note, with where the material says it ("… (see “Material properties”)"); see plainSummary. */
 function noteOf(t: DigestTopic): string {
-  const where = t.evidence?.find((e) => e.text === t.summary)?.where;
+  // The note is its quote, read as a sentence (a capital, a stop).
+  const bare = (x: string) => x.trim().replace(/\.$/, "").toLowerCase();
+  const where = t.evidence?.find((e) => bare(e.text) === bare(t.summary))?.where;
   return where && t.summary ? `${t.summary} (see “${where.replace(/[“”]/g, "")}”)` : t.summary;
 }
 

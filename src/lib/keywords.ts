@@ -680,7 +680,7 @@ export function keywordMap(text: string, opts: { mains?: number; children?: numb
   const node = (t: KeyTerm, children: KeywordNode[]): KeywordNode => {
     const evidence = evidenceIn(sentences, t.term, t.aliases, all, 3, used);
     if (evidence[0]) used.add(evidence[0].text);
-    return { term: t.term, aliases: t.aliases, note: evidence[0]?.text ?? "", evidence, start: evidence[0]?.start ?? null, children };
+    return { term: t.term, aliases: t.aliases, note: evidence[0] ? asNote(evidence[0].text) : "", evidence, start: evidence[0]?.start ?? null, children };
   };
   // A sub-term the material says nothing new about (its only sentences are already quoted for another
   // term) is a passing mention, not part of the map.
@@ -710,6 +710,16 @@ export function keywordMap(text: string, opts: { mains?: number; children?: numb
     p.children.sort((a, b) => terms.find((x) => x.term === a.term)!.first - terms.find((x) => x.term === b.term)!.first);
   }
   return tree;
+}
+
+/** A quoted line as a note: a slide's bullet ("h-refinement: reduce element size h, fixed p") reads as a sentence. */
+function asNote(text: string): string {
+  const t = text.trim();
+  if (!/^\p{Ll}/u.test(t)) return t;
+  // A lowercase symbol name ("h-refinement", "p-refinement") keeps its case.
+  const head = /^\p{Ll}{3,}\b(?!-)/u.test(t) ? t[0].toUpperCase() + t.slice(1) : t;
+  // A citation after the stop ("… damage model.18") ends it already.
+  return /[\p{L}\p{N})]$/u.test(head) && !/[.!?]\d+(?:[,–-]\d+)*$/.test(head) ? `${head}.` : head;
 }
 
 /** A label for a term: its acronym after it when the material uses one ("Representative volume element (RVE)"). */
