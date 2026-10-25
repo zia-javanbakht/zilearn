@@ -21,6 +21,21 @@ beforeAll(async () => {
 const flat = (s: string) => s.replace(/\s+/g, " ");
 
 describe("key terms of a paper", () => {
+  it("names a head noun that is nearly always qualified by its most used phrase", () => {
+    const t = [
+      "The consistent tangent drives the Newton method.",
+      "We derive the consistent tangent from the residual.",
+      "A consistent tangent gives quadratic convergence.",
+      "The load tangent vanishes for dead loads.",
+      "The internal tangent comes from the stress.",
+      "Each Newton tangent is assembled per element.",
+      "The total tangent sums both parts.",
+    ].join(" ");
+    const terms = keyTerms(t).map((k) => k.term.toLowerCase());
+    expect(terms).toContain("consistent tangent");
+    expect(terms).not.toContain("tangent");
+  });
+
   it("reads the author's keywords", () => {
     expect(authorKeywords(paper)).toEqual(["Pseudo-ductile composite", "finite element model", "micro-mechanical model", "multiscale model"]);
   });

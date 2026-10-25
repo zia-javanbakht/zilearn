@@ -470,6 +470,7 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
   // isn't part of the term ("learning rate controls", "enhanced strain field" next to "enhanced strain").
   const pairs = [...cands.values()].filter((c) => c.count >= 2 && c.key.split(" ").length === 2);
   const inPhrases = (c: Candidate) => pairs.reduce((n, p) => n + (p.key.split(" ").includes(c.key) ? p.count : 0), 0);
+  const sum = (m: Map<string, number>) => [...m.values()].reduce((a, b) => a + b, 0);
   const extended = (c: Candidate) => {
     const words = c.key.split(" ");
     if (words.length < 2 || c.boost > 1) return false;
@@ -477,7 +478,9 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
       for (let at = 0; at + len <= words.length; at++) {
         const sub = cands.get(words.slice(at, at + len).join(" "));
         // A word that is itself mostly part of phrases ("Weibull" in "Weibull modulus") doesn't stand for them.
-        if (sub && sub !== c && sub.count >= 1.5 * c.count && valid(sub, formOf(sub)) && !qualified(sub) && !(len === 1 && sub.boost === 1 && inPhrases(sub) >= 0.5 * sub.count)) return true;
+        // A head noun nearly always qualified ("consistent tangent", "load tangent", "Newton tangent") is named by its most used phrase.
+        const head = len === 1 && at === 1 && words.length === 2 && sub && c.count >= 3 && sum(sub.prev) >= 0.6 * sub.count && Math.max(...sub.prev.values()) <= c.count;
+        if (sub && sub !== c && !head && sub.count >= 1.5 * c.count && valid(sub, formOf(sub)) && !qualified(sub) && !(len === 1 && sub.boost === 1 && inPhrases(sub) >= 0.5 * sub.count)) return true;
       }
     return false;
   };
@@ -493,6 +496,8 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
       if (words.length === 1 && c.boost === 1 && /(al|ive|ar|ile|ic|ous|ary|ory|able|ible)$/.test(words[0]) && !/^\p{Lu}/u.test(form)) return false;
       // A word mostly used inside longer terms ("tangent" in "consistent tangent", "tangent stiffness") is those terms.
       if (words.length === 1 && c.boost === 1 && inPhrases(c) >= 0.5 * c.count) return false;
+      // A head noun nearly always qualified, one way or another ("consistent", "load", "Newton" tangent), is its most used phrase.
+      if (words.length === 1 && c.boost === 1 && sum(c.prev) >= 0.6 * c.count && [...c.prev].some(([w, k]) => k >= 3 && cands.get(`${w} ${c.key}`)?.count === k)) return false;
       // Part of a longer term: nearly always written with the same word before or after it ("element model" after "finite").
       const most = (m: Map<string, number>) => Math.max(0, ...m.values());
       if (c.boost === 1 && c.count >= 2 && Math.max(most(c.prev), most(c.next)) >= 0.7 * c.count) return false;

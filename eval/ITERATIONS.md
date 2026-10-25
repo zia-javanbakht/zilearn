@@ -84,3 +84,5 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 73 | A term's note prefers a sentence of six words or more over a bare list item | 89.1 | 79.7 | yes |
 | 74 | A scrap of maths left open mid-sentence stays in the sentence | 89.1 | 79.7 | yes |
 | 75 | A paper of ten sections or fewer keeps every section as a branch | 89.1 | 79.95 | yes |
+| 76 | A term goes to the one section whose heading names it | 89.1 | 79.47 | no |
+| 77 | A head noun nearly always qualified is named by its most used phrase (consistent tangent) | 89.1 | 80.03 | yes |
