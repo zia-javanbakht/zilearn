@@ -36,6 +36,11 @@ describe("key terms of a paper", () => {
     expect(terms).not.toContain("tangent");
   });
 
+  it("leaves out a verb the text also uses as a participle", () => {
+    const t = "The mass oscillates. The system oscillates freely. It oscillates at the damped frequency. The beam oscillates slowly. Without oscillating, it stops. The damping ratio sets the decay. The damping ratio is small.";
+    expect(keyTerms(t).map((k) => k.term.toLowerCase())).not.toContain("oscillates");
+  });
+
   it("reads the author's keywords", () => {
     expect(authorKeywords(paper)).toEqual(["Pseudo-ductile composite", "finite element model", "micro-mechanical model", "multiscale model"]);
   });

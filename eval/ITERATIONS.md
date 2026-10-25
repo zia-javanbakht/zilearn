@@ -106,3 +106,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 95 | Figure captions count toward terms at half weight | 89.1 | 79.7 | no |
 | 96 | A heading loses a scan's stray space before a colon | 89.1 | 80.62 | yes |
 | 97 | Long texts map 48 terms (was 44) | 89.1 | 80.83 | yes |
+| 98 | A verb the text also uses as a participle (oscillates) is not a term | 89.1 | 80.83 | yes |

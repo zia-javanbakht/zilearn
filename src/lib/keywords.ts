@@ -486,6 +486,11 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
       }
     return false;
   };
+  const lowerText = text.toLowerCase();
+  const verbish = (w: string) => {
+    const stem = w.slice(0, -2);
+    return (lowerText.includes(`${stem}ing`) || lowerText.includes(`${stem}ed`)) && !new RegExp(`\\b(the|a|an|these|those|of|and)\\s+${w}\\b`).test(lowerText);
+  };
   const scored = [...cands.values()]
     .map((c) => ({ c, form: formOf(c) }))
     .filter(({ c }) => !extended(c))
@@ -504,6 +509,8 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
       const most = (m: Map<string, number>) => Math.max(0, ...m.values());
       if (c.boost === 1 && c.count >= 2 && Math.max(most(c.prev), most(c.next)) >= 0.7 * c.count) return false;
       if (qualified(c)) return false;
+      // A verb ("oscillates": the text also says "oscillating", never "the oscillates") isn't a term.
+      if (words.length === 1 && c.boost === 1 && /(?:at|iz|is|ifi)es$/.test(form.toLowerCase()) && verbish(form.toLowerCase())) return false;
       // Operator names in formulas ("sym Grad η", "Div P") are maths, not terms.
       if (c.boost === 1 && words.some((w) => /^(sym|grad|div|curl|det|tr|dev|diag)$/.test(w))) return false;
       // Terms the material uses once are kept only when it names them as key (author keywords, an acronym).
