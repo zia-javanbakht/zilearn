@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { dataDir } from "@/lib/db";
+import { dataPath } from "@/lib/db";
 import { getPodcast, setPodcastAudio } from "@/lib/store";
 import { fail, fileResponse, handle, ok, type Ctx } from "@/lib/http";
 
@@ -16,7 +16,7 @@ function fileName(title: string) {
 export const GET = handle(async (req: Request, { params }: Ctx<{ id: string }>) => {
   const p = getPodcast((await params).id);
   if (!p?.audio) return fail("This episode has no recording yet.", 404);
-  const buf = await fs.readFile(path.join(dataDir(), p.audio)).catch(() => null);
+  const buf = await fs.readFile(dataPath(p.audio)).catch(() => null);
   if (!buf) return fail("The recording is missing on disk. Record it again.", 404);
   const download = new URL(req.url).searchParams.has("download");
   return fileResponse(req, buf, { mime: "audio/mpeg", filename: fileName(p.title), inline: !download });
@@ -40,17 +40,17 @@ export const PUT = handle(async (req: Request, { params }: Ctx<{ id: string }>) 
   } catch {}
   // A new name per recording, so players don't keep a cached earlier take.
   const rel = path.join("uploads", p.course_id, "podcasts", `${p.id}-${Date.now()}.mp3`);
-  await fs.mkdir(path.dirname(path.join(dataDir(), rel)), { recursive: true });
-  await fs.writeFile(path.join(dataDir(), rel), buf);
+  await fs.mkdir(path.dirname(dataPath(rel)), { recursive: true });
+  await fs.writeFile(dataPath(rel), buf);
   setPodcastAudio(p.id, rel, marks);
-  if (p.audio && p.audio !== rel) await fs.rm(path.join(dataDir(), p.audio), { force: true });
+  if (p.audio && p.audio !== rel) await fs.rm(dataPath(p.audio), { force: true });
   return ok(getPodcast(p.id));
 });
 
 export const DELETE = handle(async (_req: Request, { params }: Ctx<{ id: string }>) => {
   const p = getPodcast((await params).id);
   if (!p) return fail("Not found", 404);
-  if (p.audio) await fs.rm(path.join(dataDir(), p.audio), { force: true });
+  if (p.audio) await fs.rm(dataPath(p.audio), { force: true });
   setPodcastAudio(p.id, null, null);
   return ok(getPodcast(p.id));
 });

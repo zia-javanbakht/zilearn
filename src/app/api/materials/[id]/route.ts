@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
-import path from "node:path";
-import { dataDir } from "@/lib/db";
+import { dataPath } from "@/lib/db";
 import { deleteMaterial, getMaterial, setScan, updateMaterial } from "@/lib/store";
 import { body, fail, handle, later, ok, type Ctx } from "@/lib/http";
 import { extractFile, tidyTranscript } from "@/lib/extract";
@@ -39,10 +38,7 @@ export const PATCH = handle(async (req: Request, { params }: Ctx<{ id: string }>
   if (b.reread) {
     if (!current.path || !/pdf/i.test(`${current.mime} ${current.filename}`)) return fail("Only PDFs can be read again.");
     if (!aiEnabled()) return fail("Choose an AI provider in Settings to read the pages again.");
-    const root = path.resolve(dataDir());
-    const file = path.resolve(root, current.path);
-    if (!file.startsWith(root + path.sep)) return fail("Bad file path.");
-    const ex = await extractFile(await fs.readFile(file), current.filename ?? "file.pdf", "application/pdf");
+    const ex = await extractFile(await fs.readFile(dataPath(current.path)), current.filename ?? "file.pdf", "application/pdf");
     if (!ex.text.trim()) return fail(ex.note ?? "No text could be read from this PDF.");
     setScan(id, ex.scan ?? null);
     return ok(withDigest(updateMaterial(id, { text: ex.text, note: ex.note })));
@@ -94,7 +90,7 @@ function withDigest(m: Material | null): Material | null {
 export const DELETE = handle(async (_req: Request, { params }: Ctx<{ id: string }>) => {
   const { id } = await params;
   const m = getMaterial(id);
-  if (m?.path) await fs.rm(path.join(dataDir(), m.path), { force: true });
+  if (m?.path) await fs.rm(dataPath(m.path), { force: true });
   deleteMaterial(id);
   return ok({ ok: true });
 });

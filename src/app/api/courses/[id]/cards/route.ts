@@ -1,5 +1,6 @@
 import { generateCards, parseScope } from "@/lib/generate";
 import { addCards, cardStats, dueCards, getCourse, listCards } from "@/lib/store";
+import { CardsInput } from "@/lib/validate";
 import { body, fail, handle, ok, todayFrom, type Ctx } from "@/lib/http";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +27,7 @@ export const POST = handle(async (req: Request, { params }: Ctx<{ id: string }>)
     added = addCards(id, [{ front: b.front.slice(0, 4000), back: b.back.slice(0, 8000), topic_id: b.topic_id ?? null }], "manual", "student");
     if (!added) return fail("You already have a card with that front.");
   } else {
-    const out = await generateCards(id, parseScope(b.scope), Number(b.count) || 20);
+    const out = await generateCards(id, parseScope(b.scope), CardsInput.parse(b).count);
     added = addCards(id, out.cards, "generated", out.by);
     by = out.by;
   }

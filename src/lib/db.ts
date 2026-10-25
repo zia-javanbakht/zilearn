@@ -9,6 +9,17 @@ export function dataDir(): string {
   return dir;
 }
 
+/**
+ * A path inside the data folder's uploads, or an error when `rel` would leave it ("../", an absolute path):
+ * every file the app reads, writes or deletes goes through here, so a crafted id can't reach other files.
+ */
+export function dataPath(...rel: string[]): string {
+  const uploads = path.join(dataDir(), "uploads");
+  const full = path.resolve(dataDir(), ...rel);
+  if (full !== uploads && !full.startsWith(uploads + path.sep)) throw new Error(`Refusing a file path outside the uploads folder: ${rel.join("/")}`);
+  return full;
+}
+
 export function newId(): string {
   return crypto.randomUUID();
 }

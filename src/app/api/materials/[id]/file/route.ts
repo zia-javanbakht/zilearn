@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
-import path from "node:path";
-import { dataDir } from "@/lib/db";
+import { dataPath } from "@/lib/db";
 import { getMaterial } from "@/lib/store";
 import { fail, fileResponse, handle, type Ctx } from "@/lib/http";
 
@@ -12,10 +11,7 @@ const INLINE = /^(application\/pdf|image\/(png|jpeg|gif|webp)|audio\/|video\/|te
 export const GET = handle(async (req: Request, { params }: Ctx<{ id: string }>) => {
   const m = getMaterial((await params).id);
   if (!m?.path) return fail("No file", 404);
-  const root = path.resolve(dataDir());
-  const full = path.resolve(root, m.path);
-  if (!full.startsWith(root + path.sep)) return fail("Bad path", 400);
-  const buf = await fs.readFile(full).catch(() => null);
+  const buf = await fs.readFile(dataPath(m.path)).catch(() => null);
   if (!buf) return fail("File is missing on disk", 404);
   const mime = m.mime || "application/octet-stream";
   return fileResponse(req, buf, { mime, filename: m.filename ?? "file", inline: INLINE.test(mime) });
