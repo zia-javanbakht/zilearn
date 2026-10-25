@@ -200,11 +200,16 @@ function sentencesOf(text: string, drills = false): Sentence[] {
     }
     if (cur) units.push(cur);
     // A figure that names what it shows ("Figure 4. Graded mesh (non-uniform mesh): refinements …") is a box of its own.
-    for (const l of sec.body.split("\n")) {
+    const body = sec.body.split("\n");
+    body.forEach((l, k) => {
       const cap = l.trim().match(/^(?:Figure|Fig\.)\s*\d+[.:]\s+([\p{L}][\p{L} ’'()/-]{2,50}?):\s+(\S.*)$/u);
       const name = cap && boxName(cap[1]);
-      if (name && name.split(" ").length <= 5 && !/^(the|a|an)\s/i.test(name)) units.push(`Caption 0 — ${name}. ${cap![2]}`);
-    }
+      if (!name || name.split(" ").length > 5 || /^(the|a|an)\s/i.test(name)) return;
+      // The caption runs on to its stop, a few lines at most.
+      let says = cap![2].trim();
+      for (let j = k + 1; j <= k + 3 && !/[.!?]$/.test(says) && body[j]?.trim() && !/^(#|---|\$\$)/.test(body[j].trim()); j++) says += ` ${body[j].trim()}`;
+      units.push(`Caption 0 — ${name}. ${says[0].toUpperCase()}${says.slice(1)}`);
+    });
     for (const u of units) {
       // A list item that names what it explains ("- Jacobian ratio: the uniformity of …") defines that name.
       const item = u.match(/^(?:[-*+•·]|\d+[.)])\s+([\p{L}][\p{L}\p{N} ,'’()/‐‑–-]{2,70}?):\s+(\S.*)$/u);

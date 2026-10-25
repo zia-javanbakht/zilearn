@@ -80,3 +80,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 69 | No formula cards from a scan's misread or cut-off maths (formula cards 49→39, junk gone) | 89.1 | 78.98 | yes |
 | 70 | Boost phrases that name a symbol (Cauchy stress σ) | 89.1 | 78.63 | no |
 | 71 | Section notes drop the words leading into an equation that left it out | 89.1 | 79.22 | yes |
+| 72 | A figure caption box runs on to its stop and starts with a capital | 89.1 | 79.62 | yes |
