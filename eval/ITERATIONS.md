@@ -90,3 +90,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 79 | A long technical word used often ranks as a term of its own | 89.1 | 80.29 | yes |
 | 80 | A long word qualified many ways stays a term | 89.1 | 80.22 | no |
 | 81 | No terms ending on a joining word (distributed based, linear plus) | 89.1 | 80.29 | yes |
+| 82 | A heading's run of garbled OCR words reads as the document's closest phrase | 89.1 | 80.29 | yes |
