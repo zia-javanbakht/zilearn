@@ -77,3 +77,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 66 | A lone equation number (12) becomes 	ag{12} | 89.1 | 78.98 | yes |
 | 67 | Eval deck keeps one card per answer, as the app does | 89.1 | 78.98 | yes |
 | 68 | A radical bar drawn as ffiffiffi reads as √ | 89.1 | 78.98 | yes |
+| 69 | No formula cards from a scan's misread or cut-off maths (formula cards 49→39, junk gone) | 89.1 | 78.98 | yes |

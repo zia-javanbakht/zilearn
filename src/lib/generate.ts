@@ -617,6 +617,8 @@ export function offlineCards(courseId: string, t: TopicNode): { front: string; b
     const eq = math.indexOf("=");
     // "... = 0." leaves nothing to recall.
     if (eq < 1 || math.includes("\n") || eq > 40 || math.slice(eq + 1).replace(/[\s.,;]/g, "").length < 3) continue;
+    // A scan's misread maths (stray quotes, tildes, escaped braces) or an equation cut off at a line end isn't worth recalling.
+    if (/[~"@`]|\\[{}&]|![A-Za-z]/.test(math) || (math.match(/['!]/g) ?? []).length >= 3 || /[=∫+−√-]\s*(?:\\tag\{[^}]*\})?$/.test(math)) continue;
     const lead = f.lead && !/^\$\$/.test(f.lead) ? `${f.lead}\n\n` : `Complete the result for **${t.title}**:\n\n`;
     out.push({ front: `${lead}$$${math.slice(0, eq).trim()} = \\;?$$`, back: `$$${math}$$${from(f.source)}`, topic_id: t.id });
     if (out.length >= 5) break;
