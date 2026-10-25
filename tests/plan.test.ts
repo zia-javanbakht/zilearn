@@ -38,12 +38,22 @@ describe("buildPlan", () => {
     expect(plan.items.filter((i) => i.kind === "checkpoint").map((i) => i.iteration)).toEqual([1, 2, 3]);
   });
 
-  it("plans only leaves, and inherits marks from parents", () => {
+  it("plans a top-level branch through its subtopics, which inherit its marks", () => {
     const leaf = node("Leaf", null);
     leaf.effective_mastery = "familiar";
     const roots = [node("Parent", "familiar", [leaf])];
     const plan = buildPlan({ ...base, roots, targetLevel: 2 });
     expect(plan.items.filter((i) => i.kind === "study").map((i) => [i.topic_title, i.depth])).toEqual([["Leaf", 2]]);
+  });
+
+  it("studies a parent concept below the top level before its subtopics", () => {
+    const roots = [node("FEM", null, [node("Shape functions", null), node("Jacobian", null, [node("Inverted elements", null), node("Shear locking", null)])])];
+    const plan = buildPlan({ ...base, roots, targetLevel: 1 });
+    const study = plan.items.filter((i) => i.kind === "study");
+    expect(study.map((i) => i.topic_title)).toEqual(["Shape functions", "Jacobian", "Inverted elements", "Shear locking"]);
+    const jac = study.find((i) => i.topic_title === "Jacobian")!;
+    expect(jac.minutes).toBeLessThan(study[0].minutes);
+    expect(jac.activities[0]).toMatch(/Inverted elements, Shear locking/);
   });
 
   it("keeps passes in order and dates within the exam window", () => {
