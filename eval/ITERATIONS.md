@@ -63,3 +63,4 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 52 | Terms of a section too slight to be a branch go to the sections that are | 89.1 | 76.59 | no |
 | 53 | Italic headings at a section title's size are subsections (journal styles): the paper's real hierarchy | 89.1 | 77.67 | yes |
 | 54 | A sub-subsection that a term is mostly discussed in is listed beside its subsection, holding the term | 89.1 | 77.81 | yes |
+| 55 | A sub-term named like a section is that section's node, not a second one | 89.1 | 77.88 | yes |

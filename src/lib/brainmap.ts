@@ -290,7 +290,8 @@ function keywordBranches(mapped: Material[], gather = true): NewTopic[] | null {
 function mergeNamesakes(topics: NewTopic[]): NewTopic[] {
   const drop = new Set<string>();
   for (const t of topics) {
-    if (!t.ref.startsWith("K") || !t.parent_ref?.startsWith("S")) continue;
+    // A main term in a section, or a sub-term anywhere ("Theorem of expended power" under another term).
+    if (!t.ref.startsWith("K") || !(t.parent_ref?.startsWith("S") || t.ref.includes("."))) continue;
     // Its namesake section, wherever the term itself was placed.
     const parent = topics.find((p) => p.ref.startsWith("S") && termKey(p.title) === termKey(t.title));
     if (!parent) continue;
