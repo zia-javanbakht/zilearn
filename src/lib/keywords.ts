@@ -118,6 +118,7 @@ function wordKey(w: string): string {
 const DRILL = /^((multiple[- ]choice\s+)?(concept\s+)?quiz(zes)?|exercises?|hints?|answers?|answer checks|self[- ]?tests?|review questions|practice (problems|questions)|problems|solutions)\b/i;
 
 const DRILL_WEIGHT = 0.5;
+const VERB = /^(ensures?|gives|requires|yields|implies|enters|becomes|remains|provides|allows|makes|takes|shows|leads|means|uses|includes|contains|defines|describes|follows|holds|produces|reduces|increases|decreases|depends|satisfies|states|equals|governs|controls|determines)$/;
 
 /** The material's teaching text: no title page, affiliations, references, funding or declarations. */
 function bodySections(text: string, drills = false): { heading: string; body: string; lead: boolean; drill?: boolean }[] {
@@ -402,6 +403,8 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
           const last = words[len - 1].toLowerCase();
           if (len > 1 && GENERIC.has(first) && !/^(high|low|finite|numerical|micro|macro|initial|total|general)/.test(first)) continue;
           if (len === 1 && GENERIC.has(last)) continue;
+          // A verb ("ensures local invertibility", "nonlinearity enters") makes a clause, not a term.
+          if (len > 1 && (VERB.test(first) || VERB.test(last))) continue;
           // An adverb starts a clause, not a term ("randomly removes units").
           if (/ly$/.test(first) && first.length > 4 && !/^(assembly|family|anomaly|poly|supply|monopoly|butterfly)$/.test(first)) continue;
           if (len > 1 && /^(high|higher|low|lower|large|small|different|various|several|new|proposed|present|good)$/.test(last)) continue;
