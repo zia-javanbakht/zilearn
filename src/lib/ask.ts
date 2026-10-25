@@ -68,23 +68,62 @@ export function retrieve(courseId: string, question: string, previous: string | 
   return out;
 }
 
-/** Sentences of a passage, without splitting decimals or "e.g.". */
-function sentences(text: string): string[] {
-  return text
-    .replace(/\s*\n\s*/g, " ")
-    .split(/(?<=[.!?])\s+(?=[A-Z(“"$])/)
-    .map((s) => s.trim())
-    .filter((s) => s.length >= 25 && s.length <= 600);
+/**
+ * Sentences of a passage. Headings and table rows are left out, list items are sentences of their own,
+ * and a display formula stays with the sentence that introduces it.
+ */
+export function sentences(text: string): string[] {
+  const out: string[] = [];
+  for (const para of text.split(/\n\s*\n/)) {
+    let buf = "";
+    let header: string[] | null = null;
+    const flush = () => {
+      // A recording's timestamps ("[05:05]") start a new sentence too.
+      if (buf) out.push(...buf.split(/(?<=[.!?])\s+(?=[A-Z(“"]|\$(?!\$))|\s+(?=\[\d{1,2}:\d{2}(?::\d{2})?\])/));
+      buf = "";
+    };
+    for (const raw of para.split("\n")) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (/^#{1,6}\s/.test(line)) {
+        flush();
+        continue;
+      }
+      // A table row reads as "Header: value; Header: value".
+      if (line.startsWith("|")) {
+        flush();
+        const cells = line.replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+        if (cells.every((c) => /^:?-+:?$/.test(c))) continue;
+        if (!header) header = cells;
+        else out.push(cells.map((c, i) => (header![i] ? `${header![i]}: ${c}` : c)).join("; "));
+        continue;
+      }
+      header = null;
+      if (/^([-*+]|\d+[.)])\s/.test(line)) {
+        flush();
+        buf = line.replace(/^([-*+]|\d+[.)])\s+/, "");
+        flush();
+        continue;
+      }
+      buf += (buf ? " " : "") + line;
+    }
+    flush();
+  }
+  return out.map((x) => x.trim()).filter((x) => x.length >= 20 && x.length <= 800);
 }
 
 /**
  * The offline answer: the sentences that share the most (and the rarest) words with the question,
  * each cited, in the order of their passages. Null when nothing in the passages is about the question.
  */
+// Words that say what kind of answer is wanted, not what it is about.
+const ASKING = new Set("happen happens mean means meaning work works explain describe difference differ give tell find show example important matter matters".split(" ").map(stem));
+
 export function extractiveAnswer(question: string, passages: Passage[], max = 4): string | null {
-  const q = new Set(tokenize(question).map(stem));
+  const q = new Set(tokenize(question).map(stem).filter((w) => !ASKING.has(w)));
   if (!q.size || !passages.length) return null;
-  const cands = passages.flatMap((p) => sentences(p.text).map((s, i) => ({ p, i, s, stems: new Set(tokenize(s).map(stem)) })));
+  const split = new Map(passages.map((p) => [p.n, sentences(p.text)]));
+  const cands = passages.flatMap((p) => split.get(p.n)!.map((s, i) => ({ p, i, s, stems: new Set(tokenize(s).map(stem)) })));
   // A word found in few sentences says more about which sentence answers the question.
   const df = new Map<string, number>();
   for (const c of cands) for (const w of c.stems) if (q.has(w)) df.set(w, (df.get(w) ?? 0) + 1);
@@ -101,11 +140,27 @@ export function extractiveAnswer(question: string, passages: Passage[], max = 4)
   const best = Math.max(...scored.map((c) => c.score));
   // Only sentences close to the best one, so a stray shared word doesn't make it in.
   const picked = scored
-    .filter((c) => c.score >= best * 0.45)
+    .filter((c) => c.score >= best * 0.6)
     .sort((a, b) => b.score - a.score)
     .slice(0, max)
     .sort((a, b) => a.p.n - b.p.n || a.i - b.i);
-  return picked.map((c) => `- ${c.s} [${c.p.n}]`).join("\n");
+  const lines: string[] = [];
+  const used = new Set<string>();
+  for (const c of picked) {
+    const key = `${c.p.n}:${c.i}`;
+    if (used.has(key)) continue;
+    used.add(key);
+    // "This is how...", "It...": the sentence before says what "this" is.
+    const prev = split.get(c.p.n)![c.i - 1];
+    const lead = /^(this|these|it|its|they|such|here|that)\b/i.test(c.s) && prev && !used.has(`${c.p.n}:${c.i - 1}`) ? `${prev} ` : "";
+    if (lead) used.add(`${c.p.n}:${c.i - 1}`);
+    // A question in the material ("What's critical damping?") is answered by the sentence after it.
+    const next = split.get(c.p.n)![c.i + 1];
+    const tail = c.s.endsWith("?") && next && !used.has(`${c.p.n}:${c.i + 1}`) ? ` ${next}` : "";
+    if (tail) used.add(`${c.p.n}:${c.i + 1}`);
+    lines.push(`- ${lead}${c.s}${tail} [${c.p.n}]`);
+  }
+  return lines.join("\n");
 }
 
 /** Keep only [n] markers that point at a passage; returns the cleaned text and the numbers used. */

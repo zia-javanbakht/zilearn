@@ -365,7 +365,7 @@ input.changed { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--acc
 .cite-chip { border-radius: 999px; }
 .cite-chip.on { border-color: var(--accent); color: var(--accent); }
 .passage { margin: 0; padding: 10px 14px; border-left: 3px solid var(--accent); background: var(--surface-2); border-radius: 0 8px 8px 0; }
-.passage-text { white-space: pre-wrap; font-size: 0.9rem; max-height: 320px; overflow: auto; margin-top: 6px; }
+.passage-text { font-size: 0.9rem; max-height: 320px; overflow: auto; margin-top: 6px; }
 .ask-box { position: sticky; bottom: 12px; align-items: flex-end; }
 .ask-box textarea { min-height: 44px; resize: vertical; font-size: 16px; }
 
@@ -395,3 +395,5 @@ main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
   .ask-q { max-width: 92%; }
   .ask-box { bottom: calc(8px + env(safe-area-inset-bottom)); }
 }
+.learn-option .markdown { min-width: 0; overflow-x: auto; }
+.learn-option { min-width: 0; }

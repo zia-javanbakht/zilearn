@@ -25,7 +25,9 @@ export function AskTab({ data }: { data: CourseData }) {
       .then(setMessages)
       .catch((e) => setError(e.message));
   }, [id]);
-  useEffect(() => end.current?.scrollIntoView({ block: "nearest" }), [messages, pending]);
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "nearest" });
+  }, [messages, pending]);
 
   async function ask(q = question) {
     const text = q.trim();
@@ -181,7 +183,9 @@ function Passage({ c, hasFile }: { c: Citation; hasFile: boolean }) {
           </a>
         )}
       </div>
-      <div className="passage-text">{c.text}</div>
+      <div className="passage-text">
+        <Markdown>{c.text}</Markdown>
+      </div>
     </blockquote>
   );
 }
