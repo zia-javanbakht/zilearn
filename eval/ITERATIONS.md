@@ -60,3 +60,5 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 49 | 14 main terms for long texts | 89.1 | 75.58 | no |
 | 50 | 10 main terms for long texts | 89.1 | 76.56 | no |
 | 51 | Operator names from formulas (sym Grad, Div) are never terms | 89.1 | 76.98 | yes |
+| 52 | Terms of a section too slight to be a branch go to the sections that are | 89.1 | 76.59 | no |
+| 53 | Italic headings at a section title's size are subsections (journal styles): the paper's real hierarchy | 89.1 | 77.67 | yes |

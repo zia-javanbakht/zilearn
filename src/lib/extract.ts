@@ -69,7 +69,7 @@ function ok(text: string): Extracted {
 
 async function extractPdf(buf: Buffer): Promise<Extracted> {
   const { getDocumentProxy } = await import("unpdf");
-  const pdf = await getDocumentProxy(new Uint8Array(buf));
+  const pdf = await getDocumentProxy(new Uint8Array(buf), { verbosity: 0 });
   // Lines with font sizes: running heads and page numbers dropped, larger lines marked as headings.
   const layered = await ocrLayerPages(pdf);
   const { pages: raw, running } = pagesFromLines(await pdfLines(pdf), { ocrPages: layered });

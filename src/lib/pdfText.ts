@@ -13,15 +13,20 @@ export interface PdfLine {
   size: number;
   /** The line started with a list bullet (a Beamer triangle, "•"), now written as "- ". */
   bullet?: boolean;
+  /** Its font is italic and not bold: a journal sets its subsection titles so, at the size of its section titles. */
+  italic?: boolean;
 }
 
-type Pdf = { numPages: number; getPage(n: number): Promise<{ getTextContent(): Promise<{ items: unknown[] }> }> };
-type Item = { str?: string; transform?: number[]; width?: number; hasEOL?: boolean };
+type Pdf = {
+  numPages: number;
+  getPage(n: number): Promise<{ getTextContent(): Promise<{ items: unknown[] }>; getOperatorList?(): Promise<unknown>; commonObjs?: { get(id: string): unknown } }>;
+};
+type Item = { str?: string; transform?: number[]; width?: number; hasEOL?: boolean; fontName?: string };
 
 const BULLETS = /^[•●⚫▪■▶►▸‣◆◦○➤✓✗]$/;
 
 /** A line from its items: the text, its size, and a leading bullet glyph turned into "- ". */
-function lineOf(items: Item[]): PdfLine {
+function lineOf(items: Item[], italic: (font?: string) => boolean = () => false): PdfLine {
   const sizeOf = (it: Item) => (it.transform ? Math.round(Math.hypot(it.transform[2], it.transform[3]) * 10) / 10 : 0);
   const text = items.filter((it) => it.str?.trim());
   // A bullet: a bullet character opening the line, or a lone glyph set larger than the word after it
@@ -101,7 +106,8 @@ function lineOf(items: Item[]): PdfLine {
   });
   close();
   const size = Math.max(0, ...rest.filter((it) => it.str?.trim()).map(sizeOf));
-  return { text: bullet ? `- ${str.trim()}` : str, size, ...(bullet ? { bullet } : {}) };
+  const lead = rest.find((it) => it.str?.trim());
+  return { text: bullet ? `- ${str.trim()}` : str, size, ...(bullet ? { bullet } : {}), ...(lead && italic(lead.fontName) ? { italic: true } : {}) };
 }
 
 /**
@@ -153,13 +159,31 @@ function fractions(items: Item[], sizeOf: (it: Item) => number): Item[] {
 export async function pdfLines(pdf: Pdf): Promise<PdfLine[][]> {
   const pages: PdfLine[][] = [];
   for (let n = 1; n <= pdf.numPages; n++) {
-    const { items } = await (await pdf.getPage(n)).getTextContent();
+    const page = await pdf.getPage(n);
+    const { items } = await page.getTextContent();
+    // The fonts' names say which are italic ("…-Italic", "….I"); pdf.js loads them while reading the page's drawing.
+    const fonts = new Map<string, boolean>();
+    if (page.getOperatorList && page.commonObjs && (items as Item[]).some((it) => it.str?.trim()))
+      await page.getOperatorList().catch(() => null);
+    const italic = (font?: string) => {
+      if (!font || !page.commonObjs) return false;
+      if (!fonts.has(font)) {
+        let name = "";
+        try {
+          name = String((page.commonObjs.get(font) as { name?: string } | null)?.name ?? "");
+        } catch {
+          name = "";
+        }
+        fonts.set(font, /(italic|oblique|[.-]I(?:t)?(?:[+.]|$)|-?It$)/i.test(name) && !/(bold|black|heavy|[.-]B(?:I)?(?:[+.]|$)|Bd)/i.test(name));
+      }
+      return fonts.get(font)!;
+    };
     const lines: PdfLine[] = [];
     let cur: Item[] = [];
     let y: number | null = null;
     let size = 0;
     const flush = (eol = false) => {
-      if (eol || cur.some((it) => it.str)) lines.push(lineOf(cur));
+      if (eol || cur.some((it) => it.str)) lines.push(lineOf(cur, italic));
       cur = [];
       y = null;
       size = 0;
@@ -421,7 +445,9 @@ export function headingLevel(line: PdfLine, body: number, sizes: number[]): numb
   if (t.split(/\s+/).length > 14 || /^[a-z]/.test(t) || /\b(of|the|and|to|in|a|an|by|with|for|from|on)$/i.test(t)) return 0;
   // A line of bold maths ("𝝈 ⋅⋅ 𝑫 d𝑣. Then") is set large but isn't a title.
   if ((t.match(/[\u{1d400}-\u{1d7ff}]/gu) ?? []).length >= 2 && (t.match(/\b[A-Za-z][a-z]{2,}\b/g) ?? []).length < 2) return 0;
-  return sizes.length > 1 && line.size >= sizes[sizes.length - 1] * 0.98 && line.size < sizes[0] ? 3 : 2;
+  const level = sizes.length > 1 && line.size >= sizes[sizes.length - 1] * 0.98 && line.size < sizes[0] ? 3 : 2;
+  // Italic at a section title's size: a subsection.
+  return line.italic ? level + 1 : level;
 }
 
 /**
