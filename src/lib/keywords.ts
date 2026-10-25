@@ -583,8 +583,10 @@ function evidenceIn(sentences: Sentence[], term: string, aliases: string[], othe
   const opens = (s: Sentence) => !!s.box && keyOf(s.box.split(/\s+/)) === boxKey;
   const using = sentences.map((s, i) => ({ s, i })).filter(({ s }) => contains(s, keys) || opens(s));
   // Where every sentence using it is mostly maths, the best of those is still what the material says.
-  const strict = using.filter(({ s }) => quotable(s.text));
-  const hits = (strict.length ? strict : using.filter(({ s }) => quotable(s.text, true)))
+  // A bare list item ("Conservation of angular momentum") names it without saying anything.
+  const says = (s: Sentence) => s.text.split(" ").length >= 6;
+  const tiers = [using.filter(({ s }) => quotable(s.text) && says(s)), using.filter(({ s }) => quotable(s.text, true) && says(s)), using.filter(({ s }) => quotable(s.text))];
+  const hits = (tiers.find((t) => t.length) ?? using.filter(({ s }) => quotable(s.text, true)))
     .map(({ s, i }) => {
       let score = 0;
       const at = s.text.toLowerCase().indexOf(term.toLowerCase().split(" ")[0]);
