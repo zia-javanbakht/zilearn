@@ -1,0 +1,285 @@
+{
+ "doc": "Abdellahi, Azhari & Nguyen (2024), failure of pseudo-ductile composites with a multi-scale FE model",
+ "groups": [
+  {
+   "name": "Pseudo-ductile composites",
+   "aliases": [
+    "Pseudo-ductile hybrid composites",
+    "Pseudo-ductility"
+   ],
+   "concepts": [
+    [
+     "*Pseudo-ductility",
+     "Pseudo-ductile behavior",
+     "Pseudo-ductile composite"
+    ],
+    [
+     "*Fiber hybridization",
+     "Hybrid composite",
+     "Hybridization of fibers",
+     "Hybrid laminate"
+    ],
+    [
+     "*Thin-ply composites",
+     "Thin ply",
+     "Thin-ply method",
+     "Thin-ply hybrid"
+    ],
+    [
+     "Conventional thickness composite",
+     "Conventional thickness"
+    ],
+    [
+     "*Low-strain ply",
+     "Low strain material",
+     "Middle ply",
+     "Low-strain material"
+    ],
+    [
+     "High-strain ply",
+     "High strain material",
+     "High-strain plies"
+    ],
+    [
+     "Fragmentation",
+     "Ply fragmentation",
+     "Fiber fragmentation"
+    ],
+    [
+     "Delamination"
+    ]
+   ]
+  },
+  {
+   "name": "Analytical model",
+   "aliases": [
+    "Analytical model (Appendix A)"
+   ],
+   "concepts": [
+    [
+     "*Failure scenarios",
+     "Four failure scenarios",
+     "Damage scenarios"
+    ],
+    [
+     "Rule of mixtures",
+     "Chamis rule of mixtures",
+     "Chamis"
+    ],
+    [
+     "Numerical vs analytical results",
+     "Comparison between numerical and analytical results"
+    ]
+   ]
+  },
+  {
+   "name": "Micro-scale finite element model",
+   "aliases": [
+    "Finite element model",
+    "Micro-scale model",
+    "Micro-mechanical model",
+    "Micro-scale RVE model"
+   ],
+   "concepts": [
+    [
+     "*Representative volume element",
+     "RVE",
+     "RVE generation",
+     "Generation of the representative volume element"
+    ],
+    [
+     "*Periodic boundary conditions",
+     "PBC"
+    ],
+    [
+     "*Weibull distribution",
+     "Weibull fiber strength",
+     "Weibull strength distribution",
+     "Fiber strength distribution"
+    ],
+    [
+     "UMAT subroutine",
+     "UMAT",
+     "User-defined subroutine",
+     "FE implementation"
+    ],
+    [
+     "*Fiber volume fraction",
+     "Middle-ply fiber volume fraction",
+     "Volume fraction"
+    ],
+    [
+     "Convergence study",
+     "Mesh convergence",
+     "RVE size"
+    ],
+    [
+     "Material properties",
+     "T800",
+     "K63720"
+    ]
+   ]
+  },
+  {
+   "name": "Failure process",
+   "aliases": [
+    "Micro-scale tensile failure results",
+    "Results and discussion",
+    "Failure process of the composite"
+   ],
+   "concepts": [
+    [
+     "*Effect of fiber volume fraction of the middle ply",
+     "Effect of middle-ply volume fraction",
+     "Effect of fiber volume fraction"
+    ],
+    [
+     "Stress-strain curve",
+     "Stress-strain response",
+     "Tensile stress-strain curves"
+    ],
+    [
+     "Fiber failure",
+     "Gradual failure"
+    ],
+    [
+     "Stress concentration"
+    ]
+   ]
+  },
+  {
+   "name": "Validation against experiments",
+   "aliases": [
+    "Experimental validation",
+    "Validation of the model against experimental results",
+    "Verification and experimental validation"
+   ],
+   "concepts": [
+    [
+     "*Validation of thin-ply and conventional composites",
+     "Thin-ply vs conventional",
+     "Experimental results"
+    ],
+    [
+     "Failure mechanisms",
+     "Failure mechanism"
+    ]
+   ]
+  },
+  {
+   "name": "Fiber strength variation",
+   "aliases": [
+    "Effect of fibre strength scatter",
+    "Effect of the middle-ply fibers' tensile strength variation",
+    "Strength variation"
+   ],
+   "concepts": [
+    [
+     "*Weibull modulus",
+     "Weibull moduli"
+    ],
+    [
+     "Strength scatter",
+     "Tensile strength variation",
+     "Strength variability"
+    ]
+   ]
+  },
+  {
+   "name": "Multi-scale modeling",
+   "aliases": [
+    "Sequential multi-scale modelling",
+    "Multi-scale model",
+    "Multiscale model"
+   ],
+   "concepts": [
+    [
+     "*Sequential multi-scale approach",
+     "Sequential multi-scale modeling",
+     "Multi-scale approach"
+    ],
+    [
+     "*Macro-scale model",
+     "Macro-scale",
+     "Shell model"
+    ],
+    [
+     "*Hashin damage criteria",
+     "Hashin criteria",
+     "Hashin damage",
+     "Hashin"
+    ],
+    [
+     "Ply properties from micro-scale",
+     "Homogenized properties",
+     "Micro-scale results to macro-scale"
+    ]
+   ]
+  }
+ ],
+ "also": [
+  [
+   "Failure behavior"
+  ],
+  [
+   "Failure strain"
+  ],
+  [
+   "Carbon fibers"
+  ],
+  [
+   "Vacuum infusion"
+  ],
+  [
+   "Matrix cracking"
+  ],
+  [
+   "Damage initiation"
+  ],
+  [
+   "Damage evolution"
+  ],
+  [
+   "Fiber strength"
+  ],
+  [
+   "First yield stress"
+  ],
+  [
+   "Initial modulus"
+  ],
+  [
+   "Pseudo-ductile strain"
+  ],
+  [
+   "Hardcore model"
+  ],
+  [
+   "Fibre distribution"
+  ],
+  [
+   "Elastic modulus"
+  ],
+  [
+   "Stress drop"
+  ],
+  [
+   "Damage variable"
+  ],
+  [
+   "Element deletion"
+  ],
+  [
+   "ABAQUS"
+  ],
+  [
+   "Load drop"
+  ],
+  [
+   "Cohesive"
+  ],
+  [
+   "Interlaminar"
+  ]
+ ]
+}

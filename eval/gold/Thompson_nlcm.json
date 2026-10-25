@@ -1,0 +1,56 @@
+{
+ "doc": "Lecture notes: Nonlinear Solid Mechanics - strong forms, weak forms and consistent tangents",
+ "groups": [
+  {"name": "Kinematics", "aliases": ["Finite-deformation kinematics", "Kinematics and primary solution field"], "concepts": [
+   ["*Deformation map", "Deformation map, F and J", "Primary solution field"],
+   ["*Deformation gradient", "Grad φ"],
+   ["Jacobian determinant", "Volume ratio", "J = det F"],
+   ["*Right Cauchy-Green tensor", "Cauchy-Green tensor", "Cauchy-Green"],
+   ["*Green-Lagrange strain", "Green-Lagrange", "Lagrangian strain"],
+   ["Rigid rotation", "Rigid rotation, stretch, and objectivity"]
+  ]},
+  {"name": "Stress measures", "aliases": ["Stress measures and hyperelasticity"], "concepts": [
+   ["*First Piola-Kirchhoff stress", "Piola-Kirchhoff stress", "Nominal stress"],
+   ["*Second Piola-Kirchhoff stress", "Second Piola-Kirchhoff"],
+   ["*Cauchy stress"],
+   ["*Hyperelastic material", "Hyperelasticity", "Stored-energy density", "Stored energy", "Hyperelastic law"],
+   ["Objectivity", "Objective hyperelastic law", "Material frame indifference"],
+   ["Nanson's formula", "Nanson"],
+   ["*Work-conjugate pairs", "Work-conjugate stress and strain", "Work conjugate", "Stress-strain pairing"]
+  ]},
+  {"name": "Strong form", "aliases": ["Strong form in the reference configuration", "Strong form of equilibrium"], "concepts": [
+   ["*Boundary value problem", "Nonlinear boundary value problem"],
+   ["Boundary conditions", "Essential boundary condition", "Natural boundary condition", "Traction boundary condition"],
+   ["Quasi-static", "Quasi-static and static", "Static and quasi-static", "Slow loading"],
+   ["Reference configuration"]
+  ]},
+  {"name": "Weak form", "aliases": ["Derivation of the weak form", "Weak form and virtual work"], "concepts": [
+   ["*Virtual displacement", "Test function", "Admissible virtual displacements", "Test space"],
+   ["*Principle of virtual work", "Virtual work", "Interpretation as virtual work"],
+   ["*Total potential energy", "Hyperelastic variational form", "Stationarity", "Potential energy"],
+   ["Spatial form", "Spatial weak form", "Spatial virtual displacement"],
+   ["Dynamic extension", "Dynamic weak form", "Dynamics"],
+   ["Divergence theorem"]
+  ]},
+  {"name": "Finite elements", "aliases": ["Finite element discretization", "Finite element"], "concepts": [
+   ["*Isoparametric interpolation", "Shape functions", "Isoparametric"],
+   ["*Nodal residual", "Discrete residual", "Residual", "Assembly"],
+   ["One-element bar", "Loaded bar", "Bar example", "A loaded bar"]
+  ]},
+  {"name": "Consistent linearization", "aliases": ["Consistent linearization and tangent stiffness", "Linearization", "Consistent linearization and Newton"], "concepts": [
+   ["*Newton's method", "Newton iteration", "Newton step", "Newton"],
+   ["*Consistent tangent", "Tangent stiffness", "Consistent tangent stiffness", "Exact Newton tangent"],
+   ["Material stiffness", "Geometric stiffness", "Material and geometric stiffness", "Initial stress stiffness"],
+   ["Follower loads", "Load stiffness", "Dead loads"]
+  ]},
+  {"name": "Small-strain limit", "aliases": ["Reduction to small-strain linear elasticity", "Small-strain linear elasticity"], "concepts": [
+   ["*Small-strain linear elasticity", "Linear elasticity", "Small strain", "Small-strain weak form"],
+   ["Small displacement gradients", "Displacement gradients", "Small rotation"]
+  ]},
+  {"name": "Function spaces", "aliases": ["Function spaces and integrability", "Existence theory"], "concepts": [
+   ["Sobolev spaces", "Sobolev", "H1"],
+   ["Finite energy", "Energy growth", "Integrability"]
+  ]}
+ ],
+ "also": [["Strong forms"], ["Weak forms"], ["Total Lagrangian"], ["Spatial configuration"], ["Current configuration"], ["Body force"], ["Traction"], ["Nominal traction"], ["Stretch"], ["Anisotropy"], ["Elasticity tensor"], ["Summary"], ["Appendix"], ["Worked examples"], ["Self-test"], ["Quiz"], ["Reference body"], ["Virtual work"], ["Affine"], ["Stress power"]]
+}

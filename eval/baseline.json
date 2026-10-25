@@ -1,0 +1,465 @@
+{
+ "abs2024": {
+  "extraction": 85.36,
+  "pages": [
+   {
+    "page": 1,
+    "prose": 0.968,
+    "eq": null,
+    "heads": "2/2",
+    "noise": false,
+    "score": 0.9725
+   },
+   {
+    "page": 5,
+    "prose": 0.984,
+    "eq": 0.517,
+    "heads": "1/1",
+    "noise": false,
+    "score": 0.8454
+   },
+   {
+    "page": 8,
+    "prose": 0.75,
+    "eq": 1.0,
+    "heads": "0/0",
+    "noise": false,
+    "score": 0.85
+   },
+   {
+    "page": 10,
+    "prose": 0.901,
+    "eq": 0.0,
+    "heads": "1/1",
+    "noise": false,
+    "score": 0.6407
+   },
+   {
+    "page": 16,
+    "prose": 0.93,
+    "eq": 0.929,
+    "heads": "1/1",
+    "noise": false,
+    "score": 0.9368
+   },
+   {
+    "page": 26,
+    "prose": 0.859,
+    "eq": 0.405,
+    "heads": "0/0",
+    "noise": false,
+    "score": 0.7369
+   },
+   {
+    "page": 31,
+    "prose": 0.991,
+    "eq": null,
+    "heads": "0/0",
+    "noise": false,
+    "score": 0.9927
+   }
+  ],
+  "brainmap": 61.01,
+  "bm": {
+   "recall": 0.422,
+   "groups": 0.571,
+   "cluster": 0.5,
+   "precision": 0.957,
+   "notes": 0.978,
+   "form": 0.4,
+   "nodes": 23,
+   "top": 23,
+   "missing": [
+    "Fiber hybridization",
+    "Thin-ply composites",
+    "High-strain ply",
+    "Fragmentation",
+    "Delamination",
+    "Failure scenarios",
+    "Rule of mixtures",
+    "Numerical vs analytical results",
+    "Weibull distribution",
+    "UMAT subroutine",
+    "Convergence study",
+    "Material properties",
+    "Stress concentration",
+    "Validation of thin-ply and conventional composites",
+    "Failure mechanisms",
+    "Weibull modulus",
+    "Strength scatter",
+    "Hashin damage criteria",
+    "Ply properties from micro-scale"
+   ],
+   "junk": [
+    "Shear loads"
+   ]
+  }
+ },
+ "simo1990": {
+  "extraction": 64.25,
+  "pages": [
+   {
+    "page": 1,
+    "prose": 0.916,
+    "eq": null,
+    "heads": "3/3",
+    "noise": false,
+    "score": 0.9279
+   },
+   {
+    "page": 5,
+    "prose": 0.858,
+    "eq": 0.0,
+    "heads": "0/2",
+    "noise": false,
+    "score": 0.5648
+   },
+   {
+    "page": 6,
+    "prose": 0.936,
+    "eq": 0.0,
+    "heads": "0/1",
+    "noise": false,
+    "score": 0.6117
+   },
+   {
+    "page": 9,
+    "prose": 0.764,
+    "eq": 0.0,
+    "heads": "1/2",
+    "noise": false,
+    "score": 0.5334
+   },
+   {
+    "page": 13,
+    "prose": 0.81,
+    "eq": 0.0,
+    "heads": "1/1",
+    "noise": false,
+    "score": 0.5857
+   },
+   {
+    "page": 20,
+    "prose": 0.861,
+    "eq": 0.0,
+    "heads": "1/2",
+    "noise": false,
+    "score": 0.5917
+   },
+   {
+    "page": 30,
+    "prose": 0.8,
+    "eq": 0.341,
+    "heads": "0/0",
+    "noise": false,
+    "score": 0.6823
+   }
+  ],
+  "brainmap": 51.82,
+  "bm": {
+   "recall": 0.42,
+   "groups": 0.143,
+   "cluster": 0.5,
+   "precision": 0.7,
+   "notes": 0.912,
+   "form": 0.4,
+   "nodes": 20,
+   "top": 20,
+   "missing": [
+    "Hu-Washizu principle",
+    "Three-field variational formulation",
+    "Euler-Lagrange equations",
+    "Stored energy function",
+    "Isoparametric displacement interpolation",
+    "Static condensation",
+    "B-bar method",
+    "Stability analysis",
+    "Stress recovery",
+    "Transformation rules",
+    "Plane elasticity element",
+    "Axisymmetric element",
+    "Wilson's quad",
+    "Mixed variational formulation",
+    "Beam bending: mesh distortion",
+    "Driven cavity flow",
+    "J2 flow theory",
+    "Cook's membrane",
+    "Double edge notched specimen",
+    "Thick cylinder",
+    "Viscoplasticity",
+    "Neo-Hookean material"
+   ],
+   "junk": [
+    "Interpolation",
+    "Displacement field",
+    "Standard strain",
+    "Finite element",
+    "Boundary conditions",
+    "Standard displacement"
+   ]
+  }
+ },
+ "Thompson_nlcm": {
+  "extraction": 84.41,
+  "pages": [
+   {
+    "page": 1,
+    "prose": 0.976,
+    "eq": 0.973,
+    "heads": "3/3",
+    "noise": true,
+    "score": 0.9274
+   },
+   {
+    "page": 2,
+    "prose": 0.867,
+    "eq": 0.759,
+    "heads": "2/2",
+    "noise": false,
+    "score": 0.8476
+   },
+   {
+    "page": 5,
+    "prose": 0.633,
+    "eq": 0.937,
+    "heads": "2/2",
+    "noise": false,
+    "score": 0.7611
+   },
+   {
+    "page": 9,
+    "prose": 0.784,
+    "eq": 0.664,
+    "heads": "0/0",
+    "noise": false,
+    "score": 0.7695
+   },
+   {
+    "page": 14,
+    "prose": 0.963,
+    "eq": 0.652,
+    "heads": "1/1",
+    "noise": false,
+    "score": 0.8732
+   },
+   {
+    "page": 20,
+    "prose": 0.935,
+    "eq": 0.749,
+    "heads": "2/2",
+    "noise": false,
+    "score": 0.8858
+   }
+  ],
+  "brainmap": 52.61,
+  "bm": {
+   "recall": 0.212,
+   "groups": 0.5,
+   "cluster": 0.5,
+   "precision": 0.846,
+   "notes": 0.942,
+   "form": 0.588,
+   "nodes": 13,
+   "top": 13,
+   "missing": [
+    "Deformation map",
+    "Deformation gradient",
+    "Jacobian determinant",
+    "Right Cauchy-Green tensor",
+    "Green-Lagrange strain",
+    "Rigid rotation",
+    "First Piola-Kirchhoff stress",
+    "Second Piola-Kirchhoff stress",
+    "Cauchy stress",
+    "Hyperelastic material",
+    "Objectivity",
+    "Nanson's formula",
+    "Work-conjugate pairs",
+    "Boundary value problem",
+    "Boundary conditions",
+    "Quasi-static",
+    "Total potential energy",
+    "Divergence theorem",
+    "Isoparametric interpolation",
+    "Nodal residual",
+    "One-element bar",
+    "Consistent tangent",
+    "Material stiffness",
+    "Follower loads",
+    "Small-strain linear elasticity",
+    "Sobolev spaces"
+   ],
+   "junk": [
+    "Nonlinear",
+    "Corresponding surface patches"
+   ]
+  }
+ },
+ "bal": {
+  "extraction": 97.22,
+  "pages": [
+   {
+    "page": 3,
+    "prose": 1.0,
+    "eq": 1.0,
+    "heads": "3/3",
+    "noise": false,
+    "score": 1.0
+   },
+   {
+    "page": 4,
+    "prose": 0.981,
+    "eq": 1.0,
+    "heads": "3/3",
+    "noise": false,
+    "score": 0.9883
+   },
+   {
+    "page": 5,
+    "prose": 1.0,
+    "eq": 1.0,
+    "heads": "1/1",
+    "noise": false,
+    "score": 1.0
+   },
+   {
+    "page": 6,
+    "prose": 0.959,
+    "eq": 0.897,
+    "heads": "3/3",
+    "noise": false,
+    "score": 0.9443
+   },
+   {
+    "page": 7,
+    "prose": 1.0,
+    "eq": 0.762,
+    "heads": "1/1",
+    "noise": false,
+    "score": 0.9285
+   }
+  ],
+  "brainmap": 57.07,
+  "bm": {
+   "recall": 0.333,
+   "groups": 0.571,
+   "cluster": 0.5,
+   "precision": 1.0,
+   "notes": 0.705,
+   "form": 0.663,
+   "nodes": 11,
+   "top": 11,
+   "missing": [
+    "Transforming a global balance law to local form",
+    "Cauchy-type theorems",
+    "Localisation theorem",
+    "Continuity equation",
+    "Rate of the Jacobian",
+    "Mass density",
+    "Cauchy's equation of motion",
+    "Symmetry of the Cauchy stress",
+    "Theorem of expended power",
+    "Local energy equation",
+    "Entropy",
+    "Clausius-Duhem inequality",
+    "Absolute temperature"
+   ],
+   "junk": []
+  }
+ },
+ "csd_l7": {
+  "extraction": 93.79,
+  "pages": [
+   {
+    "page": 4,
+    "prose": 0.988,
+    "eq": 1.0,
+    "heads": "1/1",
+    "noise": false,
+    "score": 0.9926
+   },
+   {
+    "page": 5,
+    "prose": 0.962,
+    "eq": 0.667,
+    "heads": "1/1",
+    "noise": false,
+    "score": 0.8773
+   },
+   {
+    "page": 6,
+    "prose": 0.901,
+    "eq": null,
+    "heads": "1/1",
+    "noise": false,
+    "score": 0.9155
+   },
+   {
+    "page": 8,
+    "prose": 0.982,
+    "eq": null,
+    "heads": "1/1",
+    "noise": false,
+    "score": 0.9845
+   },
+   {
+    "page": 9,
+    "prose": 1.0,
+    "eq": null,
+    "heads": "1/1",
+    "noise": false,
+    "score": 1.0
+   },
+   {
+    "page": 10,
+    "prose": 0.845,
+    "eq": null,
+    "heads": "0/1",
+    "noise": false,
+    "score": 0.7954
+   },
+   {
+    "page": 11,
+    "prose": 1.0,
+    "eq": null,
+    "heads": "1/1",
+    "noise": false,
+    "score": 1.0
+   }
+  ],
+  "brainmap": 53.69,
+  "bm": {
+   "recall": 0.267,
+   "groups": 0.2,
+   "cluster": 0.5,
+   "precision": 1.0,
+   "notes": 0.857,
+   "form": 0.7,
+   "nodes": 7,
+   "top": 7,
+   "missing": [
+    "Isoparametric concept",
+    "Natural coordinates",
+    "Isoparametric vs generic FE flow",
+    "Jacobian ratio",
+    "Strain-displacement matrix",
+    "Two uses of the Jacobian",
+    "Distortion types",
+    "Aspect ratio",
+    "Skew",
+    "h-refinement",
+    "p-refinement",
+    "Graded mesh",
+    "r-refinement",
+    "Convergence rates",
+    "Why stress lags displacement",
+    "Log-log plot"
+   ],
+   "junk": []
+  }
+ },
+ "_mean": {
+  "extraction": 85.01,
+  "brainmap": 55.24
+ }
+}

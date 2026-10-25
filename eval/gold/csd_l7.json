@@ -1,0 +1,37 @@
+{
+ "doc": "Lecture slides: Introduction to Isoparametric Concept & Element Quality",
+ "groups": [
+  {"name": "Isoparametric mapping", "aliases": ["Isoparametric concept", "Isoparametric mapping: natural, physical, and global coordinates", "Isoparametric formulation"], "concepts": [
+   ["*Isoparametric concept", "Isoparametric", "Isoparametric element"],
+   ["*Shape functions"],
+   ["Natural coordinates", "Natural, physical, and global coordinates", "Parent element", "Reference element"],
+   ["Isoparametric vs generic FE flow", "FE flow", "Generic FE flow"]
+  ]},
+  {"name": "Jacobian matrix", "aliases": ["Definition of Jacobian matrix", "Jacobian", "Role of the Jacobian"], "concepts": [
+   ["*Jacobian matrix", "Jacobian", "Role of the Jacobian"],
+   ["*Jacobian determinant", "det(J)", "Determinant of Jacobian", "Inverted elements"],
+   ["Jacobian ratio", "Uniformity of Jacobian", "Non-uniform Jacobian"],
+   ["Strain-displacement matrix", "B matrix"],
+   ["Two uses of the Jacobian", "Differentiation and integration", "Gauss quadrature", "Numerical integration"]
+  ]},
+  {"name": "Element quality", "aliases": ["Element distortion", "Mesh quality"], "concepts": [
+   ["*Distortion types", "Distortion", "Element distortion"],
+   ["Aspect ratio", "Stretch"],
+   ["Skew", "Taper", "Warping", "Curvature/warping"],
+   ["Shear locking", "Artificial straining"],
+   ["Non-uniformity consequences", "Rational functions", "Numerical integration errors", "Nodal extrapolation"]
+  ]},
+  {"name": "Mesh refinement", "aliases": ["Mesh refinement strategies", "Refinement"], "concepts": [
+   ["*h-refinement", "h-, p-, and hp-refinement", "hp-refinement"],
+   ["*p-refinement"],
+   ["Graded mesh", "Non-uniform mesh"],
+   ["r-refinement"]
+  ]},
+  {"name": "Convergence", "aliases": ["Convergence in practice", "Convergence rates"], "concepts": [
+   ["*Convergence rates", "Convergence rate", "Rate of convergence", "Order of convergence"],
+   ["*Why stress lags displacement", "Stress convergence", "Displacement vs stress"],
+   ["Log-log plot", "Log-log axes", "Why plot on log-log axes"]
+  ]}
+ ],
+ "also": [["Displacement field"], ["Nodal coordinates"], ["Finite element"], ["Stress concentration"], ["Relative error"], ["Gauss points"], ["Stiffness matrix"], ["Polynomial order"]]
+}
