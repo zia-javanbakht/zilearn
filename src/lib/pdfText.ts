@@ -58,13 +58,15 @@ function lineOf(items: Item[]): PdfLine {
     // Raised against the symbol it follows, not the line: in a stacked fraction the line has no one baseline.
     const raised = prev?.transform ? y - prev.transform[5] : 0;
     const piece = t.trim();
+    const smaller = !!prev && h <= 0.85 * sizeOf(prev);
     const isExp =
       h > 0 &&
       raised > 0.25 * h &&
       raised < 0.8 * h &&
       /^[\p{L}\p{N}+−\-′*/]{1,6}\s?$/u.test(t) &&
-      /[\u{1d400}-\u{1d7ff}\u0370-\u03ff\u2100-\u214f)\]]$/u.test(before) &&
-      /[\d+−\u{1d400}-\u{1d7ff}]/u.test(piece) &&
+      ((/[\u{1d400}-\u{1d7ff}\u0370-\u03ff\u2100-\u214f)\]]$/u.test(before) && /[\d+−\u{1d400}-\u{1d7ff}]/u.test(piece)) ||
+        // Set smaller after a symbol or a capital standing for one (pdfTeX's "F" then "T": Fᵀ; "(QF)" then "T").
+        (smaller && /^[\p{L}\p{N}+−′*]{1,4}$/u.test(piece) && /(?:^|[\s(=+−,⋅·])[A-Z]{1,3}$|[)\]\u0370-\u03ff\u{1d400}-\u{1d7ff}]$/u.test(before))) &&
       !(/[)\]]$/.test(before) && /^\d{2,}$/.test(piece));
     if (isExp) exp = { y, text: piece, tail: /\s$/.test(t) ? " " : "" };
     else str += t;
