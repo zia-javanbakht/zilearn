@@ -102,3 +102,6 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 91 | A built-up formula's pieces on short lines join its block, down to its number | 89.1 | 80.62 | yes |
 | 92 | An exercise's lettered part is a sentence about maths, not an equation | 89.1 | 80.62 | yes |
 | 93 | A small matrix whose entries came out one per line is rebuilt as a bmatrix | 89.1 | 80.62 | yes |
+| 94 | Keypoint labels that narrate are not terms | 89.1 | 79.92 | no |
+| 95 | Figure captions count toward terms at half weight | 89.1 | 79.7 | no |
+| 96 | A heading loses a scan's stray space before a colon | 89.1 | 80.62 | yes |

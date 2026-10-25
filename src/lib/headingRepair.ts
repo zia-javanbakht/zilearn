@@ -70,7 +70,8 @@ export function headingRepairer(text: string): (heading: string) => string {
       return known(joined) && (!known(a.toLowerCase()) || !known(b.toLowerCase())) ? a + b : m;
     });
     h = h.replace(/[A-Za-z0-9]+/g, (w, at: number) => mendWord(w, at === 0));
-    return mendPhrase(h);
+    // A scan's stray space before a colon or comma ("Example I : A plane …").
+    return mendPhrase(h).replace(/(\S)\s+([:;,])(?=\s)/g, "$1$2");
   };
 
 }
