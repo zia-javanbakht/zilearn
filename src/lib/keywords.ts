@@ -102,6 +102,11 @@ const QUALIFIER = /^(high|higher|low|lower|large|larger|small|smaller|thin|thick
 
 const ABBREV = /\b(?:et al|e\.g|i\.e|cf|vs|fig|figs|eq|eqs|ref|refs|no|approx|resp|dr|prof|sec|ch)\.$/i;
 
+/** A text's words, a name joined by any dash ("Piola–Kirchhoff") being one. */
+function wordsOf(t: string): string[] {
+  return t.match(/[\p{L}][\p{L}\p{N}’'‐‑–-]*/gu) ?? [];
+}
+
 function wordKey(w: string): string {
   return stem(w.toLowerCase().replace(/[’']s?$/, "").replace(/[-‐‑–]/g, ""));
 }
@@ -221,7 +226,7 @@ function sentencesOf(text: string): Sentence[] {
         return;
       }
       const opens = boxes.length && boxes[boxes.length - 1].at === out.length ? boxes[boxes.length - 1].name : undefined;
-      out.push({ text: t, where, start, keys: (t.match(/[\p{L}][\p{L}\p{N}’'-]*/gu) ?? []).map(wordKey), lead: sec.lead, ...(opens ? { box: opens } : {}) });
+      out.push({ text: t, where, start, keys: wordsOf(t).map(wordKey), lead: sec.lead, ...(opens ? { box: opens } : {}) });
     }
   }
   return out;
@@ -326,7 +331,7 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
   const acr = acronyms(sentences.map((s) => s.text).join(" "));
   const acrKey = new Map([...acr].map(([a, phrase]) => [a, keyOf(phrase.split(/\s+/))]));
   const authors = authorKeywords(text);
-  const keysIn = (s: string) => ` ${(s.match(/[\p{L}][\p{L}’'-]*/gu) ?? []).map(wordKey).join(" ")} `;
+  const keysIn = (s: string) => ` ${wordsOf(s).map(wordKey).join(" ")} `;
   const titleKeys = keysIn(text.match(/^#\s+(.+)$/m)?.[1] ?? "");
   const headingKeys = studySections(text)
     .map((s) => keysIn(s.heading))
@@ -490,7 +495,7 @@ function contains(s: Sentence, keys: string[][]): boolean {
 }
 
 function termKeys(term: string, aliases: string[]): string[][] {
-  return [term, ...aliases].map((t) => (t.match(/[\p{L}][\p{L}\p{N}’'-]*/gu) ?? []).map(wordKey)).filter((k) => k.length);
+  return [term, ...aliases].map((t) => wordsOf(t).map(wordKey)).filter((k) => k.length);
 }
 
 /** Readable, not a line of maths or a broken extraction. */
