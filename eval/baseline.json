@@ -59,16 +59,16 @@
     "score": 0.9927
    }
   ],
-  "brainmap": 61.01,
+  "brainmap": 70.59,
   "bm": {
    "recall": 0.422,
    "groups": 0.571,
-   "cluster": 0.5,
+   "cluster": 0.739,
    "precision": 0.957,
    "notes": 0.978,
-   "form": 0.4,
+   "form": 1.0,
    "nodes": 23,
-   "top": 23,
+   "top": 7,
    "missing": [
     "Fiber hybridization",
     "Thin-ply composites",
@@ -155,16 +155,16 @@
     "score": 0.6823
    }
   ],
-  "brainmap": 51.82,
+  "brainmap": 60.67,
   "bm": {
    "recall": 0.42,
    "groups": 0.143,
-   "cluster": 0.5,
+   "cluster": 0.691,
    "precision": 0.7,
    "notes": 0.912,
-   "form": 0.4,
+   "form": 1.0,
    "nodes": 20,
-   "top": 20,
+   "top": 7,
    "missing": [
     "Hu-Washizu principle",
     "Three-field variational formulation",
@@ -251,16 +251,16 @@
     "score": 0.8858
    }
   ],
-  "brainmap": 52.61,
+  "brainmap": 56.39,
   "bm": {
    "recall": 0.212,
    "groups": 0.5,
-   "cluster": 0.5,
+   "cluster": 0.477,
    "precision": 0.846,
    "notes": 0.942,
-   "form": 0.588,
+   "form": 1.0,
    "nodes": 13,
-   "top": 13,
+   "top": 7,
    "missing": [
     "Deformation map",
     "Deformation gradient",
@@ -339,16 +339,16 @@
     "score": 0.9285
    }
   ],
-  "brainmap": 57.07,
+  "brainmap": 62.51,
   "bm": {
    "recall": 0.333,
    "groups": 0.571,
-   "cluster": 0.5,
+   "cluster": 0.637,
    "precision": 1.0,
    "notes": 0.705,
-   "form": 0.663,
+   "form": 1.0,
    "nodes": 11,
-   "top": 11,
+   "top": 7,
    "missing": [
     "Transforming a global balance law to local form",
     "Cauchy-type theorems",
@@ -427,16 +427,16 @@
     "score": 1.0
    }
   ],
-  "brainmap": 53.69,
+  "brainmap": 60.44,
   "bm": {
    "recall": 0.267,
    "groups": 0.2,
-   "cluster": 0.5,
+   "cluster": 0.75,
    "precision": 1.0,
    "notes": 0.857,
-   "form": 0.7,
+   "form": 1.0,
    "nodes": 7,
-   "top": 7,
+   "top": 4,
    "missing": [
     "Isoparametric concept",
     "Natural coordinates",
@@ -460,6 +460,6 @@
  },
  "_mean": {
   "extraction": 85.01,
-  "brainmap": 55.24
+  "brainmap": 62.12
  }
 }

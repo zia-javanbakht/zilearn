@@ -3,7 +3,8 @@
 import { test } from "vitest";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { extractFile, guessKind } from "@/lib/extract";
-import { buildTree, createCourse, flattenTree, insertMaterial, listMaterials, listTopics, replaceTopics } from "@/lib/store";
+import { buildTree, createCourse, insertMaterial, listMaterials, listTopics, replaceTopics } from "@/lib/store";
+import type { TopicNode } from "@/lib/types";
 import { digestNow } from "@/lib/digest";
 import { structureCourse } from "@/lib/brainmap";
 
@@ -23,7 +24,9 @@ for (const DOC of DOCS)
     writeFileSync(`${OUT}/${DOC}.digest.json`, JSON.stringify(d, null, 1));
     const s = await structureCourse(course, listMaterials(course.id, true));
     replaceTopics(course.id, s.topics);
-    const nodes = flattenTree(buildTree(listTopics(course.id)));
-    writeFileSync(`${OUT}/${DOC}.brainmap.json`, JSON.stringify({ summary: s.summary, nodes: nodes.map((n) => ({ depth: n.depth ?? 0, title: n.title, summary: n.summary, keywords: n.keywords, importance: n.importance })) }, null, 1));
-    writeFileSync(`${OUT}/${DOC}.brainmap.md`, `Course summary: ${s.summary}\n\n` + nodes.map((n) => `${"  ".repeat(n.depth ?? 0)}- ${n.title} (imp ${n.importance}) :: ${n.summary}`).join("\n"));
+    const nodes: (TopicNode & { depth: number })[] = [];
+    const walk = (ns: TopicNode[], depth: number) => ns.forEach((n) => (nodes.push({ ...n, depth }), walk(n.children, depth + 1)));
+    walk(buildTree(listTopics(course.id)), 0);
+    writeFileSync(`${OUT}/${DOC}.brainmap.json`, JSON.stringify({ summary: s.summary, nodes: nodes.map((n) => ({ depth: n.depth, title: n.title, summary: n.summary, keywords: n.keywords, importance: n.importance })) }, null, 1));
+    writeFileSync(`${OUT}/${DOC}.brainmap.md`, `Course summary: ${s.summary}\n\n` + nodes.map((n) => `${"  ".repeat(n.depth)}- ${n.title} (imp ${n.importance}) :: ${n.summary}`).join("\n"));
   }, 300000);

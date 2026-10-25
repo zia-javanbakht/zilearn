@@ -44,6 +44,20 @@ interface Sentence {
   keys: string[];
   /** Abstract, author keywords or conclusion: where a paper says what matters. */
   lead: boolean;
+  /** The label of the box this sentence opens ("Localisation Theorem" for "Theorem 2.3 — Localisation Theorem."), if any. */
+  box?: string;
+}
+
+/** A box's label: "Definition 1.2 — Referential and Spatial Cuts." names what the box defines. */
+const BOX = /^\s*(definition|theorem|lemma|corollary|proposition|keypoint|key point|example|remark|intuition)\s+[\d.]+\s*[—–-]?\s*((?:[^.()]|\([^)]*\))*?)\s*(\([^)]*\d{4}[^)]*\))?\.(?=\s|$)\s*/i;
+
+/** The name a box label gives, or null when it is only a number or a sentence. */
+function boxName(label: string): string | null {
+  // Asides and citations aren't part of the name: "Divergence (Gauss') Theorem", "Jacobian Matrix (Cook et al. 2002)".
+  const t = label.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim().replace(/[:.]$/, "");
+  const words = t.split(" ");
+  if (words.length < 1 || words.length > 7 || !/\p{L}{3}/u.test(t)) return null;
+  return t;
 }
 
 /* ---------------- The material's own text ---------------- */
@@ -144,6 +158,7 @@ export function authorKeywords(text: string): string[] {
 /** Sentences of the text, each with its section and, in a recording, its time. */
 function sentencesOf(text: string): Sentence[] {
   const out: Sentence[] = [];
+  const boxes: { name: string; at: number }[] = [];
   for (const sec of bodySections(text)) {
     let start: string | null = sec.heading.match(STAMP)?.[1] ?? null;
     const where = sec.heading.replace(STAMP, "").trim() || (sec.lead ? "Abstract" : null);
@@ -179,14 +194,18 @@ function sentencesOf(text: string): Sentence[] {
     function push(s: string) {
       const stamp = s.match(STAMP)?.[1];
       if (stamp) start = stamp;
-      const t = s
+      const pre = s
         .replace(new RegExp(STAMP.source, "g"), "")
         // Pointers to what the text layer couldn't hold, and a box's label ("Definition 1.1 — Isoparametric Concept."), aren't sentences.
         .replace(/\[(diagram|matrix)[^\]]*\]/g, "")
-        .replace(/^\s*\(\d+\)\s*/, "")
-        .replace(/^\s*(definition|theorem|lemma|corollary|proposition|keypoint|key point|example|remark|intuition)\s+[\d.]+\s*[—–-]?\s*[^.(]{0,120}(\([^)]*\))?\.?(\s+|$)/i, "")
+        .replace(/^\s*\(\d+\)\s*/, "");
+      const label = pre.match(BOX);
+      const box = label && /[—–-]/.test(label[0]) ? boxName(label[2]) : null;
+      const t = pre
+        .replace(BOX, "")
         .replace(/\s+/g, " ")
         .trim();
+      if (box) boxes.push({ name: box, at: out.length });
       if (t.split(" ").length < 3) return;
       // Captions without stops (speech recognition) run on: take them about thirty words at a time.
       const words = t.split(" ");
@@ -194,7 +213,8 @@ function sentencesOf(text: string): Sentence[] {
         for (let k = 0; k < words.length; k += 30) push(words.slice(k, k + 30).join(" "));
         return;
       }
-      out.push({ text: t, where, start, keys: (t.match(/[\p{L}][\p{L}\p{N}’'-]*/gu) ?? []).map(wordKey), lead: sec.lead });
+      const opens = boxes.length && boxes[boxes.length - 1].at === out.length ? boxes[boxes.length - 1].name : undefined;
+      out.push({ text: t, where, start, keys: (t.match(/[\p{L}][\p{L}\p{N}’'-]*/gu) ?? []).map(wordKey), lead: sec.lead, ...(opens ? { box: opens } : {}) });
     }
   }
   return out;
@@ -213,6 +233,8 @@ interface Candidate {
   first: number;
   aliases: Set<string>;
   boost: number;
+  /** A box names it. */
+  box?: boolean;
 }
 
 /** "representative volume element (RVE)": the words before the brackets whose initials spell it. */
@@ -303,6 +325,7 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
     .join(" | ");
   // A word written in lower case anywhere is an ordinary word; one that never is (Weibull, Jacobian) is a name.
   const lower = new Set(sentences.flatMap((s) => s.text.match(/(?<![.!?]\s)\b\p{Ll}[\p{L}’'-]*/gu) ?? []).map((w) => w.toLowerCase()));
+  const named = new Set(sentences.flatMap((s) => s.text.match(/(?<=\p{L}[,;]?\s)\p{Lu}\p{Ll}[\p{L}’'-]*/gu) ?? []));
 
   const cands = new Map<string, Candidate>();
   const add = (words: string[], i: number, prev?: string, next?: string) => {
@@ -353,6 +376,17 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
     const c = cands.get(keyOf(t.split(/\s+/)));
     if (c) c.boost *= 3;
   }
+  // What a box defines or states ("Referential and Spatial Cuts", "Localisation Theorem") is a key term of the notes.
+  sentences.forEach((s, i) => {
+    if (!s.box) return;
+    // Title case in a label isn't the term's own spelling: a word keeps its capital only where the text writes it so mid-sentence (Jacobian, Cauchy).
+    const words = s.box.split(/\s+/).map((w, k) => (/^\p{Lu}{2,}/u.test(w) || (!lower.has(w.toLowerCase()) && named.has(w)) ? w : k === 0 ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w.toLowerCase()));
+    const key = keyOf(words);
+    if (!cands.has(key)) add(words, i);
+    const c = cands.get(key)!;
+    c.boost *= 3;
+    c.box = true;
+  });
 
   const valid = (c: Candidate, form: string) => {
     const words = c.key.split(" ");
@@ -468,7 +502,9 @@ export function evidenceFor(text: string, term: string, aliases: string[] = [], 
 function evidenceIn(sentences: Sentence[], term: string, aliases: string[], others: string[], n: number, used = new Set<string>()): Evidence[] {
   const keys = termKeys(term, aliases);
   const otherKeys = others.filter((o) => o !== term).map((o) => termKeys(o, []));
-  const using = sentences.map((s, i) => ({ s, i })).filter(({ s }) => contains(s, keys));
+  const boxKey = keyOf(term.split(/\s+/));
+  const opens = (s: Sentence) => !!s.box && keyOf(s.box.split(/\s+/)) === boxKey;
+  const using = sentences.map((s, i) => ({ s, i })).filter(({ s }) => contains(s, keys) || opens(s));
   // Where every sentence using it is mostly maths, the best of those is still what the material says.
   const strict = using.filter(({ s }) => quotable(s.text));
   const hits = (strict.length ? strict : using.filter(({ s }) => quotable(s.text, true)))
@@ -479,6 +515,8 @@ function evidenceIn(sentences: Sentence[], term: string, aliases: string[], othe
       if (aliases.some((a) => s.text.includes(`(${a})`) || s.text.includes(`(${a}s)`))) score += 2;
       score += Math.min(3, otherKeys.filter((k) => contains(s, [k[0] ?? []])).length) * 0.7;
       if (s.lead) score += 1;
+      // The box that names it says what it is.
+      if (opens(s)) score += 4;
       // Another term's note already quotes it: say something new where the material does.
       if (used.has(s.text)) score -= 2.5;
       const words = s.text.split(" ").length;
