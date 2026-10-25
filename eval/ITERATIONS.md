@@ -55,3 +55,8 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 44 | OCR's J and $ for the fi ligature are read back (ModiJed → Modified, strain$eld → strain field) | 89.03 | 76.43 | yes |
 | 45 | A Roman numeral OCR read as ones in a capitals heading is put back (MODEL PROBLEM 11: → II:) | 89.1 | 76.43 | yes |
 | 46 | A long paper or chapter maps up to 44 terms (was 36) | 89.1 | 76.93 | yes |
+| 47 | 52 terms for long texts (+0.08, but 66-node maps) | 89.1 | 77.01 | no |
+| 48 | 30 terms for short texts | 89.1 | 76.76 | no |
+| 49 | 14 main terms for long texts | 89.1 | 75.58 | no |
+| 50 | 10 main terms for long texts | 89.1 | 76.56 | no |
+| 51 | Operator names from formulas (sym Grad, Div) are never terms | 89.1 | 76.98 | yes |
