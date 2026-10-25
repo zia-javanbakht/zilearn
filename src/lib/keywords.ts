@@ -46,6 +46,8 @@ interface Sentence {
   lead: boolean;
   /** The label of the box this sentence opens ("Localisation Theorem" for "Theorem 2.3 — Localisation Theorem."), if any. */
   box?: string;
+  /** In exercises or a quiz: it counts toward a term, but is never quoted. */
+  drill?: boolean;
 }
 
 /** A box's label: "Definition 1.2 — Referential and Spatial Cuts." names what the box defines. */
@@ -115,16 +117,18 @@ function wordKey(w: string): string {
 
 const DRILL = /^((multiple[- ]choice\s+)?(concept\s+)?quiz(zes)?|exercises?|hints?|answers?|answer checks|self[- ]?tests?|review questions|practice (problems|questions)|problems|solutions)\b/i;
 
+const DRILL_WEIGHT = 0.5;
+
 /** The material's teaching text: no title page, affiliations, references, funding or declarations. */
-function bodySections(text: string): { heading: string; body: string; lead: boolean }[] {
-  const out: { heading: string; body: string; lead: boolean }[] = [];
+function bodySections(text: string, drills = false): { heading: string; body: string; lead: boolean; drill?: boolean }[] {
+  const out: { heading: string; body: string; lead: boolean; drill?: boolean }[] = [];
   let backMatter = false;
   // Exercises, hints, answer checks and quizzes go over the text again: their terms are its terms.
   let drill: number | null = null;
   for (const s of studySections(text)) {
     if (s.heading && drill != null && (s.level ?? 1) <= drill) drill = null;
     if (s.heading && drill == null && DRILL.test(s.heading)) drill = s.level ?? 1;
-    if (drill != null) continue;
+    if (drill != null && !drills) continue;
     const lines = s.body.split("\n");
     const kept: string[] = [];
     for (const l of lines) {
@@ -142,7 +146,7 @@ function bodySections(text: string): { heading: string; body: string; lead: bool
     const body = kept.join("\n").trim();
     if (!body) continue;
     const abstract = /^(abstract|summary)\b/i.test(s.heading) || (!s.heading && /^\s*(abstract|summary)\b/im.test(body));
-    out.push({ heading: s.heading, body, lead: abstract || /^(conclusions?|concluding remarks|summary and conclusions?)$/i.test(s.heading) });
+    out.push({ heading: s.heading, body, lead: abstract || /^(conclusions?|concluding remarks|summary and conclusions?)$/i.test(s.heading), drill: drill != null });
   }
   return out;
 }
@@ -170,10 +174,10 @@ export function authorKeywords(text: string): string[] {
 }
 
 /** Sentences of the text, each with its section and, in a recording, its time. */
-function sentencesOf(text: string): Sentence[] {
+function sentencesOf(text: string, drills = false): Sentence[] {
   const out: Sentence[] = [];
   const boxes: { name: string; at: number }[] = [];
-  for (const sec of bodySections(text)) {
+  for (const sec of bodySections(text, drills)) {
     let start: string | null = sec.heading.match(STAMP)?.[1] ?? null;
     const where = sec.heading.replace(STAMP, "").trim() || (sec.lead ? "Abstract" : null);
     // Units are paragraphs, list items and lines of slides: a sentence never runs across them.
@@ -236,7 +240,7 @@ function sentencesOf(text: string): Sentence[] {
         return;
       }
       const opens = boxes.length && boxes[boxes.length - 1].at === out.length ? boxes[boxes.length - 1].name : undefined;
-      out.push({ text: t, where, start, keys: wordsOf(t).map(wordKey), lead: sec.lead, ...(opens ? { box: opens } : {}) });
+      out.push({ text: t, where, start, keys: wordsOf(t).map(wordKey), lead: sec.lead, ...(opens && !sec.drill ? { box: opens } : {}), ...(sec.drill ? { drill: true } : {}) });
     }
   }
   return out;
@@ -336,8 +340,12 @@ function everyday(w: string): boolean {
 
 /** The material's key terms, best first: phrases it repeats, that its title, abstract and headings use. */
 export function keyTerms(text: string, max = 24): KeyTerm[] {
-  const sentences = sentencesOf(text);
-  if (!sentences.length) return [];
+  // Exercises and quizzes go over the text's terms again: they count, at half weight.
+  const sentences = sentencesOf(text, true);
+  if (!sentences.filter((s) => !s.drill).length) return [];
+  // Where each sentence is among the quotable ones (a term's first mention is given in those).
+  const rank: number[] = [];
+  sentences.reduce((n, s, i) => ((rank[i] = n), s.drill ? n : n + 1), 0);
   const acr = acronyms(sentences.map((s) => s.text).join(" "));
   const acrKey = new Map([...acr].map(([a, phrase]) => [a, keyOf(phrase.split(/\s+/))]));
   const authors = authorKeywords(text);
@@ -355,14 +363,15 @@ export function keyTerms(text: string, max = 24): KeyTerm[] {
   const add = (words: string[], i: number, prev?: string, next?: string) => {
     const key = keyOf(words);
     let c = cands.get(key);
-    if (!c) cands.set(key, (c = { key, prev: new Map(), next: new Map(), forms: new Map(), count: 0, sentences: new Set(), first: i, aliases: new Set(), boost: 1 }));
-    if (prev && prev !== "of") c.prev.set(wordKey(prev), (c.prev.get(wordKey(prev)) ?? 0) + 1);
-    if (next && next !== "of") c.next.set(wordKey(next), (c.next.get(wordKey(next)) ?? 0) + 1);
+    if (!c) cands.set(key, (c = { key, prev: new Map(), next: new Map(), forms: new Map(), count: 0, sentences: new Set(), first: rank[i], aliases: new Set(), boost: 1 }));
+    const w = sentences[i].drill ? DRILL_WEIGHT : 1;
+    if (prev && prev !== "of") c.prev.set(wordKey(prev), (c.prev.get(wordKey(prev)) ?? 0) + w);
+    if (next && next !== "of") c.next.set(wordKey(next), (c.next.get(wordKey(next)) ?? 0) + w);
     // Spelt as the text spells it mid-sentence: names (Weibull, Jacobian) and acronyms keep their capitals.
     const form = words.map((w) => (/^\p{Lu}{2,}/u.test(w) || (!lower.has(w.toLowerCase()) && (named.has(w) || !/^\p{Lu}\p{Ll}/u.test(w))) ? w : w.toLowerCase())).join(" ");
     c.forms.set(form, (c.forms.get(form) ?? 0) + 1);
-    c.count++;
-    c.sentences.add(i);
+    c.count += w;
+    if (!sentences[i].drill) c.sentences.add(i);
   };
   sentences.forEach((s, i) => {
     for (const run of runs(s.text)) {

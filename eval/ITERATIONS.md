@@ -31,3 +31,6 @@ Baseline (main c100b8c): extraction 85.01, brainmap 62.12. Reference point: the 
 | 21 | OCR shape fixes (J for f, n for ll) also run on a PDF's own text layer, which may be an old scan's OCR | 87.67 | 72.36 | yes |
 | 22 | OCR section numbers (2.2.I . → 2.2.1.) and l for slash; headings right, but 6.1 now hides the 6.1.1 Beam bending part | 87.82 | 71.88 | no |
 | 23 | A term sharing no sentence with a main term goes under the nearest main term of its section, after the others take their quotes | 87.67 | 73.09 | yes |
+| 24 | Up to 6 sub-terms per main term (was 5) | 87.67 | 73.1 | no |
+| 25a | Exercise and quiz sentences count toward terms at weight 0.75 | 87.67 | 73.44 | no |
+| 25 | Exercise and quiz sentences count toward a term at half weight (never quoted) | 87.67 | 73.55 | yes |
