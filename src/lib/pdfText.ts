@@ -43,7 +43,8 @@ function lineOf(items: Item[]): PdfLine {
     if (exp) str += `${exp.sub ? `_${group(exp.sub)}` : ""}^${group(exp.text)}${exp.tail}`;
     exp = null;
   };
-  const SCRIPT = /^[\p{L}\p{N}+−\-′*/]{1,6}\s?$/u;
+  // "\u0001" is a minus from a broken symbol font, put back later.
+  const SCRIPT = /^[\p{L}\p{N}+−\-′*/\u0001þ]{1,6}\s?$/u;
   rest.forEach((it, k) => {
     const t = it.str ?? "";
     const h = sizeOf(it);
