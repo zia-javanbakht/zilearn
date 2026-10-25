@@ -594,7 +594,9 @@ function evidenceIn(sentences: Sentence[], term: string, aliases: string[], othe
   // A bare list item ("Conservation of angular momentum") names it without saying anything.
   const says = (s: Sentence) => s.text.split(" ").length >= 6;
   const tiers = [using.filter(({ s }) => quotable(s.text) && says(s)), using.filter(({ s }) => quotable(s.text, true) && says(s)), using.filter(({ s }) => quotable(s.text))];
-  const hits = (tiers.find((t) => t.length) ?? using.filter(({ s }) => quotable(s.text, true)))
+  // A box that states only a formula ("Lemma 3.1 — Rate of the Jacobian. J̇ = J ∇ ⋅ v.") still says what it names.
+  tiers.push(using.filter(({ s }) => quotable(s.text, true)), using.filter(({ s }) => opens(s) && /\S\s*=\s*\S/.test(s.text) && s.text.length <= 200));
+  const hits = (tiers.find((t) => t.length) ?? [])
     .map(({ s, i }) => {
       let score = 0;
       const at = s.text.toLowerCase().indexOf(term.toLowerCase().split(" ")[0]);
@@ -686,7 +688,9 @@ export function keywordMap(text: string, opts: { mains?: number; children?: numb
     const before = new Set(used);
     const n = node(k, []);
     const named = k.aliases.some((a) => /^\p{Lu}{2,}/u.test(a));
-    return n.note && (named || !before.has(n.note)) ? [n] : [];
+    // One of the material's leading terms stays, though its one sentence is quoted already.
+    const leading = terms.indexOf(k) < terms.length / 3;
+    return n.note && (named || leading || !before.has(n.note)) ? [n] : [];
   };
   const tree = main
     .sort((a, b) => a.first - b.first)
