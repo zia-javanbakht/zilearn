@@ -226,7 +226,7 @@ const termKey = (t: string) =>
     .trim();
 
 /** Most main terms that stand as top-level branches on their own; more are gathered under broader ones. */
-const MAX_LOOSE_BRANCHES = 8;
+const MAX_LOOSE_BRANCHES = 5;
 
 /** Most top-level branches the items' main terms make before each item becomes a branch of its own. */
 const MAX_TERM_BRANCHES = 14;
